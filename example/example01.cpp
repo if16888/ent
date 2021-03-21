@@ -194,16 +194,10 @@ MSG_ID_T tpool_example_stop()
     return sts;
 }
 
-#ifdef WIN32
-int _tmain(int argc,_TCHAR* argv[])
-#else
-int main(int argc,char* argv[])
-#endif
+MSG_ID_T  example_run()
 {
-    MSG_ID_T  sts=0;
-    
-    sts = ENT_Init("example",".",LOG_LEV_DEBUG_E);
-    
+    MSG_ID_T sts = 0;
+
     timer_exmaple();
     thread_example();
 
@@ -226,10 +220,34 @@ int main(int argc,char* argv[])
     {
         ENT_LOG_WARN("ENT_DbClose sts [%d]\n",sts);
     }
-    sts = ENT_LogClose();
+    return sts;
+}
+
+#ifdef WIN32
+int _tmain(int argc,_TCHAR* argv[])
+#else
+int main(int argc,char* argv[])
+#endif
+{
+    MSG_ID_T  sts=0;
+    
+    sts = ENT_Init("example",".",LOG_LEV_DEBUG_E);
     if(sts < 0)
     {
-        ENT_LOG_WARN("ENT_LogClose sts [%d]\n",sts);
+        ENT_LOG_FATAL("ENT_Init failed sts [%d]\n",sts);
+        return -1;
+    }
+    
+    sts = example_run();
+    if(sts < 0)
+    {
+        ENT_LOG_WARN("example_run sts [%d]\n",sts);
+    }
+
+    sts = ENT_Close();
+    if(sts < 0)
+    {
+        ENT_LOG_WARN("ENT_Close sts [%d]\n",sts);
     }
     return 0;
 }
