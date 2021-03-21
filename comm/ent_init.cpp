@@ -105,12 +105,12 @@ MSG_ID_T  ENT_Init(const char* name,const char* workPath,ENT_LOG_LEV_E logLevel)
     }
     else
     {
-        sprintf(tmpStr,"%s%slog",ENT_FILE_SEP,workPath);
+        sprintf(tmpStr,"%s%slog",workPath,ENT_FILE_SEP);
     }
     gEntCtx.logPath = tmpStr;
 
     len    = strlen(name);
-    size   = 4+len+1;
+    size   = 4+len+1; // 4->size of "log" or "/log"
     tmpStr = (char*)malloc(size);
     if(tmpStr == NULL)
     {
@@ -129,7 +129,7 @@ MSG_ID_T  ENT_Init(const char* name,const char* workPath,ENT_LOG_LEV_E logLevel)
         return -4;
     }
 
-    sts = ENT_LogInitHandle(&gEntCtx.entLog,gEntCtx.logName,gEntCtx.logPath);
+    sts = ENT_LogInitHandle(NULL,name,gEntCtx.logPath);
     if(sts<0)
     {
         fprintf(stderr,"ENT_LogInitHandle failed,sts [%d].\n",sts);
@@ -144,12 +144,27 @@ MSG_ID_T  ENT_Init(const char* name,const char* workPath,ENT_LOG_LEV_E logLevel)
         return -6;
     }
 
+    sts = ENT_LogInitHandle(&gEntCtx.entLog,gEntCtx.logName,gEntCtx.logPath);
+    if(sts<0)
+    {
+        fprintf(stderr,"ENT_LogInitHandle failed,sts [%d].\n",sts);
+        iENT_CTXFree(&gEntCtx);
+        return -7;
+    }
+    sts = ENT_LogSetOption(gEntCtx.entLog,ENT_LOG_LEVEL_E,&logLevel);
+    if(sts < 0)
+    {
+        fprintf(stderr,"ENT_LogSetOption failed,sts [%d].\n",sts);
+        iENT_CTXFree(&gEntCtx);
+        return -8;
+    }
+
     sts = UTL_LockInit(&gEntCtx.entLock,"ent");
     if(sts<0)
     {
         iENT_CTXFree(&gEntCtx);
         IENT_LOG_ERROR("UTL_LockInit failed,sts [%d]\n",sts);
-        return -7;
+        return -9;
     }
 
     sts = UTL_CVInit(&gEntCtx.entCV,"ent");
@@ -158,7 +173,7 @@ MSG_ID_T  ENT_Init(const char* name,const char* workPath,ENT_LOG_LEV_E logLevel)
         iENT_CTXFree(&gEntCtx);
         UTL_LockClose(gEntCtx.entLock);
         IENT_LOG_ERROR("UTL_LockInit failed,sts [%d]\n",sts);
-        return -8;
+        return -10;
     }
 
     gEntCtx.isInit = true;
@@ -184,9 +199,9 @@ MSG_ID_T  ENT_Init(const char* name,const char* workPath,ENT_LOG_LEV_E logLevel)
 MSG_ID_T  ENT_Close()
 {
     MSG_ID_T  sts = 0;
-    if(gEntCtx.isInit)
+    if(!gEntCtx.isInit)
     {
-        return 1;
+        return -1;
     }
 
     sts = UTL_CVClose(gEntCtx.entCV);
@@ -194,6 +209,8 @@ MSG_ID_T  ENT_Close()
     sts = UTL_LockClose(gEntCtx.entLock);
 
     sts = ENT_LogCloseHandle(gEntCtx.entLog);
+
+    sts = ENT_LogCloseHandle(NULL);
 
     sts = ENT_LogClose();
 
@@ -219,6 +236,11 @@ MSG_ID_T  ENT_Close()
  */
 MSG_ID_T  ENT_Run()
 {
+    if(!gEntCtx.isInit)
+    {
+        return -1;
+    }
+    
     while(1)
     {
         UTL_LockEnter(gEntCtx.entLock);
