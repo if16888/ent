@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.6 FATAL_ERROR)
 
-project(ent CXX)
+project(ent C)
 
 set(LIB_NAME_SHARE ent)
 set(LIB_NAME_STATIC ent_s)
@@ -11,25 +11,48 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
+option(ENT_ENABLE_SQLITE "Enable SQLite backend" ON)
+option(ENT_ENABLE_MYSQL "Enable MySQL backend" ON)
 
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
 add_definitions(-D_UNICODE)
+if(ENT_ENABLE_SQLITE)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../3rd/sqlite)
+link_directories("${CMAKE_CURRENT_SOURCE_DIR}/../3rd/sqlite")
+endif()
+if(ENT_ENABLE_MYSQL)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../3rd/mysql/include)
-
-link_directories( 
-    "${CMAKE_CURRENT_SOURCE_DIR}/../3rd/sqlite" 
-    "${CMAKE_CURRENT_SOURCE_DIR}/../3rd/mysql/lib"
-    ${CMAKE_PREFIX_PATH})
+link_directories("${CMAKE_CURRENT_SOURCE_DIR}/../3rd/mysql/lib")
+endif()
+link_directories(${CMAKE_PREFIX_PATH})
 else()
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC")
-include_directories(/usr/include/mysql)
-link_directories( 
-    "/usr/lib64/mysql"
-    ${CMAKE_PREFIX_PATH})
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC")
+if(ENT_ENABLE_MYSQL)
+find_path(ENT_MYSQL_INCLUDE_DIR mysql.h PATHS /usr/include/mysql /usr/local/include/mysql /opt/homebrew/include/mysql)
+find_library(ENT_MYSQL_LIBRARY NAMES mysqlclient PATHS /usr/lib64/mysql /usr/lib/mysql /usr/local/lib /opt/homebrew/lib)
+if(ENT_MYSQL_INCLUDE_DIR AND ENT_MYSQL_LIBRARY)
+include_directories(${ENT_MYSQL_INCLUDE_DIR})
+else()
+message(WARNING "MySQL headers or library not found; disabling MySQL backend.")
+set(ENT_ENABLE_MYSQL OFF)
+endif()
+endif()
+if(ENT_ENABLE_SQLITE)
+find_path(ENT_SQLITE_INCLUDE_DIR sqlite3.h PATHS /usr/include /usr/local/include /opt/homebrew/include)
+find_library(ENT_SQLITE_LIBRARY NAMES sqlite3 PATHS /usr/lib /usr/local/lib /opt/homebrew/lib)
+if(ENT_SQLITE_INCLUDE_DIR AND ENT_SQLITE_LIBRARY)
+include_directories(${ENT_SQLITE_INCLUDE_DIR})
+else()
+message(WARNING "SQLite headers or library not found; disabling SQLite backend.")
+set(ENT_ENABLE_SQLITE OFF)
+endif()
+endif()
+link_directories(${CMAKE_PREFIX_PATH})
 endif()
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../inc)
+add_definitions(-DENT_ENABLE_SQLITE=$<BOOL:${ENT_ENABLE_SQLITE}>)
+add_definitions(-DENT_ENABLE_MYSQL=$<BOOL:${ENT_ENABLE_MYSQL}>)
 
 if(BUILD_SHARED_LIBS)
   add_definitions(-DENT_MODULE_BEING_COMPILED)
@@ -40,7 +63,7 @@ endif()
 add_library(
   ${LIB_NAME_OBJS}
   OBJECT
-  ent_init.cpp ent_db.cpp ent_log.cpp ent_thread.cpp utl_socket.cpp utl_thread.cpp utl_timer.cpp utl_dll.cpp utl_tpool.cpp
+  ent_init.c ent_db.c ent_log.c ent_thread.c utl_socket.c utl_thread.c utl_timer.c utl_dll.c utl_tpool.c
   )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -71,9 +94,24 @@ add_library(
                          )
   
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    target_link_libraries(${LIB_NAME_SHARE} PRIVATE sqlite3 libmysql Ws2_32 Winmm)
+    target_link_libraries(${LIB_NAME_SHARE} PRIVATE Ws2_32 Winmm)
+    if(ENT_ENABLE_SQLITE)
+        target_link_libraries(${LIB_NAME_SHARE} PRIVATE sqlite3)
+    endif()
+    if(ENT_ENABLE_MYSQL)
+        target_link_libraries(${LIB_NAME_SHARE} PRIVATE libmysql)
+    endif()
 else()
-    target_link_libraries(${LIB_NAME_SHARE} PRIVATE mysqlclient sqlite3 pthread rt)
+    target_link_libraries(${LIB_NAME_SHARE} PRIVATE pthread)
+    if(ENT_ENABLE_MYSQL)
+        target_link_libraries(${LIB_NAME_SHARE} PRIVATE ${ENT_MYSQL_LIBRARY})
+    endif()
+    if(ENT_ENABLE_SQLITE)
+        target_link_libraries(${LIB_NAME_SHARE} PRIVATE ${ENT_SQLITE_LIBRARY})
+    endif()
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_link_libraries(${LIB_NAME_SHARE} PRIVATE rt)
+    endif()
 endif()
 
 add_library(

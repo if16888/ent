@@ -18,9 +18,9 @@
 #include <stdio.h>
 #include <time.h>
 #include <stdlib.h>
-#ifdef __linux__
+#ifndef WIN32
 #include <unistd.h>
-#elif defined(WIN32)
+#else
 #include <tchar.h>
 #endif
 #include "ent_init.h"
@@ -48,7 +48,7 @@ void* thread_func(void* data)
     for(int i=0;i<20;i++)
     {
         UTL_Sleep(3000);
-        printf("[%s] %ld,test %d\n",cfg,pthread_self(),i);
+        printf("[%s] %p,test %d\n",cfg,(void*)pthread_self(),i);
         ENT_LOG_WARN("[%s]->[%d]\n",cfg,i);
     }
     return NULL;

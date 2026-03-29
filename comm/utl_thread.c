@@ -20,12 +20,18 @@
 #else
 #include <pthread.h>
 #include <errno.h>
+#include <time.h>
 #endif
 #include <stdlib.h>
 #include <string.h>
 #include "ient_comm.h"
 #include "ent_utility.h"
 
+#if !defined(WIN32) && defined(__linux__)
+#define ENT_HAS_PTHREAD_SPINLOCK 1
+#else
+#define ENT_HAS_PTHREAD_SPINLOCK 0
+#endif
 
 typedef struct 
 {
@@ -36,10 +42,14 @@ typedef struct
         CRITICAL_SECTION   cs;
         SRWLOCK            rw;
         CRITICAL_SECTION   spin;
-#else
+#elif ENT_HAS_PTHREAD_SPINLOCK
         pthread_mutex_t    cs;
         pthread_rwlock_t   rw;
         pthread_spinlock_t spin;
+#else
+        pthread_mutex_t    cs;
+        pthread_rwlock_t   rw;
+        pthread_mutex_t    spin;
 #endif
     } lock;
     char* lockName;
@@ -187,7 +197,11 @@ static MSG_ID_T  iUTL_LockInitSpin(UTL_LOCK* lock,const char* name)
         tmp->lockName = NULL;
     else
         tmp->lockName = strdup(name);
+#if ENT_HAS_PTHREAD_SPINLOCK
     pthread_spin_init(&tmp->lock.spin,PTHREAD_PROCESS_PRIVATE);
+#else
+    pthread_mutex_init(&tmp->lock.spin,NULL);
+#endif
 #endif
     *lock = tmp;
     return 0;
@@ -335,7 +349,11 @@ static MSG_ID_T  iUTL_LockEnterSpin(UTL_LOCK lock)
 #ifdef WIN32
     EnterCriticalSection(&tmp->lock.spin);
 #else
+#if ENT_HAS_PTHREAD_SPINLOCK
     pthread_spin_lock(&tmp->lock.spin);
+#else
+    pthread_mutex_lock(&tmp->lock.spin);
+#endif
 #endif
     return 0;
 }
@@ -531,7 +549,11 @@ static MSG_ID_T  iUTL_LockLeaveSpin(UTL_LOCK lock)
 #ifdef WIN32
     LeaveCriticalSection(&tmp->lock.spin);
 #else
+#if ENT_HAS_PTHREAD_SPINLOCK
     pthread_spin_unlock(&tmp->lock.spin);
+#else
+    pthread_mutex_unlock(&tmp->lock.spin);
+#endif
 #endif
     return 0;
 }
@@ -712,7 +734,11 @@ static MSG_ID_T  iUTL_LockCloseSpin(UTL_LOCK lock)
 #ifdef WIN32
     DeleteCriticalSection(&tmp->lock.spin);
 #else
+#if ENT_HAS_PTHREAD_SPINLOCK
     pthread_spin_destroy(&tmp->lock.spin);
+#else
+    pthread_mutex_destroy(&tmp->lock.spin);
+#endif
 #endif
     if(tmp->lockName)
     {
@@ -869,7 +895,7 @@ static MSG_ID_T iUTL_CVWaitMutex(UTL_TH_CV* cvCtx,UTL_TH_LOCK* lockCtx,int ms)
     }
     else
     {
-        timespec cvTm;
+        struct timespec cvTm;
         if (clock_gettime(CLOCK_REALTIME, &cvTm) == -1)
         {
             IENT_LOG_ERROR("clock_gettime failed,error [%d]->[%s]\n",errno,strerror(errno));

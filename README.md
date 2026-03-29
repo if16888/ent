@@ -2,9 +2,10 @@
    假设机器上已经安装了cmake 3及visual studio 2010等开发工具，并安装了NSIS打包工具
    mkdir -p build
    cd build
-   cmake ../src
+   cmake ..
 2. 构建项目
    cmake --build .
+   如需禁用数据库后端，可在配置时追加 `-DENT_ENABLE_MYSQL=OFF` 或 `-DENT_ENABLE_SQLITE=OFF`
 3. 切换构建类型
    cmake -D CMAKE_BUILD_TYPE=Release ..
 4. 使用ide

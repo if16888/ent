@@ -21,14 +21,14 @@
 #include "ent_comm.h"
 #ifdef WIN32
 #include "windows.h"
-#elif defined(__linux__)
+#else
 
 #endif
 
 typedef void* ENT_THREAD;
 typedef void* ENT_THREAD_ID;
 
-#ifdef __linux__
+#ifndef WIN32
 typedef void* ( *PTHREAD_START_ROUTINE)(void* );
 #endif
 

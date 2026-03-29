@@ -18,7 +18,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
-#include <malloc.h>
 #include <string.h>
 #ifdef WIN32
 #include <sys/timeb.h>
@@ -26,12 +25,12 @@
 #include <tchar.h>
 #endif
 
-#ifdef __linux__
+#ifndef WIN32
 #include <pthread.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <linux/limits.h>
+#include <limits.h>
 #include <unistd.h>
 #include <errno.h>
 #endif
@@ -47,7 +46,7 @@
 #ifdef WIN32
 static CRITICAL_SECTION sLogMutex;
 #pragma warning(disable : 4996)
-#elif defined(__linux__)
+#else
 static pthread_mutex_t  sLogMutex;
 #define _MAX_PATH PATH_MAX
 #define _snprintf snprintf
@@ -731,6 +730,7 @@ static MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX* log,ENT_LOG_LEV_E logLevel,const cha
     const static int TM_STR_LEN=23;
     const static int TM_MILLITM_LEN=29;
     char tmpbuf[64];
+    va_list fp_args;
 #ifdef WIN32
     struct _timeb nowTmb;
 #else
@@ -752,7 +752,7 @@ static MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX* log,ENT_LOG_LEV_E logLevel,const cha
     strftime( tmpbuf, 64,tmFormat, &nowTm);
     _snprintf_s(&tmpbuf[TM_STR_LEN],64-TM_STR_LEN-1,6,".%03d] ",nowTmb.millitm);
     _snprintf_s(&tmpbuf[TM_MILLITM_LEN],64-TM_MILLITM_LEN-1,32,"[%5s] [tid %5ld] ",sLogLevelStr[logLevel],GetCurrentThreadId());
-#elif defined(__linux__)
+#else
     gettimeofday(&nowTmv,NULL);
     iENT_LogRollCheck(log,nowTmv.tv_sec);
     localtime_r(&nowTmv.tv_sec,&nowTm);
@@ -764,16 +764,18 @@ static MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX* log,ENT_LOG_LEV_E logLevel,const cha
     
     if(log->isDebug)
     {
-        printf(tmpbuf);
+        printf("%s",tmpbuf);
     }
     FILE* fp = log->logFp==NULL?stderr:log->logFp;
     
-    fprintf(fp,tmpbuf);
+    fprintf(fp,"%s",tmpbuf);
+    va_copy(fp_args, va_args);
     if(log->isDebug)
     {
         vprintf(format,va_args);
     }
-    vfprintf(fp,format,va_args);
+    vfprintf(fp,format,fp_args);
+    va_end(fp_args);
     fflush(fp);
 #ifdef WIN32   
     LeaveCriticalSection(&log->cs);

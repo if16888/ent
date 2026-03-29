@@ -18,6 +18,8 @@
 #ifndef  _ENT_TYPES_H_
 #define  _ENT_TYPES_H_
 
+#include <stdbool.h>
+
 typedef int MSG_ID_T;
 
 typedef void *DB_HANDLE;
@@ -30,7 +32,7 @@ typedef void *DB_HANDLE;
 #define ENT_FILE_SEP_C '/'
 #endif
 
-#ifdef __linux__
+#ifndef WIN32
 typedef int BOOL;
 #define TRUE  1
 #define FALSE 0

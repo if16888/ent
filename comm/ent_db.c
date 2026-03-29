@@ -23,12 +23,25 @@
 #include <windows.h>
 #endif
 
-#ifdef __linux__
+#ifndef WIN32
 #include <pthread.h>
 #endif
 
+#ifndef ENT_ENABLE_SQLITE
+#define ENT_ENABLE_SQLITE 1
+#endif
+
+#ifndef ENT_ENABLE_MYSQL
+#define ENT_ENABLE_MYSQL 1
+#endif
+
+#if ENT_ENABLE_SQLITE
 #include "sqlite3.h"
+#endif
+
+#if ENT_ENABLE_MYSQL
 #include "mysql.h"
+#endif
 #include "ent_types.h"
 #include "ent_db.h"
 #include "ient_comm.h"
@@ -53,8 +66,13 @@ typedef  struct DB_CFG {
   bool             isOpen;
   union 
     {
+#if ENT_ENABLE_SQLITE
       sqlite3* sqlite;
+#endif
+#if ENT_ENABLE_MYSQL
       MYSQL*   mysql;
+#endif
+      void*    raw;
     }      dbInstance;
   unsigned int eTag;
 } DB_CFG;
@@ -67,13 +85,17 @@ typedef struct USER_SQLITE_DATA
 
 MSG_ID_T  ENT_DbSqliteInit(DB_HANDLE dbHandle);
 MSG_ID_T  ENT_DbSqliteClose(DB_HANDLE dbHandle);
+#if ENT_ENABLE_SQLITE
 MSG_ID_T  ENT_DbSqliteRead(sqlite3* dbHandle,const char* query,SqlResultCB userCb,void* userData);
 MSG_ID_T  ENT_DbSqliteWrite(sqlite3* dbHandle,const char* query,SqlResultCB userCb,void* userData);
+#endif
 
+#if ENT_ENABLE_MYSQL
 MSG_ID_T  ENT_DbMySQLInit(DB_HANDLE dbHandle);
 MSG_ID_T  ENT_DbMySQLClose(DB_HANDLE dbHandle);
 MSG_ID_T  ENT_DbMySQLRead(MYSQL* dbHandle,const char* query,SqlResultCB userCb,void* userData);
 MSG_ID_T  ENT_DbMySQLWrite(MYSQL* dbHandle,const char* query,SqlResultCB userCb,void* userData);
+#endif
 
 #ifdef WIN32
 static CRITICAL_SECTION sDbMutex;
@@ -124,6 +146,12 @@ static void defSqlResultCb(char** fields,char** rowRes,long long rowNum,int colu
         } 
         printf("\n");
     }
+}
+
+static MSG_ID_T iENT_DbBackendUnsupported(DB_TYPE dbType)
+{
+    IENT_LOG_ERROR("Database backend [%d] is not enabled in this build.\n",dbType);
+    return -2;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -410,12 +438,23 @@ MSG_ID_T ENT_DbOpen(DB_HANDLE dbHandle)
     switch(dbCfg->dbType)
     {
         case SQLITE_TYPE:
+#if ENT_ENABLE_SQLITE
             sts = ENT_DbSqliteInit(dbCfg);
+#else
+            sts = iENT_DbBackendUnsupported(SQLITE_TYPE);
+#endif
             break;
             
         case MYSQL_TYPE:
+#if ENT_ENABLE_MYSQL
             sts = ENT_DbMySQLInit(dbCfg);
+#else
+            sts = iENT_DbBackendUnsupported(MYSQL_TYPE);
+#endif
             break;   
+        default:
+            sts = -1;
+            break;
     }
 #ifdef WIN32
     LeaveCriticalSection(&dbCfg->cs); 
@@ -468,12 +507,23 @@ MSG_ID_T ENT_DbCloseHandle(DB_HANDLE dbHandle)
     switch(dbCfg->dbType)
     {
         case SQLITE_TYPE:
+#if ENT_ENABLE_SQLITE
             sts = ENT_DbSqliteClose(dbCfg);
+#else
+            sts = iENT_DbBackendUnsupported(SQLITE_TYPE);
+#endif
             break;
             
         case MYSQL_TYPE:
+#if ENT_ENABLE_MYSQL
             sts = ENT_DbMySQLClose(dbCfg);
+#else
+            sts = iENT_DbBackendUnsupported(MYSQL_TYPE);
+#endif
             break;   
+        default:
+            sts = -1;
+            break;
     }
     memset(dbCfg,0,sizeof(DB_CFG));
     if(dbCfg)
@@ -538,12 +588,23 @@ MSG_ID_T ENT_DbRead(DB_HANDLE dbHandle,const char* sql,SqlResultCB sqlCb,void* u
     switch(dbCfg->dbType)
     {
         case MYSQL_TYPE:
+#if ENT_ENABLE_MYSQL
             sts = ENT_DbMySQLRead(dbCfg->dbInstance.mysql,sql,sqlCb,userData);
+#else
+            sts = iENT_DbBackendUnsupported(MYSQL_TYPE);
+#endif
             break;
             
         case SQLITE_TYPE:
+#if ENT_ENABLE_SQLITE
             sts = ENT_DbSqliteRead(dbCfg->dbInstance.sqlite,sql,sqlCb,userData);
+#else
+            sts = iENT_DbBackendUnsupported(SQLITE_TYPE);
+#endif
             break;   
+        default:
+            sts = -1;
+            break;
     }
 #ifdef WIN32
     LeaveCriticalSection(&dbCfg->cs); 
@@ -602,12 +663,23 @@ MSG_ID_T ENT_DbWrite(DB_HANDLE dbHandle,const char* sql,SqlResultCB sqlCb,void* 
     switch(dbCfg->dbType)
     {
         case MYSQL_TYPE:
+#if ENT_ENABLE_MYSQL
             sts = ENT_DbMySQLWrite(dbCfg->dbInstance.mysql,sql,sqlCb,userData);
+#else
+            sts = iENT_DbBackendUnsupported(MYSQL_TYPE);
+#endif
             break;
             
         case SQLITE_TYPE:
+#if ENT_ENABLE_SQLITE
             sts = ENT_DbSqliteWrite(dbCfg->dbInstance.sqlite,sql,sqlCb,userData);
+#else
+            sts = iENT_DbBackendUnsupported(SQLITE_TYPE);
+#endif
             break;   
+        default:
+            sts = -1;
+            break;
     }
 #ifdef WIN32
     LeaveCriticalSection(&dbCfg->cs); 
@@ -635,6 +707,10 @@ MSG_ID_T ENT_DbWrite(DB_HANDLE dbHandle,const char* sql,SqlResultCB sqlCb,void* 
  */
 MSG_ID_T  ENT_DbSqliteInit(DB_HANDLE dbHandle)
 {
+#if !ENT_ENABLE_SQLITE
+    (void)dbHandle;
+    return iENT_DbBackendUnsupported(SQLITE_TYPE);
+#else
     int               rc;
     DB_CFG*           dbCfg=(DB_CFG*)dbHandle;
 
@@ -657,6 +733,7 @@ MSG_ID_T  ENT_DbSqliteInit(DB_HANDLE dbHandle)
     }
     dbCfg->isOpen = true;
     return 0;
+#endif
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -676,6 +753,10 @@ MSG_ID_T  ENT_DbSqliteInit(DB_HANDLE dbHandle)
  */
 MSG_ID_T  ENT_DbSqliteClose(DB_HANDLE dbHandle)
 {
+#if !ENT_ENABLE_SQLITE
+    (void)dbHandle;
+    return iENT_DbBackendUnsupported(SQLITE_TYPE);
+#else
     DB_CFG*  dbCfg=(DB_CFG*)dbHandle;
     if(dbHandle == NULL || 
       dbCfg->dbType != SQLITE_TYPE)
@@ -708,6 +789,7 @@ MSG_ID_T  ENT_DbSqliteClose(DB_HANDLE dbHandle)
      
     sDbNum--;
     return 0;
+#endif
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -725,6 +807,7 @@ MSG_ID_T  ENT_DbSqliteClose(DB_HANDLE dbHandle)
  *
  *-----------------------------------------------------------------------------
  */
+#if ENT_ENABLE_SQLITE
 static MSG_ID_T iENT_DbSqliteReadCb(void *data, int argc, char **argv, char **azColName)
 {
     USER_SQLITE_READ*  userCtx = (USER_SQLITE_READ*)data;
@@ -842,6 +925,7 @@ MSG_ID_T  ENT_DbSqliteWrite(sqlite3* dbHandle,const char* query,SqlResultCB user
     }  
     return sts;
 }
+#endif
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :ENT_DbMySQLInit
@@ -860,6 +944,7 @@ MSG_ID_T  ENT_DbSqliteWrite(sqlite3* dbHandle,const char* query,SqlResultCB user
  */
 MSG_ID_T  ENT_DbMySQLInit(DB_HANDLE dbHandle)
 {
+#if ENT_ENABLE_MYSQL
     MYSQL*     db;
 
     DB_CFG*  dbCfg=(DB_CFG*)dbHandle;
@@ -902,6 +987,10 @@ MSG_ID_T  ENT_DbMySQLInit(DB_HANDLE dbHandle)
     dbCfg->dbInstance.mysql = db; 
     dbCfg->isOpen = true;
     return 0;
+#else
+    (void)dbHandle;
+    return iENT_DbBackendUnsupported(MYSQL_TYPE);
+#endif
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -919,6 +1008,7 @@ MSG_ID_T  ENT_DbMySQLInit(DB_HANDLE dbHandle)
  *
  *-----------------------------------------------------------------------------
  */
+#if ENT_ENABLE_MYSQL
 MSG_ID_T  ENT_DbMySQLRead(MYSQL* dbHandle,const char* query,SqlResultCB userCb,void* userData)
 {
     MSG_ID_T sts = 0;
@@ -1002,6 +1092,7 @@ MSG_ID_T  ENT_DbMySQLRead(MYSQL* dbHandle,const char* query,SqlResultCB userCb,v
      mysql_free_result(result);
      return 0;
 }
+#endif
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :ENT_DbMySQLWrite
@@ -1018,6 +1109,7 @@ MSG_ID_T  ENT_DbMySQLRead(MYSQL* dbHandle,const char* query,SqlResultCB userCb,v
  *
  *-----------------------------------------------------------------------------
  */
+#if ENT_ENABLE_MYSQL
 MSG_ID_T  ENT_DbMySQLWrite(MYSQL* dbHandle,const char* query,SqlResultCB userCb,void* userData)
 {
     MSG_ID_T  sts  = 0;
@@ -1048,6 +1140,7 @@ MSG_ID_T  ENT_DbMySQLWrite(MYSQL* dbHandle,const char* query,SqlResultCB userCb,
     
     return 0;
 }
+#endif
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :ENT_DbMySQLClose
@@ -1066,6 +1159,7 @@ MSG_ID_T  ENT_DbMySQLWrite(MYSQL* dbHandle,const char* query,SqlResultCB userCb,
  */
 MSG_ID_T  ENT_DbMySQLClose(DB_HANDLE dbHandle)
 {
+#if ENT_ENABLE_MYSQL
     DB_CFG*  dbCfg=(DB_CFG*)dbHandle;
     if(dbHandle == NULL || 
       dbCfg->sTag!=ENTDB_S_TAG ||
@@ -1099,5 +1193,9 @@ MSG_ID_T  ENT_DbMySQLClose(DB_HANDLE dbHandle)
     
     sDbNum--; 
     return 0;
+#else
+    (void)dbHandle;
+    return iENT_DbBackendUnsupported(MYSQL_TYPE);
+#endif
 }
 

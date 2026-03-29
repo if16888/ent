@@ -25,7 +25,7 @@
 #include <windows.h>
 #else
 #include <pthread.h>
-#include <linux/limits.h>
+#include <limits.h>
 #include <sys/types.h>          /* See NOTES */
 #include <sys/socket.h>
 #endif

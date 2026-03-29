@@ -102,7 +102,7 @@ ENT_PUBLIC MSG_ID_T  ENT_LogDebug(ENT_LOG logHandle,const char* format,...);
     ENT_LogDebug(NULL,"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,__VA_ARGS__);\
  }\
  while(0)
-#elif defined(__linux__)
+#else
 
 #define ENT_LOG_FATAL(format,...) \
  do { \

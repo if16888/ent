@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
-project(ent LANGUAGES CXX VERSION 0.1)
-set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+project(ent LANGUAGES C VERSION 0.1)
+set(CMAKE_C_EXTENSIONS OFF)
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD_REQUIRED ON)
 
 message(STATUS "Project will be installed to ${CMAKE_INSTALL_PREFIX}")
 
@@ -43,8 +44,8 @@ message(ATATUS "Path :${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}")
 add_subdirectory(comm)
 add_subdirectory(example)
 # enable testing and define tests
-#enable_testing()
-#add_subdirectory(test)
+enable_testing()
+add_subdirectory(test)
 
 if(WIN32)
 install(FILES 

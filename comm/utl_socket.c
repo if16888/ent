@@ -18,7 +18,7 @@
 #ifdef WIN32
 #pragma warning(disable : 4996)
 #include <Winsock2.h>
-#elif defined(__linux__)
+#else
 #include <sys/socket.h>
 #include <stdlib.h>	 /* Required by getenv()			     */
 #include <errno.h>

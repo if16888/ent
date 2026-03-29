@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.6 FATAL_ERROR)
 
-project(example CXX)
+project(example C)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
 add_definitions(-D_UNICODE)
@@ -20,7 +20,7 @@ message("CMAKE_FIND_LIBRARY_SUFFIXES:  ${CMAKE_LIBRARY_PATH}")
 
 message("CMAKE_SYSTEM_NAME: ${CMAKE_SYSTEM_NAME}")
 #add_definitions(-DLINKING_LIBENT)
-add_executable(example01 example01.cpp )
+add_executable(example01 example01.c )
 target_link_libraries(example01 ent )
 
 

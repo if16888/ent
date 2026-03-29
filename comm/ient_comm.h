@@ -67,7 +67,7 @@ extern ENT_CTX gEntCtx;
     ENT_LogDebug(gEntCtx.entLog,"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,__VA_ARGS__);\
  }\
  while(0)
-#elif defined(__linux__)
+#else
 
 #define IENT_LOG_FATAL(format,...) \
  do { \

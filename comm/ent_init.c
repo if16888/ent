@@ -244,7 +244,7 @@ MSG_ID_T  ENT_Run()
     while(1)
     {
         UTL_LockEnter(gEntCtx.entLock);
-        UTL_CVWait(gEntCtx.entLock,gEntCtx.entCV,0,RW_WRITE_E);
+        UTL_CVWait(gEntCtx.entCV,gEntCtx.entLock,0,RW_WRITE_E);
         UTL_LockLeave(gEntCtx.entLock);
         break;
     }

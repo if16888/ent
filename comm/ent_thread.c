@@ -38,6 +38,10 @@ typedef struct THREAD_DB
     void*          thHandle;
     pthread_t      thId;
     pthread_attr_t thAttr;
+    PTHREAD_START_ROUTINE thProc;
+    void*          thData;
+    void*          thRet;
+    volatile bool  isDone;
 #endif
     unsigned int    tag;
 }THREAD_DB;
@@ -50,6 +54,21 @@ typedef struct ENT_TH_CTX
     UTL_LOCK        dllLock;
     DLL_D_HDR       dllHeader;
 }ENT_TH_CTX;
+
+#ifndef WIN32
+static void* iENT_ThreadProc(void* data)
+{
+    THREAD_DB* thDb = (THREAD_DB*)data;
+    if(thDb == NULL || thDb->thProc == NULL)
+    {
+        return NULL;
+    }
+
+    thDb->thRet = thDb->thProc(thDb->thData);
+    thDb->isDone = true;
+    return thDb->thRet;
+}
+#endif
 
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -492,7 +511,12 @@ MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREAD_START_ROU
     //    return -4;
     //}
     
-    s = pthread_create(&tmp->thId, &thAttr, thProc, thData); 
+    tmp->thProc = thProc;
+    tmp->thData = thData;
+    tmp->thRet = NULL;
+    tmp->isDone = false;
+
+    s = pthread_create(&tmp->thId, &thAttr, iENT_ThreadProc, tmp); 
     if(s != 0)
     {
        IENT_LOG_ERROR("pthread_create failed,error [%d] ->[%s]\n",s,strerror(s));
@@ -584,25 +608,8 @@ MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int ms)
         }
         else
         {
-#if 0
-            if (clock_gettime(CLOCK_REALTIME, &thDb->tm) == -1)
-            {
-                IENT_LOG_ERROR("clock_gettime failed,error [%d]->[%s]\n",errno,strerror(errno));
-                return -5;
-            }
-            thDb->tm.tv_sec += ms/1000;
-            thDb->tm.tv_nsec += (ms%1000)*1000000;
-            s = pthread_timedjoin_np(thDb->thId,&retVal,&thDb->tm);
-            if(s==ETIMEDOUT)
-            {
-                IENT_LOG_WARN("timeout [%d] [%d]->[%s]\n",thDb->thId,s,strerror(s));
-                return 1;
-            }
-            else if(s!=0)
-            {
-                IENT_LOG_WARN("failed [%d] [%d]->[%s]\n",thDb->thId,s,strerror(s));
-            }
-#endif
+#if defined(__linux__)
+            /* Linux can poll thread completion without blocking. */
             s = pthread_tryjoin_np(thDb->thId,&retVal);
             if(s==EBUSY)
             {
@@ -613,6 +620,18 @@ MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int ms)
             {
                 IENT_LOG_WARN("pthread_tryjoin_np failed [%d] [%d]->[%s]\n",thDb->thId,s,strerror(s));
             }
+#else
+            if(!thDb->isDone)
+            {
+                UTL_Sleep(ms);
+                return 1;
+            }
+            s = pthread_join(thDb->thId,&retVal);
+            if(s!=0)
+            {
+                IENT_LOG_WARN("join,error [%d]->[%s]\n",s,strerror(s));
+            }
+#endif
         }
         thDb->thHandle = NULL;
         thDb->thId = 0;
