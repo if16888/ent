@@ -580,7 +580,7 @@ END_OF_ROUTINE:
     pthread_mutex_unlock(&sLogMutex);
 #endif
      
-    return 0;  
+    return sts;  
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
