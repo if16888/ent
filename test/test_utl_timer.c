@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "ient_comm.h"
 #include "ent_utility.h"
@@ -101,6 +102,20 @@ static void* timer_cb(void* data)
     s_timer_hits = *hits;
     return NULL;
 }
+
+#ifdef __linux__
+static long long monotonic_ns(void)
+{
+    struct timespec ts;
+
+    if(clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+    {
+        return 0;
+    }
+
+    return (long long)ts.tv_sec * 1000000000LL + (long long)ts.tv_nsec;
+}
+#endif
 
 typedef struct
 {
@@ -333,6 +348,110 @@ static int test_timer_create_us_has_consistent_failure_contract(void)
     return expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after UTL_TimerCreateUs coverage");
 }
 
+static int test_timer_create_us_delete_does_not_wait_full_period(void)
+{
+#ifdef __linux__
+    UTL_TIMER_T timer = NULL;
+    long long before_delete_ns = 0;
+    long long after_delete_ns = 0;
+    long long elapsed_ms = 0;
+    int hits = 0;
+
+    if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before RT delete latency test") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(UTL_TimerCreateUs(&timer, UTL_TIMER_E_ONESHOT, 200000, timer_cb, &hits) == 0,
+                   "UTL_TimerCreateUs should create a long-period RT timer for delete latency test") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    before_delete_ns = monotonic_ns();
+    if(expect_true(before_delete_ns != 0, "monotonic clock should be available for RT delete latency test") != 0)
+    {
+        UTL_TimerDelete(&timer);
+        UTL_TimerClose();
+        return 1;
+    }
+
+    if(expect_true(UTL_TimerDelete(&timer) == 0, "UTL_TimerDelete should succeed during RT delete latency test") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    after_delete_ns = monotonic_ns();
+    if(expect_true(after_delete_ns != 0, "monotonic clock should still be available after RT delete") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    elapsed_ms = (after_delete_ns - before_delete_ns) / 1000000LL;
+    if(expect_true(elapsed_ms < 80, "UTL_TimerDelete should not wait for the full RT period") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    return expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after RT delete latency test");
+#else
+    return 0;
+#endif
+}
+
+static int test_timer_create_us_periodic_timer_fires_on_linux(void)
+{
+#ifdef __linux__
+    UTL_TIMER_T timer = NULL;
+    int hits = 0;
+    int before_delete = 0;
+
+    if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before Linux RT periodic timer test") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(UTL_TimerCreateUs(&timer, UTL_TIMER_E_PERIOD, 5000, timer_cb, &hits) == 0,
+                   "UTL_TimerCreateUs should create a Linux RT periodic timer") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    UTL_Sleep(40);
+    before_delete = hits;
+
+    if(expect_true(before_delete >= 3, "A Linux RT periodic timer should fire multiple times") != 0)
+    {
+        UTL_TimerDelete(&timer);
+        UTL_TimerClose();
+        return 1;
+    }
+
+    if(expect_true(UTL_TimerDelete(&timer) == 0, "UTL_TimerDelete should stop a Linux RT periodic timer") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    UTL_Sleep(20);
+
+    if(expect_true(hits == before_delete, "A deleted Linux RT periodic timer should stop firing") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    return expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after Linux RT periodic timer test");
+#else
+    return 0;
+#endif
+}
+
 int main(void)
 {
     int failures = 0;
@@ -343,6 +462,8 @@ int main(void)
     failures += test_periodic_timer_fires_until_deleted();
     failures += test_periodic_timer_remains_stable_with_slow_callback();
     failures += test_timer_create_us_has_consistent_failure_contract();
+    failures += test_timer_create_us_delete_does_not_wait_full_period();
+    failures += test_timer_create_us_periodic_timer_fires_on_linux();
 
     if(failures != 0)
     {

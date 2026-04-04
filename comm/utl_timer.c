@@ -64,7 +64,7 @@ typedef struct
     pthread_t         cbWorker;
     UTL_LOCK          cbLock;
     UTL_CV            cbCv;
-    BOOL              cbPending;
+    unsigned int      pendingCallbacks;
     BOOL              stopWorker;
     BOOL              stopCallbackWorker;
     BOOL              rtMode;
@@ -81,6 +81,7 @@ typedef struct ENT_TH_CTX
 }TIMER_TH_CTX;
 
 #define UTL_TIMER_TAG  0xeb90eb90
+#define UTL_TIMER_RT_STOP_POLL_NS 1000000LL
 
 static bool          sUtilTimerInit;
 static TIMER_TH_CTX  sTimerCtx;
@@ -433,22 +434,49 @@ static void* iUTL_TimerRtWorker(void* data)
     timerCtx->next_deadline_ns = iUTL_TimerMonotonicNs() + timerCtx->period_ns;
     while(!timerCtx->stopWorker)
     {
-        struct timespec ts;
         long long deadline = timerCtx->next_deadline_ns;
-        int sleepSts = 0;
+        int sleepFailed = 0;
 
-        ts.tv_sec = deadline / 1000000000LL;
-        ts.tv_nsec = deadline % 1000000000LL;
-
-        do
+        while(!timerCtx->stopWorker)
         {
-            sleepSts = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
+            struct timespec ts;
+            long long now = iUTL_TimerMonotonicNs();
+            long long wakeDeadline = deadline;
+            int sleepSts = 0;
+
+            if(now == 0)
+            {
+                sleepFailed = 1;
+                break;
+            }
+            if(now >= deadline)
+            {
+                break;
+            }
+            if((deadline - now) > UTL_TIMER_RT_STOP_POLL_NS)
+            {
+                wakeDeadline = now + UTL_TIMER_RT_STOP_POLL_NS;
+            }
+
+            ts.tv_sec = wakeDeadline / 1000000000LL;
+            ts.tv_nsec = wakeDeadline % 1000000000LL;
+
+            do
+            {
+                sleepSts = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
+            }
+            while(sleepSts == EINTR && !timerCtx->stopWorker);
+
+            if(sleepSts != 0 && sleepSts != EINTR)
+            {
+                IENT_LOG_ERROR("clock_nanosleep failed,error [%d]\n",sleepSts);
+                sleepFailed = 1;
+                break;
+            }
         }
-        while(sleepSts == EINTR && !timerCtx->stopWorker);
 
-        if(sleepSts != 0 && sleepSts != EINTR)
+        if(sleepFailed)
         {
-            IENT_LOG_ERROR("clock_nanosleep failed,error [%d]\n",sleepSts);
             break;
         }
 
@@ -458,7 +486,7 @@ static void* iUTL_TimerRtWorker(void* data)
         }
 
         UTL_LockEnter(timerCtx->cbLock);
-        timerCtx->cbPending = TRUE;
+        timerCtx->pendingCallbacks++;
         UTL_LockLeave(timerCtx->cbLock);
         UTL_CVWake(timerCtx->cbCv);
 
@@ -490,7 +518,7 @@ static void* iUTL_TimerCallbackWorker(void* data)
         BOOL oneshot = FALSE;
 
         UTL_LockEnter(timerCtx->cbLock);
-        while(!timerCtx->cbPending && !timerCtx->stopCallbackWorker)
+        while(timerCtx->pendingCallbacks == 0 && !timerCtx->stopCallbackWorker)
         {
             UTL_CVWait(timerCtx->cbCv, timerCtx->cbLock, 0, RW_WRITE_E);
         }
@@ -501,7 +529,7 @@ static void* iUTL_TimerCallbackWorker(void* data)
             break;
         }
 
-        timerCtx->cbPending = FALSE;
+        timerCtx->pendingCallbacks--;
         timerCb = timerCtx->timer_ev_cb;
         timerData = timerCtx->data;
         oneshot = (timerCtx->timerType & UTL_TIMER_E_ONESHOT) ? TRUE : FALSE;
