@@ -17,6 +17,9 @@
  */
 #ifdef WIN32
 #pragma warning(disable : 4996)
+#else
+#include <limits.h>
+#define _MAX_PATH PATH_MAX
 #endif
 #include <stdio.h>
 #include "ient_comm.h"
@@ -24,6 +27,37 @@
 #include "ent_utility.h"
 
 ENT_CTX gEntCtx;
+
+static inline void iENT_CTXResetRuntime(ENT_CTX* ctx)
+{
+    if(ctx == NULL)
+        return;
+
+    ctx->entLog = NULL;
+    ctx->entLock = NULL;
+    ctx->entCV = NULL;
+    ctx->isInit = false;
+}
+
+static inline void iENT_CTXCloseLog(ENT_CTX* ctx, bool closeEntLog, bool closeDefaultLog)
+{
+    if(closeEntLog && ctx != NULL && ctx->entLog != NULL)
+    {
+        ENT_LogCloseHandle(ctx->entLog);
+    }
+
+    if(closeDefaultLog)
+    {
+        ENT_LogCloseHandle(NULL);
+    }
+
+    ENT_LogClose();
+    if(ctx != NULL)
+    {
+        ctx->entLog = NULL;
+    }
+}
+
 static inline void iENT_CTXFree(ENT_CTX* ctx)
 {
     if(ctx == NULL)
@@ -77,9 +111,15 @@ MSG_ID_T  ENT_Init(const char* name,const char* workPath,ENT_LOG_LEV_E logLevel)
         fprintf(stderr,"ENT_Init already init.\n");
         return 1;
     }
-    if(name==NULL||workPath==NULL)
+    if(name==NULL||workPath==NULL||name[0]=='\0'||workPath[0]=='\0')
     {
         fprintf(stderr,"ENT_Init arguments invalid.\n");
+        return -1;
+    }
+    /* Security: reject excessively long inputs to prevent buffer overflow */
+    if(strlen(name) > _MAX_PATH - 8 || strlen(workPath) > _MAX_PATH - 8)
+    {
+        fprintf(stderr,"ENT_Init name or workPath too long.\n");
         return -1;
     }
 
@@ -93,6 +133,7 @@ MSG_ID_T  ENT_Init(const char* name,const char* workPath,ENT_LOG_LEV_E logLevel)
     {
         fprintf(stderr,"malloc size [%d] failed.\n",size);
         iENT_CTXFree(&gEntCtx);
+        iENT_CTXResetRuntime(&gEntCtx);
         return -2;
     }
 #ifdef WIN32
@@ -101,11 +142,11 @@ MSG_ID_T  ENT_Init(const char* name,const char* workPath,ENT_LOG_LEV_E logLevel)
     if(workPath[len-1]=='/')
 #endif
     {
-        sprintf(tmpStr,"%slog",workPath);
+        snprintf(tmpStr,size,"%slog",workPath);
     }
     else
     {
-        sprintf(tmpStr,"%s%slog",workPath,ENT_FILE_SEP);
+        snprintf(tmpStr,size,"%s%slog",workPath,ENT_FILE_SEP);
     }
     gEntCtx.logPath = tmpStr;
 
@@ -116,9 +157,10 @@ MSG_ID_T  ENT_Init(const char* name,const char* workPath,ENT_LOG_LEV_E logLevel)
     {
         fprintf(stderr,"malloc size [%d] failed.\n",size);
         iENT_CTXFree(&gEntCtx);
+        iENT_CTXResetRuntime(&gEntCtx);
         return -3;
     }
-    sprintf(tmpStr,"ent_%s",name);
+    snprintf(tmpStr,size,"ent_%s",name);
     gEntCtx.logName = tmpStr;
 
     sts = ENT_LogInit();
@@ -126,6 +168,7 @@ MSG_ID_T  ENT_Init(const char* name,const char* workPath,ENT_LOG_LEV_E logLevel)
     {
         fprintf(stderr,"ENT_LogInit failed,sts [%d].\n",sts);
         iENT_CTXFree(&gEntCtx);
+        iENT_CTXResetRuntime(&gEntCtx);
         return -4;
     }
 
@@ -133,14 +176,18 @@ MSG_ID_T  ENT_Init(const char* name,const char* workPath,ENT_LOG_LEV_E logLevel)
     if(sts<0)
     {
         fprintf(stderr,"ENT_LogInitHandle failed,sts [%d].\n",sts);
+        iENT_CTXCloseLog(&gEntCtx,false,false);
         iENT_CTXFree(&gEntCtx);
+        iENT_CTXResetRuntime(&gEntCtx);
         return -5;
     }
     sts = ENT_LogSetOption(NULL,ENT_LOG_LEVEL_E,&logLevel);
     if(sts < 0)
     {
         fprintf(stderr,"ENT_LogSetOption failed,sts [%d].\n",sts);
+        iENT_CTXCloseLog(&gEntCtx,false,true);
         iENT_CTXFree(&gEntCtx);
+        iENT_CTXResetRuntime(&gEntCtx);
         return -6;
     }
 
@@ -148,31 +195,39 @@ MSG_ID_T  ENT_Init(const char* name,const char* workPath,ENT_LOG_LEV_E logLevel)
     if(sts<0)
     {
         fprintf(stderr,"ENT_LogInitHandle failed,sts [%d].\n",sts);
+        iENT_CTXCloseLog(&gEntCtx,false,true);
         iENT_CTXFree(&gEntCtx);
+        iENT_CTXResetRuntime(&gEntCtx);
         return -7;
     }
     sts = ENT_LogSetOption(gEntCtx.entLog,ENT_LOG_LEVEL_E,&logLevel);
     if(sts < 0)
     {
         fprintf(stderr,"ENT_LogSetOption failed,sts [%d].\n",sts);
+        iENT_CTXCloseLog(&gEntCtx,true,true);
         iENT_CTXFree(&gEntCtx);
+        iENT_CTXResetRuntime(&gEntCtx);
         return -8;
     }
 
     sts = UTL_LockInit(&gEntCtx.entLock,"ent");
     if(sts<0)
     {
-        iENT_CTXFree(&gEntCtx);
         IENT_LOG_ERROR("UTL_LockInit failed,sts [%d]\n",sts);
+        iENT_CTXFree(&gEntCtx);
+        iENT_CTXCloseLog(&gEntCtx,true,true);
+        iENT_CTXResetRuntime(&gEntCtx);
         return -9;
     }
 
     sts = UTL_CVInit(&gEntCtx.entCV,"ent");
     if(sts<0)
     {
+        IENT_LOG_ERROR("UTL_CVInit failed,sts [%d]\n",sts);
         iENT_CTXFree(&gEntCtx);
         UTL_LockClose(gEntCtx.entLock);
-        IENT_LOG_ERROR("UTL_LockInit failed,sts [%d]\n",sts);
+        iENT_CTXCloseLog(&gEntCtx,true,true);
+        iENT_CTXResetRuntime(&gEntCtx);
         return -10;
     }
 
@@ -205,10 +260,13 @@ MSG_ID_T  ENT_Close()
     }
 
     sts = UTL_CVClose(gEntCtx.entCV);
+    gEntCtx.entCV = NULL;
 
     sts = UTL_LockClose(gEntCtx.entLock);
+    gEntCtx.entLock = NULL;
 
     sts = ENT_LogCloseHandle(gEntCtx.entLog);
+    gEntCtx.entLog = NULL;
 
     sts = ENT_LogCloseHandle(NULL);
 
@@ -270,6 +328,4 @@ MSG_ID_T  ENT_Helpers()
 {
     return 0;
 }
-
-
 

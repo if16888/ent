@@ -284,6 +284,7 @@ MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int ms)
         UTL_LockLeave(thCtx->dllLock);
         return -3;
     }
+    UTL_LockLeave(thCtx->dllLock);
     
     if(thDb->thHandle)
     {
@@ -303,13 +304,11 @@ MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int ms)
                 break;
 
             case WAIT_TIMEOUT:
-                UTL_LockLeave(thCtx->dllLock);
                 return 1;
                 break;
             
             case WAIT_FAILED:
                 IENT_LOG_ERROR("WaitForSingleObject ret [%d],err [%d]\n",ret,GetLastError());
-                UTL_LockLeave(thCtx->dllLock);
                 return -4;
                 break;
 
@@ -324,6 +323,7 @@ MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int ms)
         thDb->thId = 0;
         thDb->tag  = 0x0;
     }
+    UTL_LockEnter(thCtx->dllLock);
     sts = UTL_DllRemCurr(&thDb->dllLnk,&tmpHdr);
     free(thDb);
     *tid = NULL;
@@ -410,6 +410,7 @@ MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
 MSG_ID_T ENT_ThreadDetachCreate(ENT_THREAD handle,PTHREAD_START_ROUTINE thProc,void* thData)
 {
     MSG_ID_T       sts=0;
+    ENT_TH_CTX*    thCtx=(ENT_TH_CTX*)handle;
     pthread_t      thId;
     int            s;
     pthread_attr_t thAttr;
@@ -418,6 +419,12 @@ MSG_ID_T ENT_ThreadDetachCreate(ENT_THREAD handle,PTHREAD_START_ROUTINE thProc,v
     {
         IENT_LOG_ERROR("thread handle is null\n");
         return -1;
+    }
+
+    if(thCtx->tag != ENT_TH_TAG)
+    {
+        IENT_LOG_ERROR("break handle\n");
+        return -2;
     }
     
     s = pthread_attr_init(&thAttr);
@@ -637,6 +644,11 @@ MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int ms)
         thDb->thId = 0;
     }
     UTL_LockEnter(thCtx->dllLock);
+    if(thDb->tag != ENT_TH_TAG)
+    {
+        UTL_LockLeave(thCtx->dllLock);
+        return -4;
+    }
     sts = UTL_DllRemCurr(&thDb->dllLnk,&tmpHdr);
     UTL_LockLeave(thCtx->dllLock);
     free(thDb);
@@ -680,9 +692,16 @@ MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
         return -2;
     }
     
-    UTL_LockEnter(thCtx->dllLock);
-    while((sts = UTL_DllRemHead(&thCtx->dllHeader,&tmp))==0)
+    while(1)
     {
+        UTL_LockEnter(thCtx->dllLock);
+        sts = UTL_DllRemHead(&thCtx->dllHeader,&tmp);
+        UTL_LockLeave(thCtx->dllLock);
+        if(sts != 0)
+        {
+            break;
+        }
+
         thDb = (THREAD_DB*)tmp;
         if(thDb->thId)
         {
@@ -698,7 +717,6 @@ MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
         }
     }
     thCtx->tag = 0x0;
-    UTL_LockLeave(thCtx->dllLock);
     UTL_LockClose(thCtx->dllLock);
     
     free(handle);  

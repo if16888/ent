@@ -107,6 +107,9 @@ static DWORD iUTL_TPoolTaskPro(void* data)
             }
             if(thCtx->taskType==TASK_E_TYPE_PAUSE)
             {
+                UTL_LockLeave(poolCtx->taskLock);
+                UTL_Sleep(1);
+                UTL_LockEnter(poolCtx->taskLock);
                 continue;
             }
             sts = UTL_DllRemTail(&poolCtx->taskActiveHeader,&tmp);
@@ -262,6 +265,17 @@ MSG_ID_T  UTL_TPoolInit(UTL_TPOOL*  pool,int num)
         UTL_DllInsHead(&poolCtx->threadHeader,(DLL_D_HDR*)thCtx);
         poolCtx->threadNum++;
     }
+
+    if(poolCtx->threadNum <= 0)
+    {
+        UTL_CVClose(poolCtx->taskEmptyCV);
+        UTL_LockClose(poolCtx->taskLock);
+        ENT_ThreadClose(poolCtx->thHandle);
+        free(poolCtx);
+        *pool = NULL;
+        return -6;
+    }
+
     *pool = poolCtx;
 
     return 0;

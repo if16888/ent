@@ -171,6 +171,12 @@ MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
     return 0;
 }
 
+MSG_ID_T UTL_Sleep(int ms)
+{
+    (void)ms;
+    return 0;
+}
+
 static int test_tpool_init_rejects_null_output_pointer(void)
 {
     return expect_true(UTL_TPoolInit(NULL, 1) == -1,
