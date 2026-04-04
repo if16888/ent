@@ -71,6 +71,7 @@ typedef struct dll_header
 {
   struct dll_header  *fw_ptr;
   struct dll_header  *bw_ptr;
+  int                is_head;
 } DLL_D_HDR;
 
 ENT_PUBLIC MSG_ID_T  UTL_DllIsEmpty(BOOL* isEmpty,const DLL_D_HDR *dll_hdr);

@@ -73,6 +73,7 @@ MSG_ID_T  UTL_DllInitHead(DLL_D_HDR *dll_hdr)
     {
         dll_hdr->fw_ptr = dll_hdr;
         dll_hdr->bw_ptr = dll_hdr;
+        dll_hdr->is_head = 1;
     }
 
 EXIT:
@@ -108,6 +109,7 @@ MSG_ID_T  UTL_DllInsHead(DLL_D_HDR *dll_hdr, DLL_D_HDR *dll_elem)
     }
     else
     {
+		dll_elem->is_head = 0;
 		dll_elem->fw_ptr = dll_hdr->fw_ptr;
 		dll_elem->bw_ptr = dll_hdr;
 		
@@ -176,8 +178,9 @@ MSG_ID_T  UTL_DllInsTail(DLL_D_HDR *dll_hdr,DLL_D_HDR *dll_elem )
         IENT_LOG_ERROR("dll_elem == dll_hdr\n") ;
         goto EXIT;
     }
-    else
-    {
+     else
+     {
+        dll_elem->is_head = 0;
         dll_elem->fw_ptr = dll_hdr;
         dll_elem->bw_ptr = dll_hdr->bw_ptr;
 
@@ -249,6 +252,13 @@ MSG_ID_T  UTL_DllRemCurr(DLL_D_HDR *dll_hdr,DLL_D_HDR **dll_elem)
      {
         sts = -1;
         IENT_LOG_ERROR("arguments validations is NULL\n") ;
+        goto EXIT;
+     }
+     *dll_elem = NULL;
+     if(dll_hdr->is_head)
+     {
+        sts = -2;
+        IENT_LOG_ERROR("cannot remove list head with UTL_DllRemCurr\n");
         goto EXIT;
      }
      else
