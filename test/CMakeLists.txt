@@ -67,6 +67,10 @@ if(APPLE OR UNIX)
   target_link_libraries(test_ent_thread PRIVATE pthread)
 endif()
 
+if(UNIX AND NOT APPLE)
+  target_link_libraries(test_ent_thread PRIVATE rt)
+endif()
+
 add_test(NAME test_ent_thread COMMAND test_ent_thread)
 
 add_executable(
@@ -107,6 +111,10 @@ target_include_directories(
 
 if(APPLE OR UNIX)
   target_link_libraries(test_utl_timer PRIVATE pthread)
+endif()
+
+if(UNIX AND NOT APPLE)
+  target_link_libraries(test_utl_timer PRIVATE rt)
 endif()
 
 add_test(NAME test_utl_timer COMMAND test_utl_timer)
@@ -239,6 +247,10 @@ if(APPLE OR UNIX)
   target_link_libraries(perf_utl_timer PRIVATE pthread)
 endif()
 
+if(UNIX AND NOT APPLE)
+  target_link_libraries(perf_utl_timer PRIVATE rt)
+endif()
+
 add_executable(
   perf_utl_timer_rt
   perf_utl_timer_rt.c
@@ -256,6 +268,10 @@ target_include_directories(
 
 if(APPLE OR UNIX)
   target_link_libraries(perf_utl_timer_rt PRIVATE pthread)
+endif()
+
+if(UNIX AND NOT APPLE)
+  target_link_libraries(perf_utl_timer_rt PRIVATE rt)
 endif()
 
 add_executable(

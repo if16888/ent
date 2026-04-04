@@ -57,8 +57,17 @@ typedef struct
 #if ENT_TIMER_IMPL_WINDOWS
     UINT              timerId;
 #elif ENT_TIMER_IMPL_LINUX
-    /* Linux uses POSIX timers directly. */
     timer_t           timerId;
+    long long         period_ns;
+    long long         next_deadline_ns;
+    pthread_t         rtWorker;
+    pthread_t         cbWorker;
+    UTL_LOCK          cbLock;
+    UTL_CV            cbCv;
+    BOOL              cbPending;
+    BOOL              stopWorker;
+    BOOL              stopCallbackWorker;
+    BOOL              rtMode;
 #else
     /* Other POSIX platforms fall back to a worker thread. */
     pthread_t         timerThread;
@@ -75,6 +84,14 @@ typedef struct ENT_TH_CTX
 
 static bool          sUtilTimerInit;
 static TIMER_TH_CTX  sTimerCtx;
+
+#if ENT_TIMER_IMPL_LINUX
+static long long iUTL_TimerMonotonicNs(void);
+static void* iUTL_TimerRtWorker(void* data);
+static void* iUTL_TimerCallbackWorker(void* data);
+static MSG_ID_T iUTL_TimerCreateRt(UTL_TIMER_T* pTimer,unsigned int type,int period_us,UTL_TIMER_EV_F evCb,void* data);
+static MSG_ID_T iUTL_TimerDeleteRt(PTIMER_CTX_T timerCtx);
+#endif
 
 #ifndef WIN32
 static void iUTL_TimerSleepMs(int ms)
@@ -219,6 +236,11 @@ MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int ms,UTL_TIMER
     UINT          fuEvent = TIME_PERIODIC;
     MSG_ID_T      sts = 0;
 
+    if(pTimer)
+    {
+        *pTimer = NULL;
+    }
+
     if(!sUtilTimerInit)
     {
         IENT_LOG_ERROR("uninitialized\n");
@@ -259,6 +281,7 @@ MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int ms,UTL_TIMER
     }
     return 0;
 }
+
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :UTL_TimerDelete
@@ -384,6 +407,242 @@ static void thread_handler(union sigval si)
         UTL_TimerDelete((UTL_TIMER_T*)&timerId);
     }
 }
+
+static long long iUTL_TimerMonotonicNs(void)
+{
+    struct timespec ts;
+
+    if(clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+    {
+        IENT_LOG_ERROR("clock_gettime failed,error [%d]->[%s]\n",errno,strerror(errno));
+        return 0;
+    }
+
+    return (long long)ts.tv_sec * 1000000000LL + (long long)ts.tv_nsec;
+}
+
+static void* iUTL_TimerRtWorker(void* data)
+{
+    PTIMER_CTX_T timerCtx = (PTIMER_CTX_T)data;
+
+    if(timerCtx == NULL || timerCtx->tag != UTL_TIMER_TAG)
+    {
+        return NULL;
+    }
+
+    timerCtx->next_deadline_ns = iUTL_TimerMonotonicNs() + timerCtx->period_ns;
+    while(!timerCtx->stopWorker)
+    {
+        struct timespec ts;
+        long long deadline = timerCtx->next_deadline_ns;
+        int sleepSts = 0;
+
+        ts.tv_sec = deadline / 1000000000LL;
+        ts.tv_nsec = deadline % 1000000000LL;
+
+        do
+        {
+            sleepSts = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
+        }
+        while(sleepSts == EINTR && !timerCtx->stopWorker);
+
+        if(sleepSts != 0 && sleepSts != EINTR)
+        {
+            IENT_LOG_ERROR("clock_nanosleep failed,error [%d]\n",sleepSts);
+            break;
+        }
+
+        if(timerCtx->stopWorker)
+        {
+            break;
+        }
+
+        UTL_LockEnter(timerCtx->cbLock);
+        timerCtx->cbPending = TRUE;
+        UTL_LockLeave(timerCtx->cbLock);
+        UTL_CVWake(timerCtx->cbCv);
+
+        if(timerCtx->timerType & UTL_TIMER_E_ONESHOT)
+        {
+            break;
+        }
+
+        timerCtx->next_deadline_ns += timerCtx->period_ns;
+    }
+
+    return NULL;
+}
+
+static void* iUTL_TimerCallbackWorker(void* data)
+{
+    PTIMER_CTX_T timerCtx = (PTIMER_CTX_T)data;
+
+    if(timerCtx == NULL || timerCtx->tag != UTL_TIMER_TAG)
+    {
+        return NULL;
+    }
+
+    for(;;)
+    {
+        UTL_TIMER_EV_F timerCb = NULL;
+        void* timerData = NULL;
+        BOOL stopCallbackWorker = FALSE;
+        BOOL oneshot = FALSE;
+
+        UTL_LockEnter(timerCtx->cbLock);
+        while(!timerCtx->cbPending && !timerCtx->stopCallbackWorker)
+        {
+            UTL_CVWait(timerCtx->cbCv, timerCtx->cbLock, 0, RW_WRITE_E);
+        }
+        stopCallbackWorker = timerCtx->stopCallbackWorker;
+        if(stopCallbackWorker)
+        {
+            UTL_LockLeave(timerCtx->cbLock);
+            break;
+        }
+
+        timerCtx->cbPending = FALSE;
+        timerCb = timerCtx->timer_ev_cb;
+        timerData = timerCtx->data;
+        oneshot = (timerCtx->timerType & UTL_TIMER_E_ONESHOT) ? TRUE : FALSE;
+        UTL_LockLeave(timerCtx->cbLock);
+
+        if(timerCb)
+        {
+            timerCb(timerData);
+        }
+
+        if(oneshot)
+        {
+            break;
+        }
+    }
+
+    return NULL;
+}
+
+static MSG_ID_T iUTL_TimerCreateRt(UTL_TIMER_T* pTimer,unsigned int type,int period_us,UTL_TIMER_EV_F evCb,void* data)
+{
+    MSG_ID_T      sts = 0;
+    PTIMER_CTX_T  timerCtx = NULL;
+
+    if(pTimer)
+    {
+        *pTimer = NULL;
+    }
+
+    if(!sUtilTimerInit)
+    {
+        IENT_LOG_ERROR("uninitialized\n");
+        return -1;
+    }
+    if(period_us <= 0)
+    {
+        IENT_LOG_ERROR("invalid period_us [%d]\n",period_us);
+        return -2;
+    }
+
+    timerCtx = (PTIMER_CTX_T)malloc(sizeof(TIMER_CTX_T));
+    if(timerCtx == NULL)
+    {
+        IENT_LOG_ERROR("malloc failed,error [%d]->[%s]\n",errno,strerror(errno));
+        return -3;
+    }
+    memset(timerCtx,0,sizeof(TIMER_CTX_T));
+    timerCtx->tag         = UTL_TIMER_TAG;
+    timerCtx->timerType   = type;
+    timerCtx->timer_ev_cb = evCb;
+    timerCtx->data        = data;
+    timerCtx->isEnable    = true;
+    timerCtx->period_ns   = (long long)period_us * 1000LL;
+    timerCtx->rtMode      = TRUE;
+
+    sts = UTL_LockInit(&timerCtx->cbLock,"timer_rt_cb");
+    if(sts < 0)
+    {
+        free(timerCtx);
+        return sts;
+    }
+    sts = UTL_CVInit(&timerCtx->cbCv,"timer_rt_cb");
+    if(sts < 0)
+    {
+        UTL_LockClose(timerCtx->cbLock);
+        free(timerCtx);
+        return sts;
+    }
+
+    if(pthread_create(&timerCtx->cbWorker, NULL, iUTL_TimerCallbackWorker, timerCtx) != 0)
+    {
+        IENT_LOG_ERROR("pthread_create callback worker failed,error [%d]->[%s]\n",errno,strerror(errno));
+        UTL_CVClose(timerCtx->cbCv);
+        UTL_LockClose(timerCtx->cbLock);
+        free(timerCtx);
+        return -4;
+    }
+    if(pthread_create(&timerCtx->rtWorker, NULL, iUTL_TimerRtWorker, timerCtx) != 0)
+    {
+        IENT_LOG_ERROR("pthread_create rt worker failed,error [%d]->[%s]\n",errno,strerror(errno));
+        timerCtx->stopCallbackWorker = TRUE;
+        UTL_CVWakeAll(timerCtx->cbCv);
+        pthread_join(timerCtx->cbWorker, NULL);
+        UTL_CVClose(timerCtx->cbCv);
+        UTL_LockClose(timerCtx->cbLock);
+        free(timerCtx);
+        return -5;
+    }
+
+    UTL_LockEnter(sTimerCtx.dllLock);
+    sts = UTL_DllInsHead(&sTimerCtx.dllHeader,(DLL_D_HDR*)timerCtx);
+    UTL_LockLeave(sTimerCtx.dllLock);
+    if(sts < 0)
+    {
+        timerCtx->stopWorker = TRUE;
+        timerCtx->stopCallbackWorker = TRUE;
+        UTL_CVWakeAll(timerCtx->cbCv);
+        pthread_join(timerCtx->rtWorker, NULL);
+        pthread_join(timerCtx->cbWorker, NULL);
+        UTL_CVClose(timerCtx->cbCv);
+        UTL_LockClose(timerCtx->cbLock);
+        free(timerCtx);
+        return sts;
+    }
+
+    if(pTimer)
+    {
+        *pTimer = timerCtx;
+    }
+    return 0;
+}
+
+static MSG_ID_T iUTL_TimerDeleteRt(PTIMER_CTX_T timerCtx)
+{
+    MSG_ID_T     sts = 0;
+    DLL_D_HDR*   tmpDll = NULL;
+
+    if(timerCtx == NULL || timerCtx->tag != UTL_TIMER_TAG)
+    {
+        IENT_LOG_WARN("unvalid timer\n");
+        return -1;
+    }
+
+    timerCtx->isEnable = false;
+    timerCtx->stopWorker = TRUE;
+    timerCtx->stopCallbackWorker = TRUE;
+    UTL_CVWakeAll(timerCtx->cbCv);
+
+    pthread_join(timerCtx->rtWorker, NULL);
+    pthread_join(timerCtx->cbWorker, NULL);
+
+    UTL_LockEnter(sTimerCtx.dllLock);
+    sts = UTL_DllRemCurr((DLL_D_HDR*)timerCtx,&tmpDll);
+    UTL_LockLeave(sTimerCtx.dllLock);
+
+    UTL_CVClose(timerCtx->cbCv);
+    UTL_LockClose(timerCtx->cbLock);
+    memset(timerCtx,0,sizeof(TIMER_CTX_T));
+    free(timerCtx);
+    return sts;
+}
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :UTL_TimerInit
@@ -460,6 +719,11 @@ MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int ms,UTL_TIMER
     struct sigevent sev;
     struct itimerspec its;
 
+    if(pTimer)
+    {
+        *pTimer = NULL;
+    }
+
     if(!sUtilTimerInit)
     {
         IENT_LOG_ERROR("uninitialized\n");
@@ -528,6 +792,11 @@ MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int ms,UTL_TIMER
     }
     return 0;
 }
+
+MSG_ID_T UTL_TimerCreateUs(UTL_TIMER_T* pTimer,unsigned int type, int period_us,UTL_TIMER_EV_F evCb,void* data)
+{
+    return iUTL_TimerCreateRt(pTimer, type, period_us, evCb, data);
+}
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :UTL_TimerDelete
@@ -568,6 +837,17 @@ MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
         return -3;
     }
 
+    if(timerCtx->rtMode)
+    {
+        sts = iUTL_TimerDeleteRt(timerCtx);
+        if(sts < 0)
+        {
+            return sts;
+        }
+        *pTimer = NULL;
+        return 0;
+    }
+
     if(timer_delete(timerCtx->timerId)==-1)
     {
         IENT_LOG_ERROR("timer_delete failed,error [%d]->[%s]\n",errno,strerror(errno));
@@ -584,6 +864,22 @@ MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
     return 0;
 }
 
+#endif
+
+#if !ENT_TIMER_IMPL_LINUX
+MSG_ID_T UTL_TimerCreateUs(UTL_TIMER_T* pTimer,unsigned int type, int period_us,UTL_TIMER_EV_F evCb,void* data)
+{
+    if(pTimer)
+    {
+        *pTimer = NULL;
+    }
+    (void)pTimer;
+    (void)type;
+    (void)period_us;
+    (void)evCb;
+    (void)data;
+    return -1;
+}
 #endif
 
 #if ENT_TIMER_IMPL_POSIX_FALLBACK
@@ -649,6 +945,11 @@ MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int ms,UTL_TIMER
 {
     MSG_ID_T      sts = 0;
     PTIMER_CTX_T  timerCtx = NULL;
+
+    if(pTimer)
+    {
+        *pTimer = NULL;
+    }
 
     if(!sUtilTimerInit)
     {

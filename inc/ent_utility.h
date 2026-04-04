@@ -109,6 +109,7 @@ typedef void* UTL_TIMER_T;
 
 ENT_PUBLIC MSG_ID_T  UTL_TimerInit();
 ENT_PUBLIC MSG_ID_T  UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int ms,UTL_TIMER_EV_F evCb,void* data);
+ENT_PUBLIC MSG_ID_T  UTL_TimerCreateUs(UTL_TIMER_T* pTimer,unsigned int type, int period_us,UTL_TIMER_EV_F evCb,void* data);
 ENT_PUBLIC MSG_ID_T  UTL_TimerDelete(UTL_TIMER_T* pTimer);
 ENT_PUBLIC MSG_ID_T  UTL_TimerClose();
 

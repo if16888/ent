@@ -281,7 +281,7 @@ int main(int argc, char** argv)
         }
     }
 
-    printf("runtime affinity_set=%d sched_set=%d actual_policy=%s actual_priority=%d\n",
+    printf("runtime affinity_set=%d sched_set=%d actual_policy=%s actual_priority=%d timer_path=rt_us\n",
            affinity_set,
            sched_set,
            policy_name(actual_policy),
@@ -313,9 +313,9 @@ int main(int argc, char** argv)
     }
     timer_inited = 1;
 
-    if(UTL_TimerCreate(&timer, UTL_TIMER_E_PERIOD, target_period_us / 1000, perf_rt_timer_cb, &probe) != 0)
+    if(UTL_TimerCreateUs(&timer, UTL_TIMER_E_PERIOD, target_period_us, perf_rt_timer_cb, &probe) != 0)
     {
-        fprintf(stderr, "UTL_TimerCreate failed\n");
+        fprintf(stderr, "UTL_TimerCreateUs failed\n");
         goto CLEANUP;
     }
     timer_created = 1;
