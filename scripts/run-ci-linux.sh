@@ -4,6 +4,18 @@ set -euo pipefail
 stage="${1:-all}"
 build_dir="${BUILD_DIR:-build-ci}"
 
+run_perf_binary() {
+  local name="$1"
+  local path="$2"
+
+  echo "Running ${name}"
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 180 "${path}"
+  else
+    "${path}"
+  fi
+}
+
 run_configure() {
   local -a cmake_args
 
@@ -36,11 +48,11 @@ run_test() {
 }
 
 run_perf() {
-  "./${build_dir}/bin/perf_utl_socket"
-  "./${build_dir}/bin/perf_utl_timer"
-  "./${build_dir}/bin/perf_utl_timer_rt"
-  "./${build_dir}/bin/perf_utl_tpool"
-  "./${build_dir}/bin/perf_ent_log"
+  run_perf_binary "perf_utl_socket" "./${build_dir}/bin/perf_utl_socket"
+  run_perf_binary "perf_utl_timer" "./${build_dir}/bin/perf_utl_timer"
+  run_perf_binary "perf_utl_timer_rt" "./${build_dir}/bin/perf_utl_timer_rt"
+  run_perf_binary "perf_utl_tpool" "./${build_dir}/bin/perf_utl_tpool"
+  run_perf_binary "perf_ent_log" "./${build_dir}/bin/perf_ent_log"
 }
 
 case "${stage}" in

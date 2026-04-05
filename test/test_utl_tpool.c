@@ -584,6 +584,33 @@ static int test_tpool_close_waits_for_running_task_completion(void)
                        "slow task should complete and report its return value before close finishes");
 }
 
+static int test_tpool_close_wakes_idle_workers(void)
+{
+    UTL_TPOOL pool = NULL;
+
+    reset_thread_counters();
+    s_use_real_threads = 1;
+
+    if(expect_true(UTL_TPoolInit(&pool, 1) == 0,
+                   "UTL_TPoolInit should create a worker for idle-close checks") != 0)
+    {
+        return 1;
+    }
+
+    UTL_Sleep(50);
+
+    if(expect_true(UTL_TPoolClose(pool) == 0,
+                   "UTL_TPoolClose should wake and join an idle waiting worker without deadlock") != 0)
+    {
+        s_use_real_threads = 0;
+        return 1;
+    }
+
+    s_use_real_threads = 0;
+    return expect_true(s_thread_wait_calls == 1,
+                       "UTL_TPoolClose should wait for the idle worker exactly once");
+}
+
 int main(void)
 {
     int failures = 0;
@@ -596,6 +623,7 @@ int main(void)
     failures += test_tpool_close_rejects_null_pool();
     failures += test_tpool_executes_task_and_end_callback();
     failures += test_tpool_close_waits_for_running_task_completion();
+    failures += test_tpool_close_wakes_idle_workers();
 
     if(failures != 0)
     {

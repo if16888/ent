@@ -27,11 +27,40 @@ function Run-Test {
     }
 }
 
+function Invoke-PerfBinary {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [int]$TimeoutSeconds = 180
+    )
+
+    $Name = Split-Path $Path -Leaf
+    Write-Host "Running $Name"
+
+    $Process = Start-Process -FilePath $Path -NoNewWindow -PassThru
+    if ($null -eq $Process) {
+        throw "Failed to start $Name"
+    }
+
+    try {
+        Wait-Process -Id $Process.Id -Timeout $TimeoutSeconds -ErrorAction Stop
+    }
+    catch {
+        Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
+        throw "$Name timed out after $TimeoutSeconds seconds"
+    }
+
+    $Process.Refresh()
+    if ($Process.ExitCode -ne 0) {
+        throw "$Name exited with code $($Process.ExitCode)"
+    }
+}
+
 function Run-Perf {
-    & ".\$BuildDir\bin\Release\perf_utl_socket.exe"
-    & ".\$BuildDir\bin\Release\perf_utl_timer.exe"
-    & ".\$BuildDir\bin\Release\perf_utl_tpool.exe"
-    & ".\$BuildDir\bin\Release\perf_ent_log.exe"
+    Invoke-PerfBinary ".\$BuildDir\bin\Release\perf_utl_socket.exe"
+    Invoke-PerfBinary ".\$BuildDir\bin\Release\perf_utl_timer.exe"
+    Invoke-PerfBinary ".\$BuildDir\bin\Release\perf_utl_tpool.exe"
+    Invoke-PerfBinary ".\$BuildDir\bin\Release\perf_ent_log.exe"
 }
 
 switch ($Stage) {
