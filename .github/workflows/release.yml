@@ -40,6 +40,7 @@ jobs:
           ./build/bin/perf_utl_timer
           ./build/bin/perf_utl_timer_rt
           ./build/bin/perf_utl_tpool
+          ./build/bin/perf_ent_log
 
       - name: Upload build outputs
         uses: actions/upload-artifact@v4
@@ -79,6 +80,7 @@ jobs:
         run: |
           & ".\build\bin\Release\perf_utl_timer.exe"
           & ".\build\bin\Release\perf_utl_tpool.exe"
+          & ".\build\bin\Release\perf_ent_log.exe"
 
       - name: Upload build outputs
         uses: actions/upload-artifact@v4

@@ -347,3 +347,22 @@ endif()
 if(WIN32)
   target_link_libraries(perf_utl_tpool PRIVATE Winmm)
 endif()
+
+add_executable(
+  perf_ent_log
+  perf_ent_log.c
+  ../comm/ent_log.c
+  ../comm/utl_thread.c
+  ../comm/utl_dll.c
+)
+
+target_include_directories(
+  perf_ent_log
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../comm
+)
+
+if(APPLE OR UNIX)
+  target_link_libraries(perf_ent_log PRIVATE pthread)
+endif()

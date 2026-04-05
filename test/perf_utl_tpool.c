@@ -4,6 +4,7 @@
 #ifdef WIN32
 #include <windows.h>
 #else
+#include <pthread.h>
 #include <sys/time.h>
 #endif
 
@@ -39,6 +40,13 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle, const char* format, ...) { (void)logHan
 typedef struct
 {
     volatile int finished;
+    int total_tasks;
+#ifdef WIN32
+    HANDLE done_event;
+#else
+    pthread_mutex_t done_mutex;
+    pthread_cond_t  done_cv;
+#endif
 } PERF_TPOOL_PROBE;
 
 static double now_ms(void)
@@ -66,10 +74,22 @@ static double now_ms(void)
 
 static void perf_probe_mark_finished(PERF_TPOOL_PROBE* probe)
 {
+    int finished = 0;
+
 #ifdef WIN32
-    InterlockedIncrement((volatile LONG*)&probe->finished);
+    finished = (int)InterlockedIncrement((volatile LONG*)&probe->finished);
+    if(finished >= probe->total_tasks)
+    {
+        SetEvent(probe->done_event);
+    }
 #else
-    __sync_add_and_fetch(&probe->finished, 1);
+    pthread_mutex_lock(&probe->done_mutex);
+    finished = __sync_add_and_fetch(&probe->finished, 1);
+    if(finished >= probe->total_tasks)
+    {
+        pthread_cond_signal(&probe->done_cv);
+    }
+    pthread_mutex_unlock(&probe->done_mutex);
 #endif
 }
 
@@ -99,6 +119,19 @@ int main(void)
 
     memset(&probe, 0, sizeof(probe));
     memset(retVals, 0, sizeof(retVals));
+    probe.total_tasks = TASKS;
+
+#ifdef WIN32
+    probe.done_event = CreateEvent(NULL, TRUE, FALSE, NULL);
+    if(probe.done_event == NULL) return EXIT_FAILURE;
+#else
+    if(pthread_mutex_init(&probe.done_mutex, NULL) != 0) return EXIT_FAILURE;
+    if(pthread_cond_init(&probe.done_cv, NULL) != 0)
+    {
+        pthread_mutex_destroy(&probe.done_mutex);
+        return EXIT_FAILURE;
+    }
+#endif
 
     if(UTL_TPoolInit(&pool, WORKERS) != 0) return EXIT_FAILURE;
 
@@ -111,14 +144,27 @@ int main(void)
         }
     }
 
+#ifdef WIN32
+    WaitForSingleObject(probe.done_event, INFINITE);
+#else
+    pthread_mutex_lock(&probe.done_mutex);
     while(probe.finished < TASKS)
     {
-        UTL_Sleep(10);
+        pthread_cond_wait(&probe.done_cv, &probe.done_mutex);
     }
+    pthread_mutex_unlock(&probe.done_mutex);
+#endif
 
     elapsedMs = now_ms() - startMs;
 
     if(UTL_TPoolClose(pool) != 0) return EXIT_FAILURE;
+
+#ifdef WIN32
+    CloseHandle(probe.done_event);
+#else
+    pthread_cond_destroy(&probe.done_cv);
+    pthread_mutex_destroy(&probe.done_mutex);
+#endif
 
     printf("tpool workers=%d tasks=%d elapsed_ms=%.3f tasks_per_sec=%.3f\n",
            WORKERS,
