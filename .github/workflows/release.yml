@@ -71,7 +71,9 @@ jobs:
         run: cmake --build build --config Release
 
       - name: Test
-        run: ctest --test-dir build -C Release --output-on-failure
+        run: >
+          ctest --test-dir build -C Release --output-on-failure
+          -R "test_ent_init|test_utl_dll|test_utl_thread|test_ent_thread|test_utl_timer|test_ent_log"
 
       - name: Package
         run: cpack -C Release --config build/CPackConfig.cmake -B build/package

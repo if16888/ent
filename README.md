@@ -44,4 +44,5 @@
    `Release` 在推送 `v*` tag 时执行双平台打包，并把产物发布到 GitHub Release
    Linux 使用系统开发包：`libsqlite3-dev` 和 `default-libmysqlclient-dev`
    Windows 使用 `vcpkg` 安装 `sqlite3:x64-windows` 和 `libmysql:x64-windows`
+   Windows 当前执行受支持的测试子集：`test_ent_init`、`test_utl_dll`、`test_utl_thread`、`test_ent_thread`、`test_utl_timer`、`test_ent_log`
    Windows 默认优先使用 `vcpkg`/系统发现到的库，只有显式允许时才回退到仓库内 `3rd/` 目录

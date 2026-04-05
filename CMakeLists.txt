@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 project(ent LANGUAGES C VERSION 0.1)
-set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS ON)
 
 message(STATUS "Project will be installed to ${CMAKE_INSTALL_PREFIX}")
 
