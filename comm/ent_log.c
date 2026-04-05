@@ -73,12 +73,14 @@ typedef struct
 #ifdef WIN32
     CRITICAL_SECTION cs;
     CONDITION_VARIABLE closeCv;
+    volatile LONG    closing;
+    volatile LONG    activeWriters;
 #else
     pthread_mutex_t  cs;
     pthread_cond_t   closeCv;
+    volatile int     closing;
+    volatile int     activeWriters;
 #endif
-    bool             closing;
-    int              activeWriters;
     int              pendingFlushes;
     char*            moduleName;
     char*            logPath;
@@ -123,6 +125,16 @@ static MSG_ID_T iENT_LogFormatMessage(const char* format,
                                       char** msgBuf,
                                       size_t* msgLen);
 static void iENT_LogFlushMaybe(ENT_LOG_CTX* log, FILE* fp, bool forceFlush);
+static int iENT_LogIsClosing(const ENT_LOG_CTX* log);
+static void iENT_LogSetClosing(ENT_LOG_CTX* log);
+static int iENT_LogActiveGet(const ENT_LOG_CTX* log);
+static void iENT_LogActiveInc(ENT_LOG_CTX* log);
+static int iENT_LogActiveDec(ENT_LOG_CTX* log);
+static MSG_ID_T iENT_LogFormatPrefix(ENT_LOG_LEV_E logLevel,
+                                     char* prefixBuf,
+                                     size_t prefixBufLen,
+                                     size_t* prefixLen,
+                                     time_t* rollTime);
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :iENT_LogRollCheck
@@ -365,6 +377,178 @@ static void iENT_LogFlushMaybe(ENT_LOG_CTX* log, FILE* fp, bool forceFlush)
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
+ * NAME        :iENT_LogIsClosing
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "iENT_LogIsClosing"
+static int iENT_LogIsClosing(const ENT_LOG_CTX* log)
+{
+#ifdef WIN32
+    return InterlockedCompareExchange((volatile LONG*)&log->closing, 0, 0) != 0;
+#else
+    return __sync_val_compare_and_swap((volatile int*)&log->closing, 0, 0) != 0;
+#endif
+}
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :iENT_LogSetClosing
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "iENT_LogSetClosing"
+static void iENT_LogSetClosing(ENT_LOG_CTX* log)
+{
+#ifdef WIN32
+    InterlockedExchange(&log->closing, 1);
+#else
+    __sync_lock_test_and_set(&log->closing, 1);
+#endif
+}
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :iENT_LogActiveGet
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "iENT_LogActiveGet"
+static int iENT_LogActiveGet(const ENT_LOG_CTX* log)
+{
+#ifdef WIN32
+    return (int)InterlockedCompareExchange((volatile LONG*)&log->activeWriters, 0, 0);
+#else
+    return __sync_val_compare_and_swap((volatile int*)&log->activeWriters, 0, 0);
+#endif
+}
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :iENT_LogActiveInc
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "iENT_LogActiveInc"
+static void iENT_LogActiveInc(ENT_LOG_CTX* log)
+{
+#ifdef WIN32
+    InterlockedIncrement(&log->activeWriters);
+#else
+    __sync_add_and_fetch(&log->activeWriters, 1);
+#endif
+}
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :iENT_LogActiveDec
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "iENT_LogActiveDec"
+static int iENT_LogActiveDec(ENT_LOG_CTX* log)
+{
+#ifdef WIN32
+    return (int)InterlockedDecrement(&log->activeWriters);
+#else
+    return __sync_sub_and_fetch(&log->activeWriters, 1);
+#endif
+}
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :iENT_LogFormatPrefix
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "iENT_LogFormatPrefix"
+static MSG_ID_T iENT_LogFormatPrefix(ENT_LOG_LEV_E logLevel,
+                                     char* prefixBuf,
+                                     size_t prefixBufLen,
+                                     size_t* prefixLen,
+                                     time_t* rollTime)
+{
+    int writeLen = 0;
+#ifdef WIN32
+    struct _timeb nowTmb;
+    struct tm nowTm;
+
+    if(prefixBuf == NULL || prefixLen == NULL || rollTime == NULL)
+    {
+        return -1;
+    }
+
+    _ftime(&nowTmb);
+    *rollTime = nowTmb.time;
+    localtime_s(&nowTm, &nowTmb.time);
+    writeLen = _snprintf_s(prefixBuf,
+                           prefixBufLen,
+                           _TRUNCATE,
+                           "[Time %04d%02d%02d %02d:%02d:%02d.%03d] [%5s] [tid %5lu] ",
+                           nowTm.tm_year + 1900,
+                           nowTm.tm_mon + 1,
+                           nowTm.tm_mday,
+                           nowTm.tm_hour,
+                           nowTm.tm_min,
+                           nowTm.tm_sec,
+                           nowTmb.millitm,
+                           sLogLevelStr[logLevel],
+                           (unsigned long)GetCurrentThreadId());
+#else
+    struct timeval nowTmv;
+    struct tm nowTm;
+
+    if(prefixBuf == NULL || prefixLen == NULL || rollTime == NULL)
+    {
+        return -1;
+    }
+
+    gettimeofday(&nowTmv, NULL);
+    *rollTime = nowTmv.tv_sec;
+    localtime_r(&nowTmv.tv_sec, &nowTm);
+    writeLen = snprintf(prefixBuf,
+                        prefixBufLen,
+                        "[Time %04d%02d%02d %02d:%02d:%02d.%03ld] [%5s] [tid %5lu] ",
+                        nowTm.tm_year + 1900,
+                        nowTm.tm_mon + 1,
+                        nowTm.tm_mday,
+                        nowTm.tm_hour,
+                        nowTm.tm_min,
+                        nowTm.tm_sec,
+                        (long)(nowTmv.tv_usec / 1000),
+                        sLogLevelStr[logLevel],
+                        (unsigned long int)pthread_self());
+#endif
+
+    if(writeLen < 0 || (size_t)writeLen >= prefixBufLen)
+    {
+        return -1;
+    }
+
+    *prefixLen = (size_t)writeLen;
+    return 0;
+}
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
  * NAME        :ENT_LogInit
  *
  * DESCRIPTION :   
@@ -529,7 +713,7 @@ ENT_PUBLIC MSG_ID_T  ENT_LogInitHandle(ENT_LOG* pLogHandle,const char* moduleNam
         goto END_OF_ROUTINE;
     }
 #endif
-    log->closing = false;
+    log->closing = 0;
     log->activeWriters = 0;
     log->pendingFlushes = 0;
     log->isInit   = true;
@@ -724,9 +908,9 @@ ENT_PUBLIC MSG_ID_T ENT_LogCloseHandle(ENT_LOG logHandle)
         fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
         goto END_OF_ROUTINE;
     }
-    if(log->closing == false)
-        log->closing = true;
-    while(log->activeWriters > 0)
+    if(iENT_LogIsClosing(log) == 0)
+        iENT_LogSetClosing(log);
+    while(iENT_LogActiveGet(log) > 0)
     {
 #ifdef WIN32
         SleepConditionVariableCS(&log->closeCv, &sLogMutex, INFINITE);
@@ -885,7 +1069,7 @@ static MSG_ID_T iENT_LogAcquireWriter(ENT_LOG_CTX** logCtx,ENT_LOG logHandle)
         }
     }
 
-    if(log->closing)
+    if(iENT_LogIsClosing(log))
     {
 #ifdef WIN32
         LeaveCriticalSection(&sLogMutex);
@@ -895,7 +1079,7 @@ static MSG_ID_T iENT_LogAcquireWriter(ENT_LOG_CTX** logCtx,ENT_LOG logHandle)
         return -3;
     }
 
-    log->activeWriters++;
+    iENT_LogActiveInc(log);
     *logCtx = log;
 #ifdef WIN32
     LeaveCriticalSection(&sLogMutex);
@@ -924,25 +1108,20 @@ static MSG_ID_T iENT_LogAcquireWriter(ENT_LOG_CTX** logCtx,ENT_LOG logHandle)
 #define FUNC_NAME "iENT_LogReleaseWriter"
 static void iENT_LogReleaseWriter(ENT_LOG_CTX* log)
 {
-#ifdef WIN32
-    EnterCriticalSection(&sLogMutex);
-#else
-    pthread_mutex_lock(&sLogMutex);
-#endif
-    log->activeWriters--;
-    if(log->closing && log->activeWriters == 0)
+    if(iENT_LogActiveDec(log) == 0 && iENT_LogIsClosing(log))
     {
 #ifdef WIN32
+        EnterCriticalSection(&sLogMutex);
+        if(iENT_LogIsClosing(log) && iENT_LogActiveGet(log) == 0)
         WakeAllConditionVariable(&log->closeCv);
+        LeaveCriticalSection(&sLogMutex);
 #else
+        pthread_mutex_lock(&sLogMutex);
+        if(iENT_LogIsClosing(log) && iENT_LogActiveGet(log) == 0)
         pthread_cond_broadcast(&log->closeCv);
+        pthread_mutex_unlock(&sLogMutex);
 #endif
     }
-#ifdef WIN32
-    LeaveCriticalSection(&sLogMutex);
-#else
-    pthread_mutex_unlock(&sLogMutex);
-#endif
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -1056,10 +1235,7 @@ ENT_PUBLIC MSG_ID_T ENT_LogRaw(ENT_LOG logHandle,const char* format,...)
 #define FUNC_NAME "ENT_LogVPrint"
 static MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX* log,ENT_LOG_LEV_E logLevel,const char* format,va_list va_args)
 {
-    const static char* tmFormat="[Time %Y%m%d %H:%M:%S";
-    const static int TM_STR_LEN=23;
-    const static int TM_MILLITM_LEN=29;
-    char tmpbuf[64];
+    char prefixBuf[96];
     char stackBuf[512];
     char* msgBuf = stackBuf;
     size_t msgLen = 0;
@@ -1067,16 +1243,7 @@ static MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX* log,ENT_LOG_LEV_E logLevel,const cha
     char lineStackBuf[1024];
     char* lineBuf = lineStackBuf;
     size_t lineLen = 0;
-#ifdef WIN32
-    struct _timeb nowTmb;
-#else
-    struct timeval nowTmv;
-#endif
-    struct tm nowTm;
-
-#ifdef WIN32
-#else
-#endif
+    time_t rollTime = 0;
 
     if(iENT_LogFormatMessage(format, va_args, stackBuf, sizeof(stackBuf), &msgBuf, &msgLen) < 0)
     {
@@ -1089,24 +1256,20 @@ static MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX* log,ENT_LOG_LEV_E logLevel,const cha
     pthread_mutex_lock(&log->cs);
 #endif
 
+    if(iENT_LogFormatPrefix(logLevel, prefixBuf, sizeof(prefixBuf), &prefixLen, &rollTime) < 0)
+    {
 #ifdef WIN32
-    _ftime(&nowTmb);
-    iENT_LogRollCheck(log,nowTmb.time);
-    localtime_s(&nowTm,&nowTmb.time);
-    memset(tmpbuf,0,64);
-    strftime(tmpbuf, 64, tmFormat, &nowTm);
-    _snprintf_s(&tmpbuf[TM_STR_LEN],64-TM_STR_LEN-1,6,".%03d] ",nowTmb.millitm);
-    _snprintf_s(&tmpbuf[TM_MILLITM_LEN],64-TM_MILLITM_LEN-1,32,"[%5s] [tid %5ld] ",sLogLevelStr[logLevel],GetCurrentThreadId());
+        LeaveCriticalSection(&log->cs);
 #else
-    gettimeofday(&nowTmv,NULL);
-    iENT_LogRollCheck(log,nowTmv.tv_sec);
-    localtime_r(&nowTmv.tv_sec,&nowTm);
-    memset(tmpbuf,0,64);
-    strftime(tmpbuf, 64, tmFormat, &nowTm);
-    snprintf(&tmpbuf[TM_STR_LEN],64-TM_STR_LEN-1,".%03ld] ",(long)(nowTmv.tv_usec/1000));
-    snprintf(&tmpbuf[TM_MILLITM_LEN],64-TM_MILLITM_LEN-1,"[%5s] [tid %5ld] ",sLogLevelStr[logLevel],(unsigned long int)pthread_self());
+        pthread_mutex_unlock(&log->cs);
 #endif
-    prefixLen = strlen(tmpbuf);
+        if(msgBuf != stackBuf)
+        {
+            free(msgBuf);
+        }
+        return -1;
+    }
+    iENT_LogRollCheck(log, rollTime);
     lineLen = prefixLen + msgLen;
     if(lineLen + 1 > sizeof(lineStackBuf))
     {
@@ -1125,7 +1288,7 @@ static MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX* log,ENT_LOG_LEV_E logLevel,const cha
             return -1;
         }
     }
-    memcpy(lineBuf, tmpbuf, prefixLen);
+    memcpy(lineBuf, prefixBuf, prefixLen);
     memcpy(lineBuf + prefixLen, msgBuf, msgLen);
     lineBuf[lineLen] = '\0';
 
