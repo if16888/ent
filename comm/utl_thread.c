@@ -83,11 +83,13 @@ typedef struct
  */
 MSG_ID_T  UTL_LockInit(UTL_LOCK* lock,const char* name)
 {
+    int s;
     if(lock==NULL)
     {
         IENT_LOG_ERROR("lock handle is null\n");
         return -1;
     }
+    *lock = NULL;
 
     UTL_TH_LOCK* tmp = (UTL_TH_LOCK*)malloc(sizeof(UTL_TH_LOCK));
     if(tmp==NULL)
@@ -108,7 +110,14 @@ MSG_ID_T  UTL_LockInit(UTL_LOCK* lock,const char* name)
         tmp->lockName = NULL;
     else
         tmp->lockName = strdup(name);
-    pthread_mutex_init(&tmp->lock.cs,NULL);
+    s = pthread_mutex_init(&tmp->lock.cs,NULL);
+    if(s != 0)
+    {
+        IENT_LOG_ERROR("pthread_mutex_init failed,error [%d]->[%s]\n",s,strerror(s));
+        if(tmp->lockName) free(tmp->lockName);
+        free(tmp);
+        return -3;
+    }
 #endif
     *lock = tmp;
     return 0;
@@ -131,6 +140,7 @@ MSG_ID_T  UTL_LockInit(UTL_LOCK* lock,const char* name)
  */
 static MSG_ID_T  iUTL_LockInitRW(UTL_LOCK* lock,const char* name)
 {
+    int s;
     UTL_TH_LOCK* tmp = (UTL_TH_LOCK*)malloc(sizeof(UTL_TH_LOCK));
     if(tmp==NULL)
     {
@@ -149,7 +159,15 @@ static MSG_ID_T  iUTL_LockInitRW(UTL_LOCK* lock,const char* name)
         tmp->lockName = NULL;
     else
         tmp->lockName = strdup(name);
-    pthread_rwlock_init(&tmp->lock.rw,NULL);
+    s = pthread_rwlock_init(&tmp->lock.rw,NULL);
+    if(s != 0)
+    {
+        IENT_LOG_ERROR("pthread_rwlock_init failed,error [%d]->[%s]\n",s,strerror(s));
+        if(tmp->lockName) free(tmp->lockName);
+        free(tmp);
+        *lock = NULL;
+        return -3;
+    }
 #endif
     *lock = tmp;
     return 0;
@@ -172,6 +190,7 @@ static MSG_ID_T  iUTL_LockInitRW(UTL_LOCK* lock,const char* name)
  */
 static MSG_ID_T  iUTL_LockInitSpin(UTL_LOCK* lock,const char* name)
 {
+    int s;
     UTL_TH_LOCK* tmp = (UTL_TH_LOCK*)malloc(sizeof(UTL_TH_LOCK));
     if(tmp==NULL)
     {
@@ -198,10 +217,18 @@ static MSG_ID_T  iUTL_LockInitSpin(UTL_LOCK* lock,const char* name)
     else
         tmp->lockName = strdup(name);
 #if ENT_HAS_PTHREAD_SPINLOCK
-    pthread_spin_init(&tmp->lock.spin,PTHREAD_PROCESS_PRIVATE);
+    s = pthread_spin_init(&tmp->lock.spin,PTHREAD_PROCESS_PRIVATE);
 #else
-    pthread_mutex_init(&tmp->lock.spin,NULL);
+    s = pthread_mutex_init(&tmp->lock.spin,NULL);
 #endif
+    if(s != 0)
+    {
+        IENT_LOG_ERROR("spin lock init failed,error [%d]->[%s]\n",s,strerror(s));
+        if(tmp->lockName) free(tmp->lockName);
+        free(tmp);
+        *lock = NULL;
+        return -3;
+    }
 #endif
     *lock = tmp;
     return 0;
@@ -394,7 +421,8 @@ MSG_ID_T  UTL_LockEnter(UTL_LOCK lock)
             break;
 
         case LOCK_RW_E:
-            sts = iUTL_LockEnterRW(lock,RW_WRITE_E);
+            IENT_LOG_ERROR("rw lock requires explicit enter mode\n");
+            sts = -2;
             break;
 
         default:
@@ -594,7 +622,8 @@ MSG_ID_T  UTL_LockLeave(UTL_LOCK lock)
             break;
 
         case LOCK_RW_E:
-            sts = iUTL_LockLeaveRW(lock,RW_WRITE_E);
+            IENT_LOG_ERROR("rw lock requires explicit leave mode\n");
+            sts = -2;
             break;
 
         default:
@@ -836,11 +865,40 @@ MSG_ID_T  UTL_CVInit(UTL_CV* cv,const char* name)
         tmp->cvName = _strdup(name);
     InitializeConditionVariable(&tmp->cv);
 #else
+    pthread_condattr_t cvAttr;
+    int s;
     if(name == NULL)
         tmp->cvName = NULL;
     else
         tmp->cvName = strdup(name);
-    pthread_cond_init(&tmp->cv,NULL);
+    s = pthread_condattr_init(&cvAttr);
+    if(s != 0)
+    {
+        IENT_LOG_ERROR("pthread_condattr_init failed,error [%d]->[%s]\n",s,strerror(s));
+        if(tmp->cvName) free(tmp->cvName);
+        free(tmp);
+        return -3;
+    }
+#if defined(__linux__)
+    s = pthread_condattr_setclock(&cvAttr,CLOCK_MONOTONIC);
+    if(s != 0)
+    {
+        IENT_LOG_ERROR("pthread_condattr_setclock failed,error [%d]->[%s]\n",s,strerror(s));
+        pthread_condattr_destroy(&cvAttr);
+        if(tmp->cvName) free(tmp->cvName);
+        free(tmp);
+        return -3;
+    }
+#endif
+    s = pthread_cond_init(&tmp->cv,&cvAttr);
+    pthread_condattr_destroy(&cvAttr);
+    if(s != 0)
+    {
+        IENT_LOG_ERROR("pthread_cond_init failed,error [%d]->[%s]\n",s,strerror(s));
+        if(tmp->cvName) free(tmp->cvName);
+        free(tmp);
+        return -3;
+    }
 #endif
     *cv = tmp;
     return 0;
@@ -896,13 +954,18 @@ static MSG_ID_T iUTL_CVWaitMutex(UTL_TH_CV* cvCtx,UTL_TH_LOCK* lockCtx,int ms)
     else
     {
         struct timespec cvTm;
-        if (clock_gettime(CLOCK_REALTIME, &cvTm) == -1)
+        if (clock_gettime(CLOCK_MONOTONIC, &cvTm) == -1)
         {
             IENT_LOG_ERROR("clock_gettime failed,error [%d]->[%s]\n",errno,strerror(errno));
             return -4;
         }
         cvTm.tv_sec += ms/1000;
         cvTm.tv_nsec += (ms%1000)*1000000;
+        if(cvTm.tv_nsec >= 1000000000L)
+        {
+            cvTm.tv_sec += cvTm.tv_nsec / 1000000000L;
+            cvTm.tv_nsec = cvTm.tv_nsec % 1000000000L;
+        }
         pthread_cond_timedwait(&cvCtx->cv,&lockCtx->lock.cs,&cvTm);
     }  
 #endif

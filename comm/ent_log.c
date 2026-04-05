@@ -67,9 +67,13 @@ typedef struct
     FILE*            logFp;
 #ifdef WIN32
     CRITICAL_SECTION cs;
+    CONDITION_VARIABLE closeCv;
 #else
     pthread_mutex_t  cs;
+    pthread_cond_t   closeCv;
 #endif
+    bool             closing;
+    int              activeWriters;
     char*            moduleName;
     char*            logPath;
     int              maxNum;
@@ -91,6 +95,13 @@ static ENT_LOG_CTX sDefLog={
                 LOG_LEV_WARN_E,//default log LEVEL
                 NULL,
                 {0},
+#ifdef WIN32
+                {0},
+#else
+                {0},
+#endif
+                false,
+                0,
                 NULL,
                 NULL,
                 DEF_MAX_NUM_LOG,
@@ -345,14 +356,37 @@ MSG_ID_T  ENT_LogInitHandle(ENT_LOG* pLogHandle,const char* moduleName,const cha
             log->logPath[len-1]='\0';
         }
         sts=iENT_LogPathCheck(log->logPath);
-    }     
-    
+    }
     //iENT_LogRollCheck(log,nowTmb.time);
 #ifdef WIN32
     InitializeCriticalSection(&log->cs);
+    InitializeConditionVariable(&log->closeCv);
 #else
     pthread_mutex_init(&log->cs,NULL);
+    if(pthread_cond_init(&log->closeCv,NULL) != 0)
+    {
+        sts = -1;
+        fprintf(stderr,"Func [%s] Line [%d],pthread_cond_init failed.\n",FUNC_NAME,__LINE__);
+        pthread_mutex_destroy(&log->cs);
+        if(log->moduleName)
+        {
+            free(log->moduleName);
+            log->moduleName = NULL;
+        }
+        if(log->logPath)
+        {
+            free(log->logPath);
+            log->logPath = NULL;
+        }
+        if(log!=&sDefLog)
+        {
+            free(log);
+        }
+        goto END_OF_ROUTINE;
+    }
 #endif
+    log->closing = false;
+    log->activeWriters = 0;
     log->isInit   = true;
     log->isDebug  = false;
     log->isBuffer = false;
@@ -545,16 +579,27 @@ MSG_ID_T ENT_LogCloseHandle(ENT_LOG logHandle)
         fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
         goto END_OF_ROUTINE;
     }
-    
+    if(log->closing == false)
+        log->closing = true;
+    while(log->activeWriters > 0)
+    {
+#ifdef WIN32
+        SleepConditionVariableCS(&log->closeCv, &sLogMutex, INFINITE);
+#else
+        pthread_cond_wait(&log->closeCv, &sLogMutex);
+#endif
+    }
+
     if(log->logFp)
         fclose(log->logFp);
-    
+
     log->isInit = false;
     log->logFp  = NULL;
 #ifdef WIN32
     DeleteCriticalSection(&log->cs);
 #else
     pthread_mutex_destroy(&log->cs);
+    pthread_cond_destroy(&log->closeCv);
 #endif
     
     if(log!=&sDefLog)
@@ -627,8 +672,132 @@ static MSG_ID_T iENT_LogGetCtx(ENT_LOG_CTX** logCtx,ENT_LOG logHandle)
         return -2;
     }
     *logCtx = log;
-    
+
     return 0; 
+}
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :iENT_LogAcquireWriter
+ *
+ * DESCRIPTION :   
+ *                 
+ *                   
+ *
+ * COMPLETION
+ * STATUS      :  0
+ *                Success; Service has completed successfully.           
+ *
+ *                            
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "iENT_LogAcquireWriter"
+static MSG_ID_T iENT_LogAcquireWriter(ENT_LOG_CTX** logCtx,ENT_LOG logHandle)
+{
+    ENT_LOG_CTX* log = NULL;
+
+    *logCtx = NULL;
+    if(sLogMutexInit==false)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],Uninitialized,please call ENT_LogInit.\n",FUNC_NAME,__LINE__);
+        return -1;
+    }
+
+#ifdef WIN32
+    EnterCriticalSection(&sLogMutex);
+#else
+    pthread_mutex_lock(&sLogMutex);
+#endif
+
+    if(logHandle == NULL)
+    {
+        if(sDefLog.isInit)
+            log = &sDefLog;
+        else
+        {
+#ifdef WIN32
+            LeaveCriticalSection(&sLogMutex);
+#else
+            pthread_mutex_unlock(&sLogMutex);
+#endif
+            fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
+            return -2;
+        }
+    }
+    else
+    {
+        log = (ENT_LOG_CTX*)logHandle;
+        if(log->tag!=ENTLOG_TAG || log->isInit==false)
+        {
+#ifdef WIN32
+            LeaveCriticalSection(&sLogMutex);
+#else
+            pthread_mutex_unlock(&sLogMutex);
+#endif
+            fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
+            return -2;
+        }
+    }
+
+    if(log->closing)
+    {
+#ifdef WIN32
+        LeaveCriticalSection(&sLogMutex);
+#else
+        pthread_mutex_unlock(&sLogMutex);
+#endif
+        return -3;
+    }
+
+    log->activeWriters++;
+    *logCtx = log;
+#ifdef WIN32
+    LeaveCriticalSection(&sLogMutex);
+#else
+    pthread_mutex_unlock(&sLogMutex);
+#endif
+    return 0;
+}
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :iENT_LogReleaseWriter
+ *
+ * DESCRIPTION :   
+ *                 
+ *                   
+ *
+ * COMPLETION
+ * STATUS      :  0
+ *                Success; Service has completed successfully.           
+ *
+ *                            
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "iENT_LogReleaseWriter"
+static void iENT_LogReleaseWriter(ENT_LOG_CTX* log)
+{
+#ifdef WIN32
+    EnterCriticalSection(&sLogMutex);
+#else
+    pthread_mutex_lock(&sLogMutex);
+#endif
+    log->activeWriters--;
+    if(log->closing && log->activeWriters == 0)
+    {
+#ifdef WIN32
+        WakeAllConditionVariable(&log->closeCv);
+#else
+        pthread_cond_broadcast(&log->closeCv);
+#endif
+    }
+#ifdef WIN32
+    LeaveCriticalSection(&sLogMutex);
+#else
+    pthread_mutex_unlock(&sLogMutex);
+#endif
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -695,7 +864,7 @@ MSG_ID_T ENT_LogRaw(ENT_LOG logHandle,const char* format,...)
     MSG_ID_T  sts=0;
     ENT_LOG_CTX*  logCtx = NULL;
     
-    sts = iENT_LogGetCtx(&logCtx,logHandle);
+    sts = iENT_LogAcquireWriter(&logCtx,logHandle);
     if(sts<0)
     {
         return sts;
@@ -704,6 +873,7 @@ MSG_ID_T ENT_LogRaw(ENT_LOG logHandle,const char* format,...)
     va_start(va_args,format);
     sts = iENT_LogVRaw(logCtx,format,va_args);
     va_end(va_args);
+    iENT_LogReleaseWriter(logCtx);
     return sts;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
@@ -808,13 +978,14 @@ MSG_ID_T ENT_LogFatal(ENT_LOG logHandle,const char* format,...)
     MSG_ID_T  sts=0;
     ENT_LOG_CTX*  logCtx = NULL;
     
-    sts = iENT_LogGetCtx(&logCtx,logHandle);
+    sts = iENT_LogAcquireWriter(&logCtx,logHandle);
     if(sts<0)
     {
         return sts;
     }
     if(LOG_LEV_FATAL_E>logCtx->logLevel)
     {
+        iENT_LogReleaseWriter(logCtx);
         return 1;
     }
     
@@ -822,6 +993,7 @@ MSG_ID_T ENT_LogFatal(ENT_LOG logHandle,const char* format,...)
     va_start(va_args,format);
     sts = iENT_LogVPrint(logCtx,LOG_LEV_FATAL_E,format,va_args);
     va_end(va_args);
+    iENT_LogReleaseWriter(logCtx);
     return sts;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
@@ -847,13 +1019,14 @@ MSG_ID_T ENT_LogError(ENT_LOG logHandle,const char* format,...)
     MSG_ID_T  sts=0;
     ENT_LOG_CTX*  logCtx = NULL;
     
-    sts = iENT_LogGetCtx(&logCtx,logHandle);
+    sts = iENT_LogAcquireWriter(&logCtx,logHandle);
     if(sts<0)
     {
         return sts;
     }
     if(LOG_LEV_ERROR_E>logCtx->logLevel)//日志级别优先级高
     {
+        iENT_LogReleaseWriter(logCtx);
         return 1;
     }
     
@@ -861,6 +1034,7 @@ MSG_ID_T ENT_LogError(ENT_LOG logHandle,const char* format,...)
     va_start(va_args,format);
     sts = iENT_LogVPrint(logCtx,LOG_LEV_ERROR_E,format,va_args);
     va_end(va_args);
+    iENT_LogReleaseWriter(logCtx);
     return sts;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
@@ -886,13 +1060,14 @@ MSG_ID_T ENT_LogWarn(ENT_LOG logHandle,const char* format,...)
     MSG_ID_T  sts=0;
     ENT_LOG_CTX*  logCtx = NULL;
     
-    sts = iENT_LogGetCtx(&logCtx,logHandle);
+    sts = iENT_LogAcquireWriter(&logCtx,logHandle);
     if(sts<0)
     {
         return sts;
     }
     if(LOG_LEV_WARN_E>logCtx->logLevel)
     {
+        iENT_LogReleaseWriter(logCtx);
         return 1;
     }
     
@@ -900,6 +1075,7 @@ MSG_ID_T ENT_LogWarn(ENT_LOG logHandle,const char* format,...)
     va_start(va_args,format);
     sts = iENT_LogVPrint(logCtx,LOG_LEV_WARN_E,format,va_args);
     va_end(va_args);
+    iENT_LogReleaseWriter(logCtx);
     return sts;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
@@ -925,13 +1101,14 @@ MSG_ID_T ENT_LogPrint(ENT_LOG logHandle,const char* format,...)
     MSG_ID_T  sts=0;
     ENT_LOG_CTX*  logCtx = NULL;
     
-    sts = iENT_LogGetCtx(&logCtx,logHandle);
+    sts = iENT_LogAcquireWriter(&logCtx,logHandle);
     if(sts<0)
     {
         return sts;
     }
     if(LOG_LEV_INFO_E>logCtx->logLevel)
     {
+        iENT_LogReleaseWriter(logCtx);
         return 1;
     }
     
@@ -939,6 +1116,7 @@ MSG_ID_T ENT_LogPrint(ENT_LOG logHandle,const char* format,...)
     va_start(va_args,format);
     sts = iENT_LogVPrint(logCtx,LOG_LEV_INFO_E,format,va_args);
     va_end(va_args);
+    iENT_LogReleaseWriter(logCtx);
     return sts;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
@@ -964,13 +1142,14 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle,const char* format,...)
     MSG_ID_T  sts=0;
     ENT_LOG_CTX*  logCtx = NULL;
     
-    sts = iENT_LogGetCtx(&logCtx,logHandle);
+    sts = iENT_LogAcquireWriter(&logCtx,logHandle);
     if(sts<0)
     {
         return sts;
     }
     if(LOG_LEV_DEBUG_E>logCtx->logLevel)
     {
+        iENT_LogReleaseWriter(logCtx);
         return 1;
     }
     
@@ -978,6 +1157,7 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle,const char* format,...)
     va_start(va_args,format);
     sts = iENT_LogVPrint(logCtx,LOG_LEV_DEBUG_E,format,va_args);
     va_end(va_args);
+    iENT_LogReleaseWriter(logCtx);
     return sts;
 }
 #ifdef WIN32

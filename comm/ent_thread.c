@@ -20,6 +20,7 @@
 #else
 #include <pthread.h>
 #include <errno.h>
+#include <time.h>
 #endif
 #include <stdlib.h>
 #include <string.h>
@@ -41,7 +42,9 @@ typedef struct THREAD_DB
     PTHREAD_START_ROUTINE thProc;
     void*          thData;
     void*          thRet;
-    volatile bool  isDone;
+    pthread_mutex_t doneMutex;
+    pthread_cond_t  doneCv;
+    bool            finished;
 #endif
     unsigned int    tag;
 }THREAD_DB;
@@ -65,7 +68,10 @@ static void* iENT_ThreadProc(void* data)
     }
 
     thDb->thRet = thDb->thProc(thDb->thData);
-    thDb->isDone = true;
+    pthread_mutex_lock(&thDb->doneMutex);
+    thDb->finished = true;
+    pthread_cond_broadcast(&thDb->doneCv);
+    pthread_mutex_unlock(&thDb->doneMutex);
     return thDb->thRet;
 }
 #endif
@@ -426,7 +432,6 @@ MSG_ID_T ENT_ThreadDetachCreate(ENT_THREAD handle,PTHREAD_START_ROUTINE thProc,v
         IENT_LOG_ERROR("break handle\n");
         return -2;
     }
-    
     s = pthread_attr_init(&thAttr);
     if (s != 0)
     {
@@ -501,6 +506,7 @@ MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREAD_START_ROU
          sts = -2;
          goto END_OF_ROUTINE;
     }
+    memset(tmp,0,sizeof(THREAD_DB));
     
     s = pthread_attr_init(&thAttr);
     if(s != 0)
@@ -521,12 +527,31 @@ MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREAD_START_ROU
     tmp->thProc = thProc;
     tmp->thData = thData;
     tmp->thRet = NULL;
-    tmp->isDone = false;
+    tmp->finished = false;
+    s = pthread_mutex_init(&tmp->doneMutex,NULL);
+    if(s != 0)
+    {
+        IENT_LOG_ERROR("pthread_mutex_init failed,error [%d]->[%s]\n",s,strerror(s));
+        free(tmp);
+        sts = -4;
+        goto END_OF_ROUTINE;
+    }
+    s = pthread_cond_init(&tmp->doneCv,NULL);
+    if(s != 0)
+    {
+        IENT_LOG_ERROR("pthread_cond_init failed,error [%d]->[%s]\n",s,strerror(s));
+        pthread_mutex_destroy(&tmp->doneMutex);
+        free(tmp);
+        sts = -4;
+        goto END_OF_ROUTINE;
+    }
 
     s = pthread_create(&tmp->thId, &thAttr, iENT_ThreadProc, tmp); 
     if(s != 0)
     {
        IENT_LOG_ERROR("pthread_create failed,error [%d] ->[%s]\n",s,strerror(s));
+       pthread_cond_destroy(&tmp->doneCv);
+       pthread_mutex_destroy(&tmp->doneMutex);
        free(tmp);
        pthread_attr_destroy(&thAttr);
        sts = -5;
@@ -583,6 +608,7 @@ MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int ms)
     ENT_TH_CTX*  thCtx=NULL;
     void*        retVal=NULL;
     int          s;
+    struct timespec deadline;
 
     if(tid == NULL || handle==NULL)
     {
@@ -605,8 +631,14 @@ MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int ms)
 
     if(thDb->thId)
     {
+        pthread_mutex_lock(&thDb->doneMutex);
         if(ms<=0)
         {
+            while(!thDb->finished)
+            {
+                pthread_cond_wait(&thDb->doneCv,&thDb->doneMutex);
+            }
+            pthread_mutex_unlock(&thDb->doneMutex);
             s = pthread_join(thDb->thId,&retVal);
             if(s!=0)
             {
@@ -615,30 +647,36 @@ MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int ms)
         }
         else
         {
-#if defined(__linux__)
-            /* Linux can poll thread completion without blocking. */
-            s = pthread_tryjoin_np(thDb->thId,&retVal);
-            if(s==EBUSY)
+            clock_gettime(CLOCK_REALTIME,&deadline);
+            deadline.tv_sec += ms/1000;
+            deadline.tv_nsec += (long)(ms%1000) * 1000000L;
+            if(deadline.tv_nsec >= 1000000000L)
             {
-                UTL_Sleep(ms);
-                return 1;
+                deadline.tv_sec += 1;
+                deadline.tv_nsec -= 1000000000L;
             }
-            else if(s!=0)
+
+            while(!thDb->finished)
             {
-                IENT_LOG_WARN("pthread_tryjoin_np failed [%d] [%d]->[%s]\n",thDb->thId,s,strerror(s));
+                s = pthread_cond_timedwait(&thDb->doneCv,&thDb->doneMutex,&deadline);
+                if(s == ETIMEDOUT && !thDb->finished)
+                {
+                    pthread_mutex_unlock(&thDb->doneMutex);
+                    return 1;
+                }
+                if(s != 0 && s != ETIMEDOUT)
+                {
+                    pthread_mutex_unlock(&thDb->doneMutex);
+                    IENT_LOG_WARN("pthread_cond_timedwait failed [%d]->[%s]\n",s,strerror(s));
+                    return -4;
+                }
             }
-#else
-            if(!thDb->isDone)
-            {
-                UTL_Sleep(ms);
-                return 1;
-            }
+            pthread_mutex_unlock(&thDb->doneMutex);
             s = pthread_join(thDb->thId,&retVal);
             if(s!=0)
             {
                 IENT_LOG_WARN("join,error [%d]->[%s]\n",s,strerror(s));
             }
-#endif
         }
         thDb->thHandle = NULL;
         thDb->thId = 0;
@@ -651,6 +689,8 @@ MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int ms)
     }
     sts = UTL_DllRemCurr(&thDb->dllLnk,&tmpHdr);
     UTL_LockLeave(thCtx->dllLock);
+    pthread_cond_destroy(&thDb->doneCv);
+    pthread_mutex_destroy(&thDb->doneMutex);
     free(thDb);
     *tid = NULL;
     return 0;
@@ -705,7 +745,6 @@ MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
         thDb = (THREAD_DB*)tmp;
         if(thDb->thId)
         {
-            pthread_cancel(thDb->thId);
             pthread_join(thDb->thId,&retVal);
             thDb->thHandle = NULL;
             thDb->thId = 0;
@@ -713,6 +752,8 @@ MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
         }
         if(thDb)
         {
+            pthread_cond_destroy(&thDb->doneCv);
+            pthread_mutex_destroy(&thDb->doneMutex);
             free(thDb);
         }
     }

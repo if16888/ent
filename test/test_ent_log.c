@@ -4,9 +4,12 @@
 #include <time.h>
 
 #ifndef WIN32
+#include <pthread.h>
 #include <dirent.h>
+#include <errno.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/time.h>
 #include <unistd.h>
 #endif
 
@@ -107,6 +110,107 @@ static void format_log_file_path(char* buffer, size_t size, const char* dir, con
              nowTm.tm_mon + 1,
              nowTm.tm_mday);
 }
+
+#ifndef WIN32
+typedef struct TEST_LOG_RACE_CTX
+{
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    ENT_LOG logHandle;
+    int writerReady;
+    int writerRelease;
+    int writerAboutToLog;
+    int writerDone;
+} TEST_LOG_RACE_CTX;
+
+static void race_ctx_reset(TEST_LOG_RACE_CTX* ctx)
+{
+    ctx->writerReady = 0;
+    ctx->writerRelease = 0;
+    ctx->writerAboutToLog = 0;
+    ctx->writerDone = 0;
+}
+
+static void make_deadline(struct timespec* deadline, int timeout_ms)
+{
+    struct timeval now;
+
+    gettimeofday(&now, NULL);
+    deadline->tv_sec = now.tv_sec + timeout_ms / 1000;
+    deadline->tv_nsec = now.tv_usec * 1000 + (timeout_ms % 1000) * 1000000L;
+    if(deadline->tv_nsec >= 1000000000L)
+    {
+        deadline->tv_sec++;
+        deadline->tv_nsec -= 1000000000L;
+    }
+}
+
+static int wait_for_flag(TEST_LOG_RACE_CTX* ctx, int* flag, int expected, int timeout_ms)
+{
+    struct timespec deadline;
+    int rc = 0;
+
+    make_deadline(&deadline, timeout_ms);
+    if(pthread_mutex_lock(&ctx->mutex) != 0)
+    {
+        return 1;
+    }
+
+    while(*flag != expected)
+    {
+        rc = pthread_cond_timedwait(&ctx->cond, &ctx->mutex, &deadline);
+        if(rc == ETIMEDOUT)
+        {
+            break;
+        }
+        if(rc != 0)
+        {
+            pthread_mutex_unlock(&ctx->mutex);
+            return 1;
+        }
+    }
+
+    rc = (*flag == expected) ? 0 : 1;
+    pthread_mutex_unlock(&ctx->mutex);
+    return rc;
+}
+
+static void set_flag_and_wake(int* flag, TEST_LOG_RACE_CTX* ctx, int value)
+{
+    *flag = value;
+    pthread_cond_broadcast(&ctx->cond);
+}
+
+static void* controlled_log_writer(void* data)
+{
+    TEST_LOG_RACE_CTX* ctx = (TEST_LOG_RACE_CTX*)data;
+    char payload[32768];
+    size_t i = 0;
+
+    for(i = 0; i + 1 < sizeof(payload); ++i)
+    {
+        payload[i] = 'A';
+    }
+    payload[sizeof(payload) - 1] = '\0';
+
+    pthread_mutex_lock(&ctx->mutex);
+    set_flag_and_wake(&ctx->writerReady, ctx, 1);
+    while(!ctx->writerRelease)
+    {
+        pthread_cond_wait(&ctx->cond, &ctx->mutex);
+    }
+    set_flag_and_wake(&ctx->writerAboutToLog, ctx, 1);
+    pthread_mutex_unlock(&ctx->mutex);
+
+    ENT_LogPrint(ctx->logHandle, "%s race write\n", payload);
+
+    pthread_mutex_lock(&ctx->mutex);
+    set_flag_and_wake(&ctx->writerDone, ctx, 1);
+    pthread_mutex_unlock(&ctx->mutex);
+
+    return NULL;
+}
+#endif
 
 static int test_log_rejects_uninitialized_calls(void)
 {
@@ -469,6 +573,151 @@ static int test_log_level_filters_debug_messages(void)
 #endif
 }
 
+static int test_log_close_handle_waits_for_active_writers(void)
+{
+#ifdef WIN32
+    return 0;
+#else
+    ENT_LOG logHandle = NULL;
+    pthread_t writerThread;
+    TEST_LOG_RACE_CTX ctx;
+    ENT_LOG_LEV_E level = LOG_LEV_INFO_E;
+    char dirPath[256];
+    MSG_ID_T closeStatus = 0;
+    int writerStarted = 0;
+    int logHandleOpen = 0;
+    int logInitDone = 0;
+    int mutexInitDone = 0;
+    int condInitDone = 0;
+    int tempDirCreated = 0;
+    int rc = 1;
+
+    memset(&ctx, 0, sizeof(ctx));
+
+    if(make_temp_dir(dirPath, sizeof(dirPath)) != 0)
+    {
+        fprintf(stderr, "failed to create temp race directory\n");
+        goto cleanup;
+    }
+    tempDirCreated = 1;
+
+    if(pthread_mutex_init(&ctx.mutex, NULL) != 0)
+    {
+        goto cleanup;
+    }
+    mutexInitDone = 1;
+
+    if(pthread_cond_init(&ctx.cond, NULL) != 0)
+    {
+        goto cleanup;
+    }
+    condInitDone = 1;
+
+    if(expect_true(ENT_LogInit() == 0, "ENT_LogInit should initialize before close/write race test") != 0)
+    {
+        goto cleanup;
+    }
+    logInitDone = 1;
+
+    if(expect_true(ENT_LogInitHandle(&logHandle, "RaceModule", dirPath) == 0,
+                   "ENT_LogInitHandle should create a private handle for race test") != 0)
+    {
+        goto cleanup;
+    }
+    logHandleOpen = 1;
+
+    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_LEVEL_E, &level) == 0,
+                   "ENT_LogSetOption should enable INFO writes for the race test") != 0)
+    {
+        goto cleanup;
+    }
+
+    race_ctx_reset(&ctx);
+    ctx.logHandle = logHandle;
+
+    if(expect_true(pthread_create(&writerThread, NULL, controlled_log_writer, &ctx) == 0,
+                   "pthread_create should start a writer thread") != 0)
+    {
+        goto cleanup;
+    }
+    writerStarted = 1;
+
+    if(expect_true(wait_for_flag(&ctx, &ctx.writerReady, 1, 1000) == 0,
+                   "writer thread should signal readiness before close") != 0)
+    {
+        goto cleanup;
+    }
+
+    pthread_mutex_lock(&ctx.mutex);
+    set_flag_and_wake(&ctx.writerRelease, &ctx, 1);
+    pthread_mutex_unlock(&ctx.mutex);
+
+    if(expect_true(wait_for_flag(&ctx, &ctx.writerAboutToLog, 1, 1000) == 0,
+                   "writer thread should reach the log-call window before close") != 0)
+    {
+        goto cleanup;
+    }
+
+    closeStatus = ENT_LogCloseHandle(logHandle);
+    if(expect_true(closeStatus == 0,
+                   "ENT_LogCloseHandle should return success during the bounded overlap window") != 0)
+    {
+        goto cleanup;
+    }
+    logHandleOpen = 0;
+    logHandle = NULL;
+
+    if(expect_true(wait_for_flag(&ctx, &ctx.writerDone, 1, 2000) == 0,
+                   "writer thread should finish after the handle closes") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(pthread_join(writerThread, NULL) == 0,
+                   "pthread_join should join the writer thread") != 0)
+    {
+        goto cleanup;
+    }
+
+    writerStarted = 0;
+    rc = 0;
+
+cleanup:
+    if(writerStarted)
+    {
+        pthread_mutex_lock(&ctx.mutex);
+        ctx.writerRelease = 1;
+        pthread_cond_broadcast(&ctx.cond);
+        pthread_mutex_unlock(&ctx.mutex);
+        pthread_join(writerThread, NULL);
+    }
+
+    if(logHandleOpen && logHandle != NULL)
+    {
+        ENT_LogCloseHandle(logHandle);
+    }
+
+    if(logInitDone)
+    {
+        ENT_LogClose();
+    }
+
+    if(condInitDone)
+    {
+        pthread_cond_destroy(&ctx.cond);
+    }
+    if(mutexInitDone)
+    {
+        pthread_mutex_destroy(&ctx.mutex);
+    }
+    if(tempDirCreated)
+    {
+        remove_dir_contents(dirPath);
+    }
+    return rc;
+#endif
+}
+
 int main(void)
 {
     int failures = 0;
@@ -479,6 +728,7 @@ int main(void)
     failures += test_log_set_option_validates_arguments();
     failures += test_log_path_option_trims_trailing_separator_and_writes_file();
     failures += test_log_level_filters_debug_messages();
+    failures += test_log_close_handle_waits_for_active_writers();
 
     if(failures != 0)
     {

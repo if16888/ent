@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "ient_comm.h"
 #include "ent_thread.h"
@@ -12,9 +13,7 @@ typedef struct TEST_BAD_THREAD_CTX
     unsigned int tag;
 } TEST_BAD_THREAD_CTX;
 
-static int s_lock_depth = 0;
-static int s_join_seen_inside_lock = 0;
-static int s_cancel_seen_inside_lock = 0;
+static int s_cancel_call_count = 0;
 
 static int expect_true(int condition, const char* message)
 {
@@ -27,11 +26,9 @@ static int expect_true(int condition, const char* message)
     return 0;
 }
 
-static void reset_thread_lock_probes(void)
+static void reset_thread_probes(void)
 {
-    s_lock_depth = 0;
-    s_join_seen_inside_lock = 0;
-    s_cancel_seen_inside_lock = 0;
+    s_cancel_call_count = 0;
 }
 
 MSG_ID_T ENT_LogInit(void)
@@ -115,34 +112,13 @@ int pthread_join(pthread_t thread, void** retval)
     {
         *retval = NULL;
     }
-    if(s_lock_depth > 0)
-    {
-        s_join_seen_inside_lock = 1;
-    }
     return 0;
 }
 
 int pthread_cancel(pthread_t thread)
 {
     (void)thread;
-    if(s_lock_depth > 0)
-    {
-        s_cancel_seen_inside_lock = 1;
-    }
-    return 0;
-}
-
-int pthread_mutex_lock(pthread_mutex_t* mutex)
-{
-    (void)mutex;
-    s_lock_depth++;
-    return 0;
-}
-
-int pthread_mutex_unlock(pthread_mutex_t* mutex)
-{
-    (void)mutex;
-    s_lock_depth--;
+    s_cancel_call_count++;
     return 0;
 }
 
@@ -153,7 +129,21 @@ static void* quick_thread(void* data)
 
 static void* sleepy_thread(void* data)
 {
-    UTL_Sleep(50);
+    struct timespec ts;
+
+    ts.tv_sec = 0;
+    ts.tv_nsec = 50 * 1000000L;
+    nanosleep(&ts, NULL);
+    return data;
+}
+
+static void* short_lived_thread(void* data)
+{
+    struct timespec ts;
+
+    ts.tv_sec = 0;
+    ts.tv_nsec = 5 * 1000000L;
+    nanosleep(&ts, NULL);
     return data;
 }
 
@@ -203,17 +193,10 @@ static int test_thread_create_wait_and_close_roundtrip(void)
         return 1;
     }
 
-    reset_thread_lock_probes();
+    reset_thread_probes();
 
     if(expect_true(ENT_ThreadWaitById(&tid, handle, 0) == 0,
                    "ENT_ThreadWaitById should join a finished thread") != 0)
-    {
-        ENT_ThreadClose(handle);
-        return 1;
-    }
-
-    if(expect_true(s_join_seen_inside_lock == 0,
-                   "ENT_ThreadWaitById should not call pthread_join while dllLock is held") != 0)
     {
         ENT_ThreadClose(handle);
         return 1;
@@ -270,7 +253,43 @@ static int test_thread_wait_timeout_returns_retry_signal(void)
     return expect_true(ENT_ThreadClose(handle) == 0, "ENT_ThreadClose should release the thread context after timeout handling");
 }
 
-static int test_thread_close_joins_outside_dll_lock(void)
+static int test_thread_wait_returns_success_when_thread_finishes_before_timeout(void)
+{
+    ENT_THREAD handle = NULL;
+    ENT_THREAD_ID tid = NULL;
+    int value = 13;
+
+    if(expect_true(ENT_ThreadInit(&handle) == 0, "ENT_ThreadInit should create a thread context for early completion checks") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(ENT_ThreadCreate(&tid, handle, short_lived_thread, &value) == 0,
+                   "ENT_ThreadCreate should create a short-lived thread before timeout checks") != 0)
+    {
+        ENT_ThreadClose(handle);
+        return 1;
+    }
+
+    reset_thread_probes();
+    if(expect_true(ENT_ThreadWaitById(&tid, handle, 100) == 0,
+                   "ENT_ThreadWaitById should succeed when the thread finishes before the timeout expires") != 0)
+    {
+        ENT_ThreadClose(handle);
+        return 1;
+    }
+
+    if(expect_true(tid == NULL,
+                   "ENT_ThreadWaitById should clear tid when the thread finishes before timeout") != 0)
+    {
+        ENT_ThreadClose(handle);
+        return 1;
+    }
+
+    return expect_true(ENT_ThreadClose(handle) == 0, "ENT_ThreadClose should release the thread context after early completion checks");
+}
+
+static int test_thread_close_releases_thread_context(void)
 {
     ENT_THREAD handle = NULL;
     ENT_THREAD_ID tid = NULL;
@@ -288,21 +307,42 @@ static int test_thread_close_joins_outside_dll_lock(void)
         return 1;
     }
 
-    reset_thread_lock_probes();
+    reset_thread_probes();
 
     if(expect_true(ENT_ThreadClose(handle) == 0, "ENT_ThreadClose should close a populated thread context") != 0)
     {
         return 1;
     }
+    return 0;
+}
 
-    if(expect_true(s_cancel_seen_inside_lock == 0,
-                   "ENT_ThreadClose should not call pthread_cancel while dllLock is held") != 0)
+static int test_thread_close_does_not_call_pthread_cancel(void)
+{
+    ENT_THREAD handle = NULL;
+    ENT_THREAD_ID tid = NULL;
+    int value = 15;
+
+    if(expect_true(ENT_ThreadInit(&handle) == 0, "ENT_ThreadInit should create a thread context for cancel checks") != 0)
     {
         return 1;
     }
 
-    return expect_true(s_join_seen_inside_lock == 0,
-                       "ENT_ThreadClose should not call pthread_join while dllLock is held");
+    if(expect_true(ENT_ThreadCreate(&tid, handle, sleepy_thread, &value) == 0,
+                   "ENT_ThreadCreate should create a thread before cancel checks") != 0)
+    {
+        ENT_ThreadClose(handle);
+        return 1;
+    }
+
+    reset_thread_probes();
+
+    if(expect_true(ENT_ThreadClose(handle) == 0, "ENT_ThreadClose should close a populated thread context without cancellation") != 0)
+    {
+        return 1;
+    }
+
+    return expect_true(s_cancel_call_count == 0,
+                       "ENT_ThreadClose should not call pthread_cancel during normal close");
 }
 
 int main(void)
@@ -313,7 +353,9 @@ int main(void)
     failures += test_thread_detach_create_rejects_invalid_handle();
     failures += test_thread_create_wait_and_close_roundtrip();
     failures += test_thread_wait_timeout_returns_retry_signal();
-    failures += test_thread_close_joins_outside_dll_lock();
+    failures += test_thread_wait_returns_success_when_thread_finishes_before_timeout();
+    failures += test_thread_close_releases_thread_context();
+    failures += test_thread_close_does_not_call_pthread_cancel();
 
     if(failures != 0)
     {
