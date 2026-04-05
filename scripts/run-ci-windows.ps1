@@ -2,9 +2,10 @@ $ErrorActionPreference = "Stop"
 
 $Stage = if ($args.Length -gt 0) { $args[0] } else { "all" }
 $BuildDir = if ($env:BUILD_DIR) { $env:BUILD_DIR } else { "build-ci" }
+$Platform = if ($env:WINDOWS_CMAKE_PLATFORM) { $env:WINDOWS_CMAKE_PLATFORM } else { "Win32" }
 
 function Run-Configure {
-    cmake -S . -B $BuildDir -A x64 `
+    cmake -S . -B $BuildDir -A $Platform `
         -DCMAKE_BUILD_TYPE=Release `
         -DENT_ENABLE_SQLITE=ON `
         -DENT_ENABLE_MYSQL=ON `
