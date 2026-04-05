@@ -39,6 +39,8 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle, const char* format, ...) { (void)logHan
 typedef struct
 {
     volatile int finished;
+    UTL_LOCK done_lock;
+    UTL_CV done_cv;
 } PERF_TPOOL_PROBE;
 
 static double now_ms(void)
@@ -71,6 +73,10 @@ static void perf_probe_mark_finished(PERF_TPOOL_PROBE* probe)
 #else
     __sync_add_and_fetch(&probe->finished, 1);
 #endif
+
+    UTL_LockEnter(probe->done_lock);
+    UTL_CVWakeAll(probe->done_cv);
+    UTL_LockLeave(probe->done_lock);
 }
 
 static MSG_ID_T perf_task_cb(void* data)
@@ -100,6 +106,13 @@ int main(void)
     memset(&probe, 0, sizeof(probe));
     memset(retVals, 0, sizeof(retVals));
 
+    if(UTL_LockInit(&probe.done_lock, "perf_tpool_done") != 0) return EXIT_FAILURE;
+    if(UTL_CVInit(&probe.done_cv, "perf_tpool_done") != 0)
+    {
+        UTL_LockClose(probe.done_lock);
+        return EXIT_FAILURE;
+    }
+
     if(UTL_TPoolInit(&pool, WORKERS) != 0) return EXIT_FAILURE;
 
     startMs = now_ms();
@@ -111,14 +124,23 @@ int main(void)
         }
     }
 
+    UTL_LockEnter(probe.done_lock);
     while(probe.finished < TASKS)
     {
-        UTL_Sleep(1);
+        UTL_CVWait(probe.done_cv, probe.done_lock, 50, RW_WRITE_E);
     }
+    UTL_LockLeave(probe.done_lock);
 
     elapsedMs = now_ms() - startMs;
 
-    if(UTL_TPoolClose(pool) != 0) return EXIT_FAILURE;
+    if(UTL_TPoolClose(pool) != 0)
+    {
+        UTL_CVClose(probe.done_cv);
+        UTL_LockClose(probe.done_lock);
+        return EXIT_FAILURE;
+    }
+    UTL_CVClose(probe.done_cv);
+    UTL_LockClose(probe.done_lock);
 
     printf("tpool workers=%d tasks=%d elapsed_ms=%.3f tasks_per_sec=%.3f\n",
            WORKERS,

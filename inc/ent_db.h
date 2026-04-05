@@ -30,7 +30,7 @@ typedef enum DB_TYPE
 
 typedef struct DB_READ_HEADER
 {
-    BOOL isFetchMore;//是否有更多记录
+    BOOL isFetchMore;// whether more rows are available
 }DB_READ_HEADER;
 
 typedef void(* SqlResultCB)(char** fields,char** rowRes,long long rowNum,int columnNum,void* userData);

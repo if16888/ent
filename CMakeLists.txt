@@ -4,6 +4,10 @@ set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON)
 
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
+
 message(STATUS "Project will be installed to ${CMAKE_INSTALL_PREFIX}")
 
 if(NOT CMAKE_BUILD_TYPE)

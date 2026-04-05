@@ -45,6 +45,8 @@
 
 
 #define DEF_MAX_NUM_LOG  15
+#define ENT_LOG_FLUSH_BATCH 256
+#define ENT_LOG_FILE_BUFFER_SIZE (64 * 1024)
 
 #ifdef WIN32
 static CRITICAL_SECTION sLogMutex;
@@ -77,6 +79,7 @@ typedef struct
 #endif
     bool             closing;
     int              activeWriters;
+    int              pendingFlushes;
     char*            moduleName;
     char*            logPath;
     int              maxNum;
@@ -105,6 +108,7 @@ static ENT_LOG_CTX sDefLog={
 #endif
                 false,
                 0,
+                0,
                 NULL,
                 NULL,
                 DEF_MAX_NUM_LOG,
@@ -112,6 +116,13 @@ static ENT_LOG_CTX sDefLog={
             };
             
 static MSG_ID_T iENT_LogPathCheck(const char* path);
+static MSG_ID_T iENT_LogFormatMessage(const char* format,
+                                      va_list va_args,
+                                      char* stackBuf,
+                                      size_t stackBufLen,
+                                      char** msgBuf,
+                                      size_t* msgLen);
+static void iENT_LogFlushMaybe(ENT_LOG_CTX* log, FILE* fp, bool forceFlush);
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :iENT_LogRollCheck
@@ -194,6 +205,10 @@ static MSG_ID_T  iENT_LogRollCheck(ENT_LOG logHandle,time_t nowTime)
     {
         fprintf(stderr,"Func [%s] Line [%d],The file %s  was not opened\n",FUNC_NAME,__LINE__,fileName);
     }
+    else
+    {
+        setvbuf(log->logFp, NULL, _IOFBF, ENT_LOG_FILE_BUFFER_SIZE);
+    }
     
     if(log->maxNum>0)
     {
@@ -221,6 +236,132 @@ static MSG_ID_T  iENT_LogRollCheck(ENT_LOG logHandle,time_t nowTime)
 
     }
     return 0;
+}
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :iENT_LogFormatMessage
+ *
+ * DESCRIPTION :
+ *
+ *
+ * COMPLETION
+ * STATUS      :  0
+ *                Success; Service has completed successfully.
+ *
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "iENT_LogFormatMessage"
+static MSG_ID_T iENT_LogFormatMessage(const char* format,
+                                      va_list va_args,
+                                      char* stackBuf,
+                                      size_t stackBufLen,
+                                      char** msgBuf,
+                                      size_t* msgLen)
+{
+    int requiredLen = 0;
+    int writeLen = 0;
+    va_list writeArgs;
+    char* targetBuf = stackBuf;
+
+    if(format == NULL || stackBuf == NULL || stackBufLen == 0 || msgBuf == NULL || msgLen == NULL)
+    {
+        return -1;
+    }
+
+    va_copy(writeArgs, va_args);
+    writeLen = vsnprintf(stackBuf, stackBufLen, format, writeArgs);
+    va_end(writeArgs);
+    if(writeLen >= 0 && (size_t)writeLen < stackBufLen)
+    {
+        *msgBuf = stackBuf;
+        *msgLen = (size_t)writeLen;
+        return 0;
+    }
+
+    if(writeLen >= 0)
+    {
+        requiredLen = writeLen;
+    }
+    else
+    {
+#ifdef WIN32
+        va_list sizeArgs;
+        va_copy(sizeArgs, va_args);
+        requiredLen = _vscprintf(format, sizeArgs);
+        va_end(sizeArgs);
+#else
+        return -1;
+#endif
+    }
+
+    if(requiredLen < 0)
+    {
+        return -1;
+    }
+
+    if((size_t)requiredLen + 1 > stackBufLen)
+    {
+        targetBuf = (char*)malloc((size_t)requiredLen + 1);
+        if(targetBuf == NULL)
+        {
+            return -1;
+        }
+    }
+
+    va_copy(writeArgs, va_args);
+    if(vsnprintf(targetBuf, (size_t)requiredLen + 1, format, writeArgs) < 0)
+    {
+        va_end(writeArgs);
+        if(targetBuf != stackBuf)
+        {
+            free(targetBuf);
+        }
+        return -1;
+    }
+    va_end(writeArgs);
+
+    *msgBuf = targetBuf;
+    *msgLen = (size_t)requiredLen;
+    return 0;
+}
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :iENT_LogFlushMaybe
+ *
+ * DESCRIPTION :
+ *
+ *
+ * COMPLETION
+ * STATUS      :
+ *
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "iENT_LogFlushMaybe"
+static void iENT_LogFlushMaybe(ENT_LOG_CTX* log, FILE* fp, bool forceFlush)
+{
+    if(log == NULL || fp == NULL)
+    {
+        return;
+    }
+
+    if(forceFlush || !log->isBuffer)
+    {
+        fflush(fp);
+        log->pendingFlushes = 0;
+        return;
+    }
+
+    if(++log->pendingFlushes >= ENT_LOG_FLUSH_BATCH)
+    {
+        fflush(fp);
+        log->pendingFlushes = 0;
+    }
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -390,6 +531,7 @@ ENT_PUBLIC MSG_ID_T  ENT_LogInitHandle(ENT_LOG* pLogHandle,const char* moduleNam
 #endif
     log->closing = false;
     log->activeWriters = 0;
+    log->pendingFlushes = 0;
     log->isInit   = true;
     log->isDebug  = false;
     log->isBuffer = false;
@@ -821,27 +963,42 @@ static void iENT_LogReleaseWriter(ENT_LOG_CTX* log)
 #undef  FUNC_NAME
 #define FUNC_NAME "iENT_LogVRaw"
 static MSG_ID_T iENT_LogVRaw(ENT_LOG_CTX* log,const char* format,va_list va_args)
-{   
+{
+    char stackBuf[512];
+    char* msgBuf = stackBuf;
+    size_t msgLen = 0;
+    MSG_ID_T sts = 0;
+
+    sts = iENT_LogFormatMessage(format, va_args, stackBuf, sizeof(stackBuf), &msgBuf, &msgLen);
+    if(sts < 0)
+    {
+        return sts;
+    }
+
 #ifdef WIN32
     EnterCriticalSection(&log->cs);
 #else
     pthread_mutex_lock(&log->cs);
 #endif
 
-    time_t  nowTime = time(NULL);
-    
+    time_t nowTime = time(NULL);
     iENT_LogRollCheck(log,nowTime);
-    
+
     FILE* fp = log->logFp==NULL?stderr:log->logFp;
-    
-    vfprintf(fp,format,va_args);
-    fflush(fp);
+
+    fwrite(msgBuf, 1, msgLen, fp);
+    iENT_LogFlushMaybe(log, fp, fp == stderr);
 #ifdef WIN32   
     LeaveCriticalSection(&log->cs);
 #else
     pthread_mutex_unlock(&log->cs);
-#endif    
-    
+#endif
+
+    if(msgBuf != stackBuf)
+    {
+        free(msgBuf);
+    }
+
     return 0;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
@@ -898,31 +1055,46 @@ ENT_PUBLIC MSG_ID_T ENT_LogRaw(ENT_LOG logHandle,const char* format,...)
 #undef  FUNC_NAME
 #define FUNC_NAME "ENT_LogVPrint"
 static MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX* log,ENT_LOG_LEV_E logLevel,const char* format,va_list va_args)
-{   
+{
     const static char* tmFormat="[Time %Y%m%d %H:%M:%S";
     const static int TM_STR_LEN=23;
     const static int TM_MILLITM_LEN=29;
     char tmpbuf[64];
-    va_list fp_args;
+    char stackBuf[512];
+    char* msgBuf = stackBuf;
+    size_t msgLen = 0;
+    size_t prefixLen = 0;
+    char lineStackBuf[1024];
+    char* lineBuf = lineStackBuf;
+    size_t lineLen = 0;
 #ifdef WIN32
     struct _timeb nowTmb;
 #else
     struct timeval nowTmv;
 #endif
     struct tm nowTm;
-    
+
+#ifdef WIN32
+#else
+#endif
+
+    if(iENT_LogFormatMessage(format, va_args, stackBuf, sizeof(stackBuf), &msgBuf, &msgLen) < 0)
+    {
+        return -1;
+    }
+
 #ifdef WIN32
     EnterCriticalSection(&log->cs);
 #else
     pthread_mutex_lock(&log->cs);
 #endif
-    
+
 #ifdef WIN32
     _ftime(&nowTmb);
     iENT_LogRollCheck(log,nowTmb.time);
     localtime_s(&nowTm,&nowTmb.time);
     memset(tmpbuf,0,64);
-    strftime( tmpbuf, 64,tmFormat, &nowTm);
+    strftime(tmpbuf, 64, tmFormat, &nowTm);
     _snprintf_s(&tmpbuf[TM_STR_LEN],64-TM_STR_LEN-1,6,".%03d] ",nowTmb.millitm);
     _snprintf_s(&tmpbuf[TM_MILLITM_LEN],64-TM_MILLITM_LEN-1,32,"[%5s] [tid %5ld] ",sLogLevelStr[logLevel],GetCurrentThreadId());
 #else
@@ -930,33 +1102,57 @@ static MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX* log,ENT_LOG_LEV_E logLevel,const cha
     iENT_LogRollCheck(log,nowTmv.tv_sec);
     localtime_r(&nowTmv.tv_sec,&nowTm);
     memset(tmpbuf,0,64);
-    strftime( tmpbuf, 64,tmFormat, &nowTm);
+    strftime(tmpbuf, 64, tmFormat, &nowTm);
     snprintf(&tmpbuf[TM_STR_LEN],64-TM_STR_LEN-1,".%03ld] ",(long)(nowTmv.tv_usec/1000));
     snprintf(&tmpbuf[TM_MILLITM_LEN],64-TM_MILLITM_LEN-1,"[%5s] [tid %5ld] ",sLogLevelStr[logLevel],(unsigned long int)pthread_self());
 #endif
-    
+    prefixLen = strlen(tmpbuf);
+    lineLen = prefixLen + msgLen;
+    if(lineLen + 1 > sizeof(lineStackBuf))
+    {
+        lineBuf = (char*)malloc(lineLen + 1);
+        if(lineBuf == NULL)
+        {
+#ifdef WIN32
+            LeaveCriticalSection(&log->cs);
+#else
+            pthread_mutex_unlock(&log->cs);
+#endif
+            if(msgBuf != stackBuf)
+            {
+                free(msgBuf);
+            }
+            return -1;
+        }
+    }
+    memcpy(lineBuf, tmpbuf, prefixLen);
+    memcpy(lineBuf + prefixLen, msgBuf, msgLen);
+    lineBuf[lineLen] = '\0';
+
     if(log->isDebug)
     {
-        printf("%s",tmpbuf);
+        fwrite(lineBuf, 1, lineLen, stdout);
     }
     FILE* fp = log->logFp==NULL?stderr:log->logFp;
-    
-    fprintf(fp,"%s",tmpbuf);
-    va_copy(fp_args, va_args);
-    if(log->isDebug)
-    {
-        vprintf(format,va_args);
-    }
-    vfprintf(fp,format,fp_args);
-    va_end(fp_args);
-    fflush(fp);
+
+    fwrite(lineBuf, 1, lineLen, fp);
+    iENT_LogFlushMaybe(log, fp, fp == stderr || logLevel <= LOG_LEV_ERROR_E);
 #ifdef WIN32   
     LeaveCriticalSection(&log->cs);
 #else
     pthread_mutex_unlock(&log->cs);
-#endif    
-    
-    return 0;   
+#endif
+
+    if(lineBuf != lineStackBuf)
+    {
+        free(lineBuf);
+    }
+    if(msgBuf != stackBuf)
+    {
+        free(msgBuf);
+    }
+
+    return 0;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -1027,7 +1223,7 @@ ENT_PUBLIC MSG_ID_T ENT_LogError(ENT_LOG logHandle,const char* format,...)
     {
         return sts;
     }
-    if(LOG_LEV_ERROR_E>logCtx->logLevel)//日志级别优先级高
+    if(LOG_LEV_ERROR_E>logCtx->logLevel)// log level priority is higher
     {
         iENT_LogReleaseWriter(logCtx);
         return 1;
