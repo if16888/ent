@@ -49,7 +49,7 @@ static bool sUtlRetryFlag = true;
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T UTL_SocketInit()
+ENT_PUBLIC MSG_ID_T UTL_SocketInit()
 {
     WORD wVersionRequested;
     WSADATA wsaData;
@@ -105,7 +105,7 @@ MSG_ID_T UTL_SocketInit()
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_Socket(
+ENT_PUBLIC MSG_ID_T  UTL_Socket(
     int           AddrFamily,	  
     int           SocketType,	  
     int		      Protocol,	  
@@ -195,7 +195,7 @@ MSG_ID_T	UTL_Bind(
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_Connect(
+ENT_PUBLIC MSG_ID_T  UTL_Connect(
  UTL_D_SOCKET	        SocketDesc,	 
  const struct sockaddr* addr,
  int                    addr_size)
@@ -248,7 +248,7 @@ MSG_ID_T  UTL_Connect(
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_Listen(
+ENT_PUBLIC MSG_ID_T  UTL_Listen(
  UTL_D_SOCKET	SocketDesc, 
  int 		    MaxBacklog) 
 {
@@ -289,7 +289,7 @@ MSG_ID_T  UTL_Listen(
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_Accept(
+ENT_PUBLIC MSG_ID_T  UTL_Accept(
  UTL_D_SOCKET	        SocketListen,	 
  const struct sockaddr* addr,
  int                    addr_size) 
@@ -298,7 +298,7 @@ MSG_ID_T  UTL_Accept(
     MSG_ID_T	    sts = 0;	    
     struct sockaddr Sockaddr;	
     int     	    SockaddrLen;
-    int             ret;
+    SOCKET          ret;
 
     if (!sUtlInitFlag) 
     {
@@ -337,7 +337,7 @@ MSG_ID_T  UTL_Accept(
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_CloseSocket(
+ENT_PUBLIC MSG_ID_T  UTL_CloseSocket(
     UTL_D_SOCKET  SocketDesc) 
 {
     MSG_ID_T  sts = 0;	       
@@ -376,7 +376,7 @@ MSG_ID_T  UTL_CloseSocket(
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_Recv(
+ENT_PUBLIC MSG_ID_T  UTL_Recv(
     UTL_D_SOCKET  SocketDesc,  
     char		 *pBuffer,	       
     int		      BufferLength,	   
@@ -428,7 +428,7 @@ MSG_ID_T  UTL_Recv(
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_Send(
+ENT_PUBLIC MSG_ID_T  UTL_Send(
     UTL_D_SOCKET   SocketDesc,	 
     char          *pBuffer,	 
     int            BufferLength,
@@ -479,7 +479,7 @@ MSG_ID_T  UTL_Send(
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_SetSockOpt(
+ENT_PUBLIC MSG_ID_T  UTL_SetSockOpt(
     UTL_D_SOCKET	SocketDesc,	 
     int 		    ProtocolLevel,	 
     int 		    OptionName,	    
@@ -527,7 +527,7 @@ MSG_ID_T  UTL_SetSockOpt(
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_Shutdown(
+ENT_PUBLIC MSG_ID_T  UTL_Shutdown(
     UTL_D_SOCKET  SocketDesc,	 
     int    	   HowToShutdown)	 
 {
@@ -569,7 +569,7 @@ MSG_ID_T  UTL_Shutdown(
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_GetSockOpt(
+ENT_PUBLIC MSG_ID_T  UTL_GetSockOpt(
     UTL_D_SOCKET SocketDesc,	  
     int          ProtocolLevel,	  
     int          OptionName,	      
@@ -620,7 +620,7 @@ MSG_ID_T  UTL_GetSockOpt(
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T UTL_SocketInit()
+ENT_PUBLIC MSG_ID_T UTL_SocketInit()
 {   
     if(sUtlInitFlag)
     {
@@ -646,7 +646,7 @@ MSG_ID_T UTL_SocketInit()
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_Socket(
+ENT_PUBLIC MSG_ID_T  UTL_Socket(
     int           AddrFamily,	  
     int           SocketType,	  
     int		      Protocol,	  
@@ -736,7 +736,7 @@ MSG_ID_T	UTL_Bind(
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_Connect(
+ENT_PUBLIC MSG_ID_T  UTL_Connect(
  UTL_D_SOCKET	        SocketDesc,	 
  const struct sockaddr* addr,
  int                    addr_size)
@@ -788,7 +788,7 @@ MSG_ID_T  UTL_Connect(
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_Listen(
+ENT_PUBLIC MSG_ID_T  UTL_Listen(
  UTL_D_SOCKET	SocketDesc, 
  int 		    MaxBacklog) 
 {
@@ -829,7 +829,7 @@ MSG_ID_T  UTL_Listen(
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_Accept(
+ENT_PUBLIC MSG_ID_T  UTL_Accept(
  UTL_D_SOCKET	        SocketListen,	 
  const struct sockaddr* addr,
  int                    addr_size) 
@@ -877,7 +877,7 @@ MSG_ID_T  UTL_Accept(
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_CloseSocket(
+ENT_PUBLIC MSG_ID_T  UTL_CloseSocket(
     UTL_D_SOCKET  SocketDesc) 
 {
     MSG_ID_T  sts = 0;	       
@@ -916,7 +916,7 @@ MSG_ID_T  UTL_CloseSocket(
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_Recv(
+ENT_PUBLIC MSG_ID_T  UTL_Recv(
     UTL_D_SOCKET  SocketDesc,  
     char		 *pBuffer,	       
     int		      BufferLength,	   
@@ -968,7 +968,7 @@ MSG_ID_T  UTL_Recv(
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_Send(
+ENT_PUBLIC MSG_ID_T  UTL_Send(
     UTL_D_SOCKET   SocketDesc,	 
     char          *pBuffer,	 
     int            BufferLength,
@@ -1019,7 +1019,7 @@ MSG_ID_T  UTL_Send(
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_SetSockOpt(
+ENT_PUBLIC MSG_ID_T  UTL_SetSockOpt(
     UTL_D_SOCKET	SocketDesc,	 
     int 		    ProtocolLevel,	 
     int 		    OptionName,	    
@@ -1067,7 +1067,7 @@ MSG_ID_T  UTL_SetSockOpt(
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_Shutdown(
+ENT_PUBLIC MSG_ID_T  UTL_Shutdown(
     UTL_D_SOCKET  SocketDesc,	 
     int    	   HowToShutdown)	 
 {
@@ -1109,7 +1109,7 @@ MSG_ID_T  UTL_Shutdown(
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_GetSockOpt(
+ENT_PUBLIC MSG_ID_T  UTL_GetSockOpt(
     UTL_D_SOCKET SocketDesc,	  
     int          ProtocolLevel,	  
     int          OptionName,	      

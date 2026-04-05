@@ -126,7 +126,7 @@ static void iUTL_TimerSleepMs(int ms)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_TimerClose()
+ENT_PUBLIC MSG_ID_T  UTL_TimerClose()
 {
     MSG_ID_T     sts = 0;
     DLL_D_HDR*   tmpDll = NULL;
@@ -196,7 +196,7 @@ static void CALLBACK iUTL_TimerWinCb(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser,
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_TimerInit()
+ENT_PUBLIC MSG_ID_T  UTL_TimerInit()
 {
     MSG_ID_T  sts = 0;
     if(!sUtilTimerInit)
@@ -236,7 +236,7 @@ END_OF_ROUTINE:
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int ms,UTL_TIMER_EV_F evCb,void* data)
+ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int ms,UTL_TIMER_EV_F evCb,void* data)
 {
     PTIMER_CTX_T  timerCtx = NULL;
     UINT          fuEvent = TIME_PERIODIC;
@@ -270,7 +270,7 @@ MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int ms,UTL_TIMER
         fuEvent = TIME_ONESHOT;
 
     timerCtx->timerId = timeSetEvent(ms,0,iUTL_TimerWinCb,(DWORD_PTR)timerCtx,fuEvent|TIME_KILL_SYNCHRONOUS);
-    if(timerCtx->timerId == NULL)
+    if(timerCtx->timerId == 0)
     {
         IENT_LOG_ERROR("timeSetEvent failed,error [%d]\n",errno);
         free(timerCtx);
@@ -304,7 +304,7 @@ MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int ms,UTL_TIMER
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
+ENT_PUBLIC MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
 {
     MSG_ID_T      sts = 0;
     PTIMER_CTX_T  timerCtx = NULL;
@@ -705,7 +705,7 @@ static MSG_ID_T iUTL_TimerDeleteRt(PTIMER_CTX_T timerCtx)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_TimerInit()
+ENT_PUBLIC MSG_ID_T  UTL_TimerInit()
 {
     MSG_ID_T  sts = 0;
     struct sigaction sa;
@@ -758,7 +758,7 @@ END_OF_ROUTINE:
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int ms,UTL_TIMER_EV_F evCb,void* data)
+ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int ms,UTL_TIMER_EV_F evCb,void* data)
 {
     MSG_ID_T      sts = 0;
     PTIMER_CTX_T  timerCtx = NULL;
@@ -862,7 +862,7 @@ MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int ms,UTL_TIMER
     return 0;
 }
 
-MSG_ID_T UTL_TimerCreateUs(UTL_TIMER_T* pTimer,unsigned int type, int period_us,UTL_TIMER_EV_F evCb,void* data)
+ENT_PUBLIC MSG_ID_T UTL_TimerCreateUs(UTL_TIMER_T* pTimer,unsigned int type, int period_us,UTL_TIMER_EV_F evCb,void* data)
 {
     return iUTL_TimerCreateRt(pTimer, type, period_us, evCb, data);
 }
@@ -882,7 +882,7 @@ MSG_ID_T UTL_TimerCreateUs(UTL_TIMER_T* pTimer,unsigned int type, int period_us,
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
+ENT_PUBLIC MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
 {
     MSG_ID_T      sts = 0;
     DLL_D_HDR*    tmpDll;
@@ -954,7 +954,7 @@ MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
 #endif
 
 #if !ENT_TIMER_IMPL_LINUX
-MSG_ID_T UTL_TimerCreateUs(UTL_TIMER_T* pTimer,unsigned int type, int period_us,UTL_TIMER_EV_F evCb,void* data)
+ENT_PUBLIC MSG_ID_T UTL_TimerCreateUs(UTL_TIMER_T* pTimer,unsigned int type, int period_us,UTL_TIMER_EV_F evCb,void* data)
 {
     if(pTimer)
     {
@@ -970,7 +970,7 @@ MSG_ID_T UTL_TimerCreateUs(UTL_TIMER_T* pTimer,unsigned int type, int period_us,
 #endif
 
 #if ENT_TIMER_IMPL_POSIX_FALLBACK
-MSG_ID_T  UTL_TimerInit()
+ENT_PUBLIC MSG_ID_T  UTL_TimerInit()
 {
     MSG_ID_T  sts = 0;
     if(sUtilTimerInit)
@@ -996,7 +996,7 @@ MSG_ID_T  UTL_TimerInit()
     return 0;
 }
 
-MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int ms,UTL_TIMER_EV_F evCb,void* data)
+ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int ms,UTL_TIMER_EV_F evCb,void* data)
 {
     MSG_ID_T      sts = 0;
     PTIMER_CTX_T  timerCtx = NULL;
@@ -1044,7 +1044,7 @@ MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int ms,UTL_TIMER
     return sts;
 }
 
-MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
+ENT_PUBLIC MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
 {
     MSG_ID_T      sts = 0;
     DLL_D_HDR*    tmpDll;
@@ -1101,7 +1101,7 @@ MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_Sleep(int ms)
+ENT_PUBLIC MSG_ID_T  UTL_Sleep(int ms)
 {
 #ifdef WIN32
     Sleep(ms);

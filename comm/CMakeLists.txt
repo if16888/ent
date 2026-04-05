@@ -32,7 +32,7 @@ set(ENT_MYSQL_RUNTIME "" CACHE INTERNAL "MySQL runtime library")
 
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
-add_definitions(-D_UNICODE)
+add_definitions(-DUNICODE -D_UNICODE)
 if(ENT_ENABLE_SQLITE)
 find_path(ENT_SQLITE_INCLUDE_DIR sqlite3.h)
 find_library(ENT_SQLITE_LIBRARY NAMES sqlite3 sqlite3.lib)

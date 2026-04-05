@@ -106,7 +106,7 @@ static inline void iENT_CTXFree(ENT_CTX* ctx)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  ENT_Init(const char* name,const char* workPath,ENT_LOG_LEV_E logLevel)
+ENT_PUBLIC MSG_ID_T  ENT_Init(const char* name,const char* workPath,ENT_LOG_LEV_E logLevel)
 {
     MSG_ID_T  sts=0;
     if(gEntCtx.isInit)
@@ -129,12 +129,12 @@ MSG_ID_T  ENT_Init(const char* name,const char* workPath,ENT_LOG_LEV_E logLevel)
     gEntCtx.workPath = strdup(workPath);
     gEntCtx.entName  = strdup(name);
 
-    int    len     = strlen(workPath);
-    int    size    = len+4+1+1;//
+    size_t len     = strlen(workPath);
+    size_t size    = len+4+1+1;//
     char*  tmpStr  = (char*)malloc(size);
     if(tmpStr == NULL)
     {
-        fprintf(stderr,"malloc size [%d] failed.\n",size);
+        fprintf(stderr,"malloc size [%zu] failed.\n",size);
         iENT_CTXFree(&gEntCtx);
         iENT_CTXResetRuntime(&gEntCtx);
         return -2;
@@ -158,7 +158,7 @@ MSG_ID_T  ENT_Init(const char* name,const char* workPath,ENT_LOG_LEV_E logLevel)
     tmpStr = (char*)malloc(size);
     if(tmpStr == NULL)
     {
-        fprintf(stderr,"malloc size [%d] failed.\n",size);
+        fprintf(stderr,"malloc size [%zu] failed.\n",size);
         iENT_CTXFree(&gEntCtx);
         iENT_CTXResetRuntime(&gEntCtx);
         return -3;
@@ -254,7 +254,7 @@ MSG_ID_T  ENT_Init(const char* name,const char* workPath,ENT_LOG_LEV_E logLevel)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  ENT_Close()
+ENT_PUBLIC MSG_ID_T  ENT_Close()
 {
     MSG_ID_T  sts = 0;
     if(!gEntCtx.isInit)
@@ -295,7 +295,7 @@ MSG_ID_T  ENT_Close()
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  ENT_Run()
+ENT_PUBLIC MSG_ID_T  ENT_Run()
 {
     if(!gEntCtx.isInit)
     {
@@ -327,7 +327,7 @@ MSG_ID_T  ENT_Run()
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  ENT_Helpers()
+ENT_PUBLIC MSG_ID_T  ENT_Helpers()
 {
     return 0;
 }

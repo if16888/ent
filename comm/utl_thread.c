@@ -81,9 +81,8 @@ typedef struct
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_LockInit(UTL_LOCK* lock,const char* name)
+ENT_PUBLIC MSG_ID_T  UTL_LockInit(UTL_LOCK* lock,const char* name)
 {
-    int s;
     if(lock==NULL)
     {
         IENT_LOG_ERROR("lock handle is null\n");
@@ -106,6 +105,7 @@ MSG_ID_T  UTL_LockInit(UTL_LOCK* lock,const char* name)
         tmp->lockName = _strdup(name);
     InitializeCriticalSection(&tmp->lock.cs);
 #else
+    int s;
     if(name == NULL)
         tmp->lockName = NULL;
     else
@@ -140,7 +140,6 @@ MSG_ID_T  UTL_LockInit(UTL_LOCK* lock,const char* name)
  */
 static MSG_ID_T  iUTL_LockInitRW(UTL_LOCK* lock,const char* name)
 {
-    int s;
     UTL_TH_LOCK* tmp = (UTL_TH_LOCK*)malloc(sizeof(UTL_TH_LOCK));
     if(tmp==NULL)
     {
@@ -155,6 +154,7 @@ static MSG_ID_T  iUTL_LockInitRW(UTL_LOCK* lock,const char* name)
         tmp->lockName = _strdup(name);
     InitializeSRWLock(&tmp->lock.rw);
 #else
+    int s;
     if(name == NULL)
         tmp->lockName = NULL;
     else
@@ -190,7 +190,6 @@ static MSG_ID_T  iUTL_LockInitRW(UTL_LOCK* lock,const char* name)
  */
 static MSG_ID_T  iUTL_LockInitSpin(UTL_LOCK* lock,const char* name)
 {
-    int s;
     UTL_TH_LOCK* tmp = (UTL_TH_LOCK*)malloc(sizeof(UTL_TH_LOCK));
     if(tmp==NULL)
     {
@@ -212,6 +211,7 @@ static MSG_ID_T  iUTL_LockInitSpin(UTL_LOCK* lock,const char* name)
         return -3;
     }
 #else
+    int s;
     if(name == NULL)
         tmp->lockName = NULL;
     else
@@ -249,7 +249,7 @@ static MSG_ID_T  iUTL_LockInitSpin(UTL_LOCK* lock,const char* name)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_LockInitEx(UTL_LOCK* lock,const char* name,UTL_LOCK_TYPE_T type)
+ENT_PUBLIC MSG_ID_T  UTL_LockInitEx(UTL_LOCK* lock,const char* name,UTL_LOCK_TYPE_T type)
 {
     MSG_ID_T sts = 0;
     if(lock==NULL)
@@ -400,7 +400,7 @@ static MSG_ID_T  iUTL_LockEnterSpin(UTL_LOCK lock)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_LockEnter(UTL_LOCK lock)
+ENT_PUBLIC MSG_ID_T  UTL_LockEnter(UTL_LOCK lock)
 {
     MSG_ID_T  sts = 0;
     if(lock==NULL)
@@ -449,7 +449,7 @@ MSG_ID_T  UTL_LockEnter(UTL_LOCK lock)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_LockEnterEx(UTL_LOCK lock,UTL_LOCK_RW_TYPE_T rwType)
+ENT_PUBLIC MSG_ID_T  UTL_LockEnterEx(UTL_LOCK lock,UTL_LOCK_RW_TYPE_T rwType)
 {
     MSG_ID_T  sts = 0;
     if(lock==NULL)
@@ -601,7 +601,7 @@ static MSG_ID_T  iUTL_LockLeaveSpin(UTL_LOCK lock)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_LockLeave(UTL_LOCK lock)
+ENT_PUBLIC MSG_ID_T  UTL_LockLeave(UTL_LOCK lock)
 {
     MSG_ID_T  sts = 0;
     if(lock==NULL)
@@ -649,7 +649,7 @@ MSG_ID_T  UTL_LockLeave(UTL_LOCK lock)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_LockLeaveEx(UTL_LOCK lock,UTL_LOCK_RW_TYPE_T rwType)
+ENT_PUBLIC MSG_ID_T  UTL_LockLeaveEx(UTL_LOCK lock,UTL_LOCK_RW_TYPE_T rwType)
 {
     MSG_ID_T  sts = 0;
     if(lock==NULL)
@@ -792,7 +792,7 @@ static MSG_ID_T  iUTL_LockCloseSpin(UTL_LOCK lock)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_LockClose(UTL_LOCK lock)
+ENT_PUBLIC MSG_ID_T  UTL_LockClose(UTL_LOCK lock)
 {
     MSG_ID_T  sts = 0;
     if(lock==NULL)
@@ -843,7 +843,7 @@ MSG_ID_T  UTL_LockClose(UTL_LOCK lock)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_CVInit(UTL_CV* cv,const char* name)
+ENT_PUBLIC MSG_ID_T  UTL_CVInit(UTL_CV* cv,const char* name)
 {
     if(cv==NULL)
     {
@@ -919,7 +919,7 @@ MSG_ID_T  UTL_CVInit(UTL_CV* cv,const char* name)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_CVClose(UTL_CV cv)
+ENT_PUBLIC MSG_ID_T  UTL_CVClose(UTL_CV cv)
 {
     if(cv==NULL)
     {
@@ -1004,7 +1004,7 @@ static MSG_ID_T iUTL_CVWaitRW(UTL_TH_CV* cvCtx,UTL_TH_LOCK* lockCtx,int ms,UTL_L
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_CVWait(UTL_CV cv,UTL_LOCK lock,int ms,UTL_LOCK_RW_TYPE_T rwType)
+ENT_PUBLIC MSG_ID_T  UTL_CVWait(UTL_CV cv,UTL_LOCK lock,int ms,UTL_LOCK_RW_TYPE_T rwType)
 {
     MSG_ID_T  sts = 0;
     if(cv==NULL || lock==NULL)
@@ -1050,7 +1050,7 @@ MSG_ID_T  UTL_CVWait(UTL_CV cv,UTL_LOCK lock,int ms,UTL_LOCK_RW_TYPE_T rwType)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_CVWake(UTL_CV cv)
+ENT_PUBLIC MSG_ID_T  UTL_CVWake(UTL_CV cv)
 {
     MSG_ID_T  sts = 0;
     if(cv==NULL)
@@ -1085,7 +1085,7 @@ MSG_ID_T  UTL_CVWake(UTL_CV cv)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_CVWakeAll(UTL_CV cv)
+ENT_PUBLIC MSG_ID_T  UTL_CVWakeAll(UTL_CV cv)
 {
     MSG_ID_T  sts = 0;
     if(cv==NULL)

@@ -195,7 +195,7 @@ static void*  iUTL_TPoolTaskProLinux(void* data)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_TPoolInit(UTL_TPOOL*  pool,int num)
+ENT_PUBLIC MSG_ID_T  UTL_TPoolInit(UTL_TPOOL*  pool,int num)
 {
     MSG_ID_T     sts=0;
     UTL_TPOOL_CTX*  poolCtx=NULL;
@@ -291,7 +291,7 @@ MSG_ID_T  UTL_TPoolInit(UTL_TPOOL*  pool,int num)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_TPoolClose(UTL_TPOOL  pool)
+ENT_PUBLIC MSG_ID_T  UTL_TPoolClose(UTL_TPOOL  pool)
 {
     MSG_ID_T          sts = 0;
     UTL_TPOOL_CTX*  poolCtx= NULL;
@@ -373,7 +373,7 @@ MSG_ID_T  UTL_TPoolClose(UTL_TPOOL  pool)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_TPoolAddTask(UTL_TPOOL pool,UTL_TP_TASK_F taskCb,UTL_TP_TASK_END_F taskEndCb,void* taskData,MSG_ID_T* retVal)
+ENT_PUBLIC MSG_ID_T  UTL_TPoolAddTask(UTL_TPOOL pool,UTL_TP_TASK_F taskCb,UTL_TP_TASK_END_F taskEndCb,void* taskData,MSG_ID_T* retVal)
 {
     MSG_ID_T          sts = 0;
     UTL_TPOOL_CTX*  poolCtx= NULL;

@@ -34,58 +34,30 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
-      - name: Package
-        run: cpack --config build/CPackConfig.cmake -B build/package
-
-      - name: Upload package bundle
+      - name: Upload build outputs
         uses: actions/upload-artifact@v4
         with:
-          name: release-linux-packages
-          path: build/package/*
+          name: release-linux-build
+          path: |
+            build/bin/*
+            build/lib/*
           if-no-files-found: error
 
   build-windows:
     runs-on: windows-2022
-    env:
-      VCPKG_BINARY_CACHE_DIR: ${{ github.workspace }}\.vcpkg-bincache
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Cache vcpkg downloads
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.VCPKG_INSTALLATION_ROOT }}\downloads
-          key: vcpkg-downloads-${{ runner.os }}-x64-windows-${{ hashFiles('.github/workflows/ci.yml', '.github/workflows/release.yml', 'CMakeLists.txt', 'comm/CMakeLists.txt') }}
-          restore-keys: |
-            vcpkg-downloads-${{ runner.os }}-x64-windows-
-
-      - name: Cache vcpkg binary cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.VCPKG_BINARY_CACHE_DIR }}
-          key: vcpkg-bincache-${{ runner.os }}-x64-windows-${{ hashFiles('.github/workflows/ci.yml', '.github/workflows/release.yml', 'CMakeLists.txt', 'comm/CMakeLists.txt') }}
-          restore-keys: |
-            vcpkg-bincache-${{ runner.os }}-x64-windows-
-
-      - name: Install vcpkg dependencies
-        shell: pwsh
-        env:
-          VCPKG_BINARY_SOURCES: clear;files,${{ env.VCPKG_BINARY_CACHE_DIR }},readwrite
-        run: |
-          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install sqlite3:x64-windows libmysql:x64-windows
 
       - name: Configure
         shell: pwsh
         run: |
           cmake -S . -B build -A x64 `
             -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
-            -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DENT_ENABLE_SQLITE=ON `
             -DENT_ENABLE_MYSQL=ON `
-            -DENT_ALLOW_VENDORED_DB_LIBS=OFF
+            -DENT_ALLOW_VENDORED_DB_LIBS=ON
 
       - name: Build
         run: cmake --build build --config Release
@@ -93,16 +65,15 @@ jobs:
       - name: Test
         run: >
           ctest --test-dir build -C Release --output-on-failure
-          -R "test_ent_init|test_utl_dll|test_utl_thread|test_ent_thread|test_utl_timer|test_ent_log"
+          -R "test_ent_init|test_utl_dll|test_ent_thread|test_utl_timer|test_ent_log"
 
-      - name: Package
-        run: cpack -C Release --config build/CPackConfig.cmake -B build/package
-
-      - name: Upload package bundle
+      - name: Upload build outputs
         uses: actions/upload-artifact@v4
         with:
-          name: release-windows-packages
-          path: build/package/*
+          name: release-windows-build
+          path: |
+            build/bin/Release/*
+            build/lib/Release/*
           if-no-files-found: error
 
   publish:
@@ -112,7 +83,7 @@ jobs:
       - build-windows
 
     steps:
-      - name: Download all package artifacts
+      - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist

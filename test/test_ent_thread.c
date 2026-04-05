@@ -2,6 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef WIN32
+#include <windows.h>
+#endif
 
 #include "ient_comm.h"
 #include "ent_thread.h"
@@ -105,6 +108,7 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle, const char* format, ...)
     return 0;
 }
 
+#ifndef WIN32
 int pthread_join(pthread_t thread, void** retval)
 {
     (void)thread;
@@ -121,12 +125,30 @@ int pthread_cancel(pthread_t thread)
     s_cancel_call_count++;
     return 0;
 }
+#endif
 
+#ifdef WIN32
+static DWORD WINAPI quick_thread(void* data)
+#else
 static void* quick_thread(void* data)
+#endif
 {
     return data;
 }
 
+#ifdef WIN32
+static DWORD WINAPI sleepy_thread(void* data)
+{
+    Sleep(50);
+    return (DWORD)(ULONG_PTR)data;
+}
+
+static DWORD WINAPI short_lived_thread(void* data)
+{
+    Sleep(5);
+    return (DWORD)(ULONG_PTR)data;
+}
+#else
 static void* sleepy_thread(void* data)
 {
     struct timespec ts;
@@ -146,6 +168,7 @@ static void* short_lived_thread(void* data)
     nanosleep(&ts, NULL);
     return data;
 }
+#endif
 
 static int test_thread_init_rejects_null_pointer(void)
 {
@@ -318,6 +341,9 @@ static int test_thread_close_releases_thread_context(void)
 
 static int test_thread_close_does_not_call_pthread_cancel(void)
 {
+#ifdef WIN32
+    return 0;
+#else
     ENT_THREAD handle = NULL;
     ENT_THREAD_ID tid = NULL;
     int value = 15;
@@ -343,6 +369,7 @@ static int test_thread_close_does_not_call_pthread_cancel(void)
 
     return expect_true(s_cancel_call_count == 0,
                        "ENT_ThreadClose should not call pthread_cancel during normal close");
+#endif
 }
 
 int main(void)

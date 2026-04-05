@@ -250,7 +250,7 @@ MSG_ID_T  iENT_DbReInit(DB_HANDLE dbHandle,
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  ENT_DbInit()
+ENT_PUBLIC MSG_ID_T  ENT_DbInit()
 {
     if(sDbMutexInit)
     {
@@ -281,7 +281,7 @@ MSG_ID_T  ENT_DbInit()
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  ENT_DbClose()
+ENT_PUBLIC MSG_ID_T  ENT_DbClose()
 {
 #ifdef WIN32
     DeleteCriticalSection(&sDbMutex);
@@ -308,7 +308,7 @@ MSG_ID_T  ENT_DbClose()
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
+ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
                      DB_TYPE dbType,
                      const char* host,
                      const char* database,
@@ -410,7 +410,7 @@ END_OF_ROUTINE:
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T ENT_DbOpen(DB_HANDLE dbHandle)
+ENT_PUBLIC MSG_ID_T ENT_DbOpen(DB_HANDLE dbHandle)
 {
     MSG_ID_T sts=0;
     DB_CFG*  dbCfg=(DB_CFG*)dbHandle;
@@ -480,7 +480,7 @@ MSG_ID_T ENT_DbOpen(DB_HANDLE dbHandle)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T ENT_DbCloseHandle(DB_HANDLE dbHandle)
+ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE dbHandle)
 {
     MSG_ID_T sts=0;   
     DB_CFG*  dbCfg=(DB_CFG*)dbHandle;
@@ -555,7 +555,7 @@ MSG_ID_T ENT_DbCloseHandle(DB_HANDLE dbHandle)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T ENT_DbRead(DB_HANDLE dbHandle,const char* sql,SqlResultCB sqlCb,void* userData)
+ENT_PUBLIC MSG_ID_T ENT_DbRead(DB_HANDLE dbHandle,const char* sql,SqlResultCB sqlCb,void* userData)
 {
     MSG_ID_T sts=0;
     DB_CFG*  dbCfg=(DB_CFG*)dbHandle;
@@ -630,7 +630,7 @@ MSG_ID_T ENT_DbRead(DB_HANDLE dbHandle,const char* sql,SqlResultCB sqlCb,void* u
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T ENT_DbWrite(DB_HANDLE dbHandle,const char* sql,SqlResultCB sqlCb,void* userData)
+ENT_PUBLIC MSG_ID_T ENT_DbWrite(DB_HANDLE dbHandle,const char* sql,SqlResultCB sqlCb,void* userData)
 {
     MSG_ID_T sts=0;
     DB_CFG*  dbCfg=(DB_CFG*)dbHandle;

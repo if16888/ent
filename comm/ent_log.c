@@ -240,7 +240,7 @@ static MSG_ID_T  iENT_LogRollCheck(ENT_LOG logHandle,time_t nowTime)
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "ENT_LogInit"
-MSG_ID_T  ENT_LogInit()
+ENT_PUBLIC MSG_ID_T  ENT_LogInit()
 {
     if(sLogMutexInit)
     {
@@ -273,7 +273,7 @@ MSG_ID_T  ENT_LogInit()
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "ENT_LogClose"
-MSG_ID_T  ENT_LogClose()
+ENT_PUBLIC MSG_ID_T  ENT_LogClose()
 {
 #ifdef WIN32
     DeleteCriticalSection(&sLogMutex);
@@ -303,10 +303,10 @@ MSG_ID_T  ENT_LogClose()
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "ENT_LogInitHandle"
-MSG_ID_T  ENT_LogInitHandle(ENT_LOG* pLogHandle,const char* moduleName,const char* logPath)
+ENT_PUBLIC MSG_ID_T  ENT_LogInitHandle(ENT_LOG* pLogHandle,const char* moduleName,const char* logPath)
 {
     MSG_ID_T sts = 0;
-    int      len;
+    size_t   len;
     ENT_LOG_CTX* log;
     
     if(sLogMutexInit==false)
@@ -431,10 +431,10 @@ END_OF_ROUTINE:
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "ENT_LogSetOption"
-MSG_ID_T  ENT_LogSetOption(ENT_LOG logHandle,ENT_LOG_OPTIONS_E option,const void* arg)
+ENT_PUBLIC MSG_ID_T  ENT_LogSetOption(ENT_LOG logHandle,ENT_LOG_OPTIONS_E option,const void* arg)
 {
     ENT_LOG_CTX* log = (ENT_LOG_CTX*)logHandle;
-    int          len;
+    size_t       len;
     MSG_ID_T     sts=0;
     
     if(sLogMutexInit==false)
@@ -548,7 +548,7 @@ END_OF_ROUTINE:
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "ENT_LogCloseHandle"
-MSG_ID_T ENT_LogCloseHandle(ENT_LOG logHandle)
+ENT_PUBLIC MSG_ID_T ENT_LogCloseHandle(ENT_LOG logHandle)
 {
     MSG_ID_T  sts = 0;
     
@@ -862,7 +862,7 @@ static MSG_ID_T iENT_LogVRaw(ENT_LOG_CTX* log,const char* format,va_list va_args
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "ENT_LogRaw"
-MSG_ID_T ENT_LogRaw(ENT_LOG logHandle,const char* format,...)
+ENT_PUBLIC MSG_ID_T ENT_LogRaw(ENT_LOG logHandle,const char* format,...)
 {
     MSG_ID_T  sts=0;
     ENT_LOG_CTX*  logCtx = NULL;
@@ -976,7 +976,7 @@ static MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX* log,ENT_LOG_LEV_E logLevel,const cha
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "ENT_LogFatal"
-MSG_ID_T ENT_LogFatal(ENT_LOG logHandle,const char* format,...)
+ENT_PUBLIC MSG_ID_T ENT_LogFatal(ENT_LOG logHandle,const char* format,...)
 {
     MSG_ID_T  sts=0;
     ENT_LOG_CTX*  logCtx = NULL;
@@ -1017,7 +1017,7 @@ MSG_ID_T ENT_LogFatal(ENT_LOG logHandle,const char* format,...)
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "ENT_LogError"
-MSG_ID_T ENT_LogError(ENT_LOG logHandle,const char* format,...)
+ENT_PUBLIC MSG_ID_T ENT_LogError(ENT_LOG logHandle,const char* format,...)
 {
     MSG_ID_T  sts=0;
     ENT_LOG_CTX*  logCtx = NULL;
@@ -1058,7 +1058,7 @@ MSG_ID_T ENT_LogError(ENT_LOG logHandle,const char* format,...)
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "ENT_LogWarn"
-MSG_ID_T ENT_LogWarn(ENT_LOG logHandle,const char* format,...)
+ENT_PUBLIC MSG_ID_T ENT_LogWarn(ENT_LOG logHandle,const char* format,...)
 {
     MSG_ID_T  sts=0;
     ENT_LOG_CTX*  logCtx = NULL;
@@ -1099,7 +1099,7 @@ MSG_ID_T ENT_LogWarn(ENT_LOG logHandle,const char* format,...)
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "ENT_LogPrint"
-MSG_ID_T ENT_LogPrint(ENT_LOG logHandle,const char* format,...)
+ENT_PUBLIC MSG_ID_T ENT_LogPrint(ENT_LOG logHandle,const char* format,...)
 {
     MSG_ID_T  sts=0;
     ENT_LOG_CTX*  logCtx = NULL;
@@ -1140,7 +1140,7 @@ MSG_ID_T ENT_LogPrint(ENT_LOG logHandle,const char* format,...)
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "ENT_LogDebug"
-MSG_ID_T ENT_LogDebug(ENT_LOG logHandle,const char* format,...)
+ENT_PUBLIC MSG_ID_T ENT_LogDebug(ENT_LOG logHandle,const char* format,...)
 {
     MSG_ID_T  sts=0;
     ENT_LOG_CTX*  logCtx = NULL;
@@ -1182,7 +1182,7 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle,const char* format,...)
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "UTL_MultiToWide"
-static WCHAR* UTL_MultiToWide(_TCHAR** pwStr,const char* localStr)
+static WCHAR* UTL_MultiToWide(WCHAR** pwStr,const char* localStr)
 {       
     if(localStr == NULL)
     {
@@ -1230,7 +1230,7 @@ static MSG_ID_T iENT_LogPathCheck(const char* path)
         
     WCHAR* wPath=NULL;
     UTL_MultiToWide(&wPath,path);
-    int len = wcslen(wPath);
+    size_t len = wcslen(wPath);
     if ((wPath[len - 1] == L'\\') || (wPath[len - 1] == L'/'))
     {
         wPath[len - 1] = L'\0';

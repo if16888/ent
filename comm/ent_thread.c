@@ -92,7 +92,7 @@ static void* iENT_ThreadProc(void* data)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T ENT_ThreadInit(ENT_THREAD* pthHandle)
+ENT_PUBLIC MSG_ID_T ENT_ThreadInit(ENT_THREAD* pthHandle)
 {   
     MSG_ID_T     sts=0;
     ENT_TH_CTX*  thCtx=NULL;
@@ -137,7 +137,7 @@ MSG_ID_T ENT_ThreadInit(ENT_THREAD* pthHandle)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T ENT_ThreadDetachCreate(ENT_THREAD handle,PTHREAD_START_ROUTINE thProc,void* thData)
+ENT_PUBLIC MSG_ID_T ENT_ThreadDetachCreate(ENT_THREAD handle,PTHREAD_START_ROUTINE thProc,void* thData)
 {
     MSG_ID_T     sts=0;
     HANDLE       tmpHandle;
@@ -184,7 +184,7 @@ MSG_ID_T ENT_ThreadDetachCreate(ENT_THREAD handle,PTHREAD_START_ROUTINE thProc,v
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREAD_START_ROUTINE thProc,void* thData)
+ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREAD_START_ROUTINE thProc,void* thData)
 {
     MSG_ID_T     sts=0;
     ENT_TH_CTX*  thCtx=NULL;
@@ -259,7 +259,7 @@ MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREAD_START_ROU
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int ms)
+ENT_PUBLIC MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int ms)
 {
     MSG_ID_T     sts    = 0;
     MSG_ID_T     reSts  = 0;
@@ -352,7 +352,7 @@ MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int ms)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
+ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
 {
     MSG_ID_T     sts=0;
     ENT_TH_CTX*  thCtx = NULL;
@@ -413,7 +413,7 @@ MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T ENT_ThreadDetachCreate(ENT_THREAD handle,PTHREAD_START_ROUTINE thProc,void* thData)
+ENT_PUBLIC MSG_ID_T ENT_ThreadDetachCreate(ENT_THREAD handle,PTHREAD_START_ROUTINE thProc,void* thData)
 {
     MSG_ID_T       sts=0;
     ENT_TH_CTX*    thCtx=(ENT_TH_CTX*)handle;
@@ -479,7 +479,7 @@ MSG_ID_T ENT_ThreadDetachCreate(ENT_THREAD handle,PTHREAD_START_ROUTINE thProc,v
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREAD_START_ROUTINE thProc,void* thData)
+ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREAD_START_ROUTINE thProc,void* thData)
 {
     MSG_ID_T       sts=0;
     ENT_TH_CTX*    thCtx=(ENT_TH_CTX*)handle;
@@ -600,7 +600,7 @@ END_OF_ROUTINE:
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int ms)
+ENT_PUBLIC MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int ms)
 {
     MSG_ID_T     sts = 0;
     THREAD_DB*   thDb  = NULL;
@@ -711,7 +711,7 @@ MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int ms)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
+ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
 {
     MSG_ID_T     sts=0;
     ENT_TH_CTX*  thCtx = NULL;

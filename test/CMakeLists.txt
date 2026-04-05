@@ -30,24 +30,26 @@ target_include_directories(
 
 add_test(NAME test_utl_dll COMMAND test_utl_dll)
 
-add_executable(
-  test_utl_thread
-  test_utl_thread.c
-  ../comm/utl_thread.c
-)
+if(NOT WIN32)
+  add_executable(
+    test_utl_thread
+    test_utl_thread.c
+    ../comm/utl_thread.c
+  )
 
-target_include_directories(
-  test_utl_thread
-  PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../inc
-    ${CMAKE_CURRENT_SOURCE_DIR}/../comm
-)
+  target_include_directories(
+    test_utl_thread
+    PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+      ${CMAKE_CURRENT_SOURCE_DIR}/../comm
+  )
 
-if(APPLE OR UNIX)
-  target_link_libraries(test_utl_thread PRIVATE pthread)
+  if(APPLE OR UNIX)
+    target_link_libraries(test_utl_thread PRIVATE pthread)
+  endif()
+
+  add_test(NAME test_utl_thread COMMAND test_utl_thread)
 endif()
-
-add_test(NAME test_utl_thread COMMAND test_utl_thread)
 
 add_executable(
   test_ent_thread

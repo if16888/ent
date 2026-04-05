@@ -31,7 +31,7 @@
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_DllIsEmpty(BOOL* isEmpty,const DLL_D_HDR *dll_hdr) 
+ENT_PUBLIC MSG_ID_T  UTL_DllIsEmpty(BOOL* isEmpty,const DLL_D_HDR *dll_hdr) 
 {
     if(dll_hdr==NULL || isEmpty==NULL)
     {
@@ -59,7 +59,7 @@ MSG_ID_T  UTL_DllIsEmpty(BOOL* isEmpty,const DLL_D_HDR *dll_hdr)
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_DllInitHead(DLL_D_HDR *dll_hdr) 
+ENT_PUBLIC MSG_ID_T  UTL_DllInitHead(DLL_D_HDR *dll_hdr) 
 {
     MSG_ID_T    sts = 0;
 
@@ -90,7 +90,7 @@ EXIT:
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_DllInsHead(DLL_D_HDR *dll_hdr, DLL_D_HDR *dll_elem) 
+ENT_PUBLIC MSG_ID_T  UTL_DllInsHead(DLL_D_HDR *dll_hdr, DLL_D_HDR *dll_elem) 
 {   
      DLL_D_HDR  *next_dll_elem;
      MSG_ID_T   sts = 0;
@@ -132,7 +132,7 @@ EXIT:
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_DllInsCurr(DLL_D_HDR *dll_hdr,DLL_D_HDR *dll_elem)   
+ENT_PUBLIC MSG_ID_T  UTL_DllInsCurr(DLL_D_HDR *dll_hdr,DLL_D_HDR *dll_elem)   
 {
      MSG_ID_T   sts = 0;
 
@@ -161,7 +161,7 @@ EXIT:
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_DllInsTail(DLL_D_HDR *dll_hdr,DLL_D_HDR *dll_elem )
+ENT_PUBLIC MSG_ID_T  UTL_DllInsTail(DLL_D_HDR *dll_hdr,DLL_D_HDR *dll_elem )
 {
      DLL_D_HDR   *prev_dll_elem;
      MSG_ID_T    sts = 0;
@@ -203,7 +203,7 @@ EXIT:
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_DllRemHead(DLL_D_HDR *dll_hdr,DLL_D_HDR **dll_elem )   
+ENT_PUBLIC MSG_ID_T  UTL_DllRemHead(DLL_D_HDR *dll_hdr,DLL_D_HDR **dll_elem )   
 {
      DLL_D_HDR  *removed_elem;
      DLL_D_HDR  *next_dll_elem;
@@ -244,7 +244,7 @@ EXIT:
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_DllRemCurr(DLL_D_HDR *dll_hdr,DLL_D_HDR **dll_elem)   
+ENT_PUBLIC MSG_ID_T  UTL_DllRemCurr(DLL_D_HDR *dll_hdr,DLL_D_HDR **dll_elem)   
 {
      MSG_ID_T   sts = 0;
 
@@ -280,7 +280,7 @@ EXIT:
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_DllRemTail(DLL_D_HDR   *dll_hdr,DLL_D_HDR   **dll_elem )
+ENT_PUBLIC MSG_ID_T  UTL_DllRemTail(DLL_D_HDR   *dll_hdr,DLL_D_HDR   **dll_elem )
 {
      DLL_D_HDR   *removed_elem;
      DLL_D_HDR   *prev_dll_elem;
@@ -323,7 +323,7 @@ EXIT:
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_DllNextLe(DLL_D_HDR   *dll_elem,DLL_D_HDR   **next_elem )
+ENT_PUBLIC MSG_ID_T  UTL_DllNextLe(DLL_D_HDR   *dll_elem,DLL_D_HDR   **next_elem )
 {
      DLL_D_HDR   *le_ptr;
      MSG_ID_T    sts = 0;
@@ -362,7 +362,7 @@ EXIT:
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T  UTL_DllPrevLe(DLL_D_HDR   *dll_elem,DLL_D_HDR   **prev_elem)
+ENT_PUBLIC MSG_ID_T  UTL_DllPrevLe(DLL_D_HDR   *dll_elem,DLL_D_HDR   **prev_elem)
 {
      DLL_D_HDR  *le_ptr;
      MSG_ID_T   sts = 0;
