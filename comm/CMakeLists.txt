@@ -19,12 +19,6 @@ option(ENT_ENABLE_SQLITE "Enable SQLite backend" ON)
 option(ENT_ENABLE_MYSQL "Enable MySQL backend" ON)
 option(ENT_ALLOW_VENDORED_DB_LIBS "Allow vendored DB libraries as a fallback" ON)
 
-set(ENT_SQLITE_INCLUDE_DIR "")
-set(ENT_SQLITE_LIBRARY "")
-set(ENT_SQLITE_RUNTIME "")
-set(ENT_MYSQL_INCLUDE_DIR "")
-set(ENT_MYSQL_LIBRARY "")
-set(ENT_MYSQL_RUNTIME "")
 set(ENT_USING_VENDORED_SQLITE OFF CACHE INTERNAL "Using vendored SQLite library")
 set(ENT_USING_VENDORED_MYSQL OFF CACHE INTERNAL "Using vendored MySQL library")
 set(ENT_SQLITE_RUNTIME "" CACHE INTERNAL "SQLite runtime library")
@@ -127,6 +121,10 @@ else()
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC")
 set(ENT_APPLE_SDK_INCLUDE "")
 set(ENT_APPLE_SDK_LIB "")
+set(ENT_PKGCONFIG_MYSQL_INCLUDE_DIRS "")
+set(ENT_PKGCONFIG_MYSQL_LIBRARY_DIRS "")
+set(ENT_PKGCONFIG_SQLITE_INCLUDE_DIRS "")
+set(ENT_PKGCONFIG_SQLITE_LIBRARY_DIRS "")
 if(APPLE)
 if(CMAKE_OSX_SYSROOT)
 set(ENT_APPLE_SDK_INCLUDE ${CMAKE_OSX_SYSROOT}/usr/include)
@@ -144,13 +142,32 @@ set(ENT_APPLE_SDK_LIB ${ENT_APPLE_SDK_ROOT}/usr/lib)
 endif()
 endif()
 endif()
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+pkg_check_modules(ENT_PKGCONFIG_MYSQL QUIET mysqlclient)
+if(NOT ENT_PKGCONFIG_MYSQL_FOUND)
+pkg_check_modules(ENT_PKGCONFIG_MYSQL QUIET mariadb)
+endif()
+pkg_check_modules(ENT_PKGCONFIG_SQLITE QUIET sqlite3)
+endif()
+endif()
 if(ENT_ENABLE_MYSQL)
 if(APPLE)
 find_path(ENT_MYSQL_INCLUDE_DIR mysql.h PATH_SUFFIXES mysql mariadb PATHS ${ENT_APPLE_SDK_INCLUDE})
 find_library(ENT_MYSQL_LIBRARY NAMES mysqlclient mariadb libmariadb PATHS ${ENT_APPLE_SDK_LIB})
 else()
-find_path(ENT_MYSQL_INCLUDE_DIR mysql.h PATH_SUFFIXES mysql mariadb)
-find_library(ENT_MYSQL_LIBRARY NAMES mysqlclient mariadb libmariadb)
+find_path(
+  ENT_MYSQL_INCLUDE_DIR
+  mysql.h
+  PATH_SUFFIXES mysql mariadb
+  HINTS ${ENT_PKGCONFIG_MYSQL_INCLUDE_DIRS}
+)
+find_library(
+  ENT_MYSQL_LIBRARY
+  NAMES mysqlclient mariadb libmariadb
+  HINTS ${ENT_PKGCONFIG_MYSQL_LIBRARY_DIRS}
+)
 endif()
 if(ENT_MYSQL_INCLUDE_DIR AND ENT_MYSQL_LIBRARY)
 include_directories(${ENT_MYSQL_INCLUDE_DIR})
@@ -164,8 +181,16 @@ if(APPLE)
 find_path(ENT_SQLITE_INCLUDE_DIR sqlite3.h PATHS ${ENT_APPLE_SDK_INCLUDE})
 find_library(ENT_SQLITE_LIBRARY NAMES sqlite3 PATHS ${ENT_APPLE_SDK_LIB})
 else()
-find_path(ENT_SQLITE_INCLUDE_DIR sqlite3.h)
-find_library(ENT_SQLITE_LIBRARY NAMES sqlite3)
+find_path(
+  ENT_SQLITE_INCLUDE_DIR
+  sqlite3.h
+  HINTS ${ENT_PKGCONFIG_SQLITE_INCLUDE_DIRS}
+)
+find_library(
+  ENT_SQLITE_LIBRARY
+  NAMES sqlite3
+  HINTS ${ENT_PKGCONFIG_SQLITE_LIBRARY_DIRS}
+)
 if(NOT ENT_SQLITE_INCLUDE_DIR AND ENT_ALLOW_VENDORED_DB_LIBS AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/../3rd/sqlite/sqlite3.h)
 set(ENT_SQLITE_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../3rd/sqlite)
 endif()
