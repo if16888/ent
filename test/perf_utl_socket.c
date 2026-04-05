@@ -216,8 +216,16 @@ static int setup_loopback_tcp_pair(UTL_D_SOCKET* server,
     *accepted = (UTL_D_SOCKET)-1;
     memset(addr, 0, sizeof(*addr));
 
-    if(UTL_SocketInit() != 0) return -1;
-    if(UTL_Socket(AF_INET, SOCK_STREAM, 0, server) != 0) return -1;
+    if(UTL_SocketInit() != 0)
+    {
+        fprintf(stderr, "setup_loopback_tcp_pair: UTL_SocketInit failed\n");
+        return -1;
+    }
+    if(UTL_Socket(AF_INET, SOCK_STREAM, 0, server) != 0)
+    {
+        fprintf(stderr, "setup_loopback_tcp_pair: UTL_Socket failed\n");
+        return -1;
+    }
 
     addr->sin_family = AF_INET;
 #ifdef __APPLE__
@@ -226,17 +234,45 @@ static int setup_loopback_tcp_pair(UTL_D_SOCKET* server,
     addr->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     addr->sin_port = 0;
 
-    if(UTL_Bind(*server, (struct sockaddr*)addr, sizeof(*addr)) != 0) return -1;
-    if(UTL_Listen(*server, 1) != 0) return -1;
-    if(get_socket_name(*server, (struct sockaddr*)addr, &addr_len) != 0) return -1;
-    if(UTL_Socket(AF_INET, SOCK_STREAM, 0, client) != 0) return -1;
-    if(UTL_Connect(*client, (struct sockaddr*)addr, sizeof(*addr)) != 0) return -1;
+    if(UTL_Bind(*server, (struct sockaddr*)addr, sizeof(*addr)) != 0)
+    {
+        fprintf(stderr, "setup_loopback_tcp_pair: UTL_Bind failed\n");
+        return -1;
+    }
+    if(UTL_Listen(*server, 1) != 0)
+    {
+        fprintf(stderr, "setup_loopback_tcp_pair: UTL_Listen failed\n");
+        return -1;
+    }
+    if(get_socket_name(*server, (struct sockaddr*)addr, &addr_len) != 0)
+    {
+        perror("setup_loopback_tcp_pair: getsockname");
+        return -1;
+    }
+    if(UTL_Socket(AF_INET, SOCK_STREAM, 0, client) != 0)
+    {
+        fprintf(stderr, "setup_loopback_tcp_pair: client UTL_Socket failed\n");
+        return -1;
+    }
+    if(UTL_Connect(*client, (struct sockaddr*)addr, sizeof(*addr)) != 0)
+    {
+        fprintf(stderr, "setup_loopback_tcp_pair: UTL_Connect failed\n");
+        return -1;
+    }
 
     *accepted = accept_native_socket(*server, NULL, NULL);
 #ifdef WIN32
-    if(*accepted == INVALID_SOCKET) return -1;
+    if(*accepted == INVALID_SOCKET)
+    {
+        fprintf(stderr, "setup_loopback_tcp_pair: accept failed\n");
+        return -1;
+    }
 #else
-    if(*accepted < 0) return -1;
+    if(*accepted < 0)
+    {
+        perror("setup_loopback_tcp_pair: accept");
+        return -1;
+    }
 #endif
 
     return 0;

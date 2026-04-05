@@ -11,6 +11,8 @@ on:
 jobs:
   build-linux:
     runs-on: ubuntu-24.04
+    env:
+      BUILD_DIR: build
 
     steps:
       - name: Checkout
@@ -22,28 +24,21 @@ jobs:
           sudo apt-get install -y ninja-build libsqlite3-dev default-libmysqlclient-dev
 
       - name: Configure
-        run: |
-          cmake -S . -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DENT_ENABLE_SQLITE=ON \
-            -DENT_ENABLE_MYSQL=ON
+        run: ./scripts/run-ci-linux.sh configure
 
       - name: Build
-        run: cmake --build build
+        run: ./scripts/run-ci-linux.sh build
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: ./scripts/run-ci-linux.sh test
 
       - name: Performance Smoke
-        run: |
-          ./build/bin/perf_utl_socket
-          ./build/bin/perf_utl_timer
-          ./build/bin/perf_utl_timer_rt
-          ./build/bin/perf_utl_tpool
-          ./build/bin/perf_ent_log
+        run: ./scripts/run-ci-linux.sh perf
 
   build-windows:
     runs-on: windows-2022
+    env:
+      BUILD_DIR: build
 
     steps:
       - name: Checkout
@@ -51,24 +46,16 @@ jobs:
 
       - name: Configure
         shell: pwsh
-        run: |
-          cmake -S . -B build -A x64 `
-            -DCMAKE_BUILD_TYPE=Release `
-            -DENT_ENABLE_SQLITE=ON `
-            -DENT_ENABLE_MYSQL=ON `
-            -DENT_ALLOW_VENDORED_DB_LIBS=ON
+        run: .\scripts\run-ci-windows.ps1 configure
 
       - name: Build
-        run: cmake --build build --config Release
+        shell: pwsh
+        run: .\scripts\run-ci-windows.ps1 build
 
       - name: Test
-        run: >
-          ctest --test-dir build -C Release --output-on-failure
-          -R "test_ent_init|test_utl_dll|test_utl_thread|test_ent_thread|test_utl_tpool|test_utl_timer|test_utl_socket|test_ent_db|test_ent_log|test_security"
+        shell: pwsh
+        run: .\scripts\run-ci-windows.ps1 test
 
       - name: Performance Smoke
         shell: pwsh
-        run: |
-          & ".\build\bin\Release\perf_utl_timer.exe"
-          & ".\build\bin\Release\perf_utl_tpool.exe"
-          & ".\build\bin\Release\perf_ent_log.exe"
+        run: .\scripts\run-ci-windows.ps1 perf
