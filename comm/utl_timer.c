@@ -58,6 +58,7 @@ typedef struct
     UINT              timerId;
 #elif ENT_TIMER_IMPL_LINUX
     timer_t           timerId;
+    pthread_t         timerThread;
     long long         period_ns;
     long long         next_deadline_ns;
     pthread_t         rtWorker;
@@ -92,6 +93,10 @@ static void* iUTL_TimerRtWorker(void* data);
 static void* iUTL_TimerCallbackWorker(void* data);
 static MSG_ID_T iUTL_TimerCreateRt(UTL_TIMER_T* pTimer,unsigned int type,int period_us,UTL_TIMER_EV_F evCb,void* data);
 static MSG_ID_T iUTL_TimerDeleteRt(PTIMER_CTX_T timerCtx);
+#endif
+
+#if ENT_TIMER_IMPL_LINUX || ENT_TIMER_IMPL_POSIX_FALLBACK
+static void* iUTL_TimerThread(void* data);
 #endif
 
 #ifndef WIN32
@@ -390,23 +395,36 @@ static void timer_handler(int sig, siginfo_t *si, void *uc)
  *
  *-----------------------------------------------------------------------------
  */
-static void thread_handler(union sigval si)
+static void* iUTL_TimerThread(void* data)
 {
-    PTIMER_CTX_T timerId = (PTIMER_CTX_T)si.sival_ptr;
-    if(timerId == NULL || timerId->isEnable==false || timerId->tag!=UTL_TIMER_TAG)
+    PTIMER_CTX_T timerCtx = (PTIMER_CTX_T)data;
+
+    if(timerCtx == NULL || timerCtx->tag != UTL_TIMER_TAG)
     {
-        return;
+        return NULL;
     }
 
-    if(timerId->timer_ev_cb)
+    while(timerCtx->isEnable)
     {
-        timerId->timer_ev_cb(timerId->data);
+        iUTL_TimerSleepMs(timerCtx->ms);
+        if(!timerCtx->isEnable)
+        {
+            break;
+        }
+
+        if(timerCtx->timer_ev_cb)
+        {
+            timerCtx->timer_ev_cb(timerCtx->data);
+        }
+
+        if(timerCtx->timerType & UTL_TIMER_E_ONESHOT)
+        {
+            timerCtx->isEnable = false;
+            break;
+        }
     }
 
-    if(timerId->timerType&UTL_TIMER_E_ONESHOT)
-    {
-        UTL_TimerDelete((UTL_TIMER_T*)&timerId);
-    }
+    return NULL;
 }
 
 static long long iUTL_TimerMonotonicNs(void)
@@ -770,22 +788,39 @@ MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int ms,UTL_TIMER
     timerCtx->timer_ev_cb = evCb;
     timerCtx->data        = data;
     timerCtx->ms          = ms;
+    timerCtx->isEnable    = true;
+
+    if(!(type&UTL_TIMER_E_SIGNAL))
+    {
+        if(pthread_create(&timerCtx->timerThread, NULL, iUTL_TimerThread, timerCtx) != 0)
+        {
+            IENT_LOG_ERROR("pthread_create failed,error [%d]->[%s]\n",errno,strerror(errno));
+            free(timerCtx);
+            return -3;
+        }
+
+        UTL_LockEnter(sTimerCtx.dllLock);
+        sts = UTL_DllInsHead(&sTimerCtx.dllHeader,(DLL_D_HDR*)timerCtx);
+        UTL_LockLeave(sTimerCtx.dllLock);
+        if(sts < 0)
+        {
+            timerCtx->isEnable = false;
+            pthread_join(timerCtx->timerThread, NULL);
+            free(timerCtx);
+            return sts;
+        }
+
+        if(pTimer)
+        {
+            *pTimer = timerCtx;
+        }
+        return 0;
+    }
 
     /* Create the timer */
-    if(type&UTL_TIMER_E_SIGNAL)
-    {
-        sev.sigev_notify = SIGEV_SIGNAL;
-        sev.sigev_signo = SIG_UTL;
-        sev.sigev_value.sival_ptr = timerCtx;
-    }
-    else
-    {
-        sev.sigev_notify = SIGEV_THREAD;
-        sev.sigev_signo = SIG_UTL;
-        sev.sigev_value.sival_ptr = timerCtx;
-        sev.sigev_notify_function = thread_handler;
-        sev.sigev_notify_attributes = NULL;    
-    }
+    sev.sigev_notify = SIGEV_SIGNAL;
+    sev.sigev_signo = SIG_UTL;
+    sev.sigev_value.sival_ptr = timerCtx;
 
     if(timer_create(CLOCKID, &sev, &timerCtx->timerId) == -1)
     {
@@ -799,8 +834,16 @@ MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int ms,UTL_TIMER
     /* Start the timer */
     its.it_value.tv_sec  = ms/1000;
     its.it_value.tv_nsec = (ms%1000)*1000000;
-    its.it_interval.tv_sec = its.it_value.tv_sec;
-    its.it_interval.tv_nsec = its.it_value.tv_nsec;
+    if(type&UTL_TIMER_E_ONESHOT)
+    {
+        its.it_interval.tv_sec = 0;
+        its.it_interval.tv_nsec = 0;
+    }
+    else
+    {
+        its.it_interval.tv_sec = its.it_value.tv_sec;
+        its.it_interval.tv_nsec = its.it_value.tv_nsec;
+    }
 
     if(timer_settime(timerCtx->timerId, 0, &its, NULL) == -1)
     {
@@ -808,8 +851,6 @@ MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int ms,UTL_TIMER
         timer_delete(timerCtx->timerId);
         return -2;
     }
-    timerCtx->isEnable = true;
-
     UTL_LockEnter(sTimerCtx.dllLock);
     sts = UTL_DllInsHead(&sTimerCtx.dllHeader,(DLL_D_HDR*)timerCtx);
     UTL_LockLeave(sTimerCtx.dllLock);
@@ -876,6 +917,24 @@ MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
         return 0;
     }
 
+    if(!(timerCtx->timerType&UTL_TIMER_E_SIGNAL))
+    {
+        timerCtx->isEnable = false;
+        if(!pthread_equal(pthread_self(), timerCtx->timerThread))
+        {
+            pthread_join(timerCtx->timerThread, NULL);
+        }
+
+        UTL_LockEnter(sTimerCtx.dllLock);
+        sts = UTL_DllRemCurr((DLL_D_HDR*)timerCtx,&tmpDll);
+        UTL_LockLeave(sTimerCtx.dllLock);
+        memset(timerCtx,0,sizeof(TIMER_CTX_T));
+
+        free(timerCtx);
+        *pTimer = NULL;
+        return 0;
+    }
+
     if(timer_delete(timerCtx->timerId)==-1)
     {
         IENT_LOG_ERROR("timer_delete failed,error [%d]->[%s]\n",errno,strerror(errno));
@@ -911,38 +970,6 @@ MSG_ID_T UTL_TimerCreateUs(UTL_TIMER_T* pTimer,unsigned int type, int period_us,
 #endif
 
 #if ENT_TIMER_IMPL_POSIX_FALLBACK
-static void* iUTL_TimerThread(void* data)
-{
-    PTIMER_CTX_T timerCtx = (PTIMER_CTX_T)data;
-
-    if(timerCtx == NULL || timerCtx->tag != UTL_TIMER_TAG)
-    {
-        return NULL;
-    }
-
-    while(timerCtx->isEnable)
-    {
-        iUTL_TimerSleepMs(timerCtx->ms);
-        if(!timerCtx->isEnable)
-        {
-            break;
-        }
-
-        if(timerCtx->timer_ev_cb)
-        {
-            timerCtx->timer_ev_cb(timerCtx->data);
-        }
-
-        if(timerCtx->timerType & UTL_TIMER_E_ONESHOT)
-        {
-            timerCtx->isEnable = false;
-            break;
-        }
-    }
-
-    return NULL;
-}
-
 MSG_ID_T  UTL_TimerInit()
 {
     MSG_ID_T  sts = 0;

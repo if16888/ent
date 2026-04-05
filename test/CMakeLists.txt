@@ -1,3 +1,5 @@
+add_compile_definitions(LINKING_LIBENT)
+
 add_executable(
   test_ent_init
   test_ent_init.c
@@ -67,6 +69,10 @@ if(APPLE OR UNIX)
   target_link_libraries(test_ent_thread PRIVATE pthread)
 endif()
 
+if(WIN32)
+  target_link_libraries(test_ent_thread PRIVATE Winmm)
+endif()
+
 if(UNIX AND NOT APPLE)
   target_link_libraries(test_ent_thread PRIVATE rt)
 endif()
@@ -113,6 +119,10 @@ target_include_directories(
 
 if(APPLE OR UNIX)
   target_link_libraries(test_utl_timer PRIVATE pthread)
+endif()
+
+if(WIN32)
+  target_link_libraries(test_utl_timer PRIVATE Winmm)
 endif()
 
 if(UNIX AND NOT APPLE)
