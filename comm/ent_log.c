@@ -33,6 +33,9 @@
 #include <limits.h>
 #include <unistd.h>
 #include <errno.h>
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
 #endif
 
 #include <time.h>
@@ -928,7 +931,7 @@ static MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX* log,ENT_LOG_LEV_E logLevel,const cha
     localtime_r(&nowTmv.tv_sec,&nowTm);
     memset(tmpbuf,0,64);
     strftime( tmpbuf, 64,tmFormat, &nowTm);
-    snprintf(&tmpbuf[TM_STR_LEN],64-TM_STR_LEN-1,".%03d] ",nowTmv.tv_usec/1000);
+    snprintf(&tmpbuf[TM_STR_LEN],64-TM_STR_LEN-1,".%03ld] ",(long)(nowTmv.tv_usec/1000));
     snprintf(&tmpbuf[TM_MILLITM_LEN],64-TM_MILLITM_LEN-1,"[%5s] [tid %5ld] ",sLogLevelStr[logLevel],(unsigned long int)pthread_self());
 #endif
     

@@ -19,6 +19,9 @@
 #pragma warning(disable : 4996)
 #else
 #include <limits.h>
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
 #define _MAX_PATH PATH_MAX
 #endif
 #include <stdio.h>
@@ -328,4 +331,3 @@ MSG_ID_T  ENT_Helpers()
 {
     return 0;
 }
-

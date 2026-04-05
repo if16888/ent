@@ -6,6 +6,10 @@ set(LIB_NAME_SHARE ent)
 set(LIB_NAME_STATIC ent_s)
 set(LIB_NAME_OBJS ent_objs)
 
+if(UNIX AND NOT APPLE)
+add_compile_definitions(_GNU_SOURCE)
+endif()
+
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
