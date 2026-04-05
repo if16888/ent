@@ -586,29 +586,33 @@ static int test_tpool_close_waits_for_running_task_completion(void)
 
 static int test_tpool_close_wakes_idle_workers(void)
 {
-    UTL_TPOOL pool = NULL;
-
     reset_thread_counters();
     s_use_real_threads = 1;
 
-    if(expect_true(UTL_TPoolInit(&pool, 1) == 0,
-                   "UTL_TPoolInit should create a worker for idle-close checks") != 0)
+    for(int i = 0; i < 20; ++i)
     {
-        return 1;
-    }
+        UTL_TPOOL pool = NULL;
 
-    UTL_Sleep(50);
+        if(expect_true(UTL_TPoolInit(&pool, 1) == 0,
+                       "UTL_TPoolInit should create a worker for idle-close checks") != 0)
+        {
+            s_use_real_threads = 0;
+            return 1;
+        }
 
-    if(expect_true(UTL_TPoolClose(pool) == 0,
-                   "UTL_TPoolClose should wake and join an idle waiting worker without deadlock") != 0)
-    {
-        s_use_real_threads = 0;
-        return 1;
+        UTL_Sleep(10);
+
+        if(expect_true(UTL_TPoolClose(pool) == 0,
+                       "UTL_TPoolClose should wake and join an idle waiting worker without deadlock") != 0)
+        {
+            s_use_real_threads = 0;
+            return 1;
+        }
     }
 
     s_use_real_threads = 0;
-    return expect_true(s_thread_wait_calls == 1,
-                       "UTL_TPoolClose should wait for the idle worker exactly once");
+    return expect_true(s_thread_wait_calls == 20,
+                       "UTL_TPoolClose should wait for each idle worker exactly once");
 }
 
 int main(void)

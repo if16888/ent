@@ -101,10 +101,18 @@ static DWORD iUTL_TPoolTaskPro(void* data)
             UTL_DllIsEmpty(&isEmpty,&poolCtx->taskActiveHeader);
             if(isEmpty)
             {
+                if(thCtx->taskType==TASK_E_TYPE_QUIT)
+                {
+                    IENT_LOG_DEBUG("thread end\n");
+                    poolCtx->threadNum--;
+                    UTL_LockLeave(poolCtx->taskLock);
+                    return 0;
+                }
                 IENT_LOG_DEBUG("task is empty\n");
                 poolCtx->waitNum++;
                 sts = UTL_CVWait(poolCtx->taskEmptyCV,poolCtx->taskLock,0,RW_WRITE_E);
                 poolCtx->waitNum--;
+                continue;
             }
             if(thCtx->taskType==TASK_E_TYPE_PAUSE)
             {
