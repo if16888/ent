@@ -36,23 +36,34 @@ function Invoke-PerfBinary {
 
     $Name = Split-Path $Path -Leaf
     Write-Host "Running $Name"
-
-    $Process = Start-Process -FilePath $Path -NoNewWindow -PassThru
-    if ($null -eq $Process) {
-        throw "Failed to start $Name"
-    }
+    $StdOut = [System.IO.Path]::GetTempFileName()
+    $StdErr = [System.IO.Path]::GetTempFileName()
 
     try {
-        Wait-Process -Id $Process.Id -Timeout $TimeoutSeconds -ErrorAction Stop
-    }
-    catch {
-        Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
-        throw "$Name timed out after $TimeoutSeconds seconds"
-    }
+        $Process = Start-Process -FilePath $Path `
+            -RedirectStandardOutput $StdOut `
+            -RedirectStandardError $StdErr `
+            -PassThru
+        if ($null -eq $Process) {
+            throw "Failed to start $Name"
+        }
 
-    $Process.Refresh()
-    if ($Process.ExitCode -ne 0) {
-        throw "$Name exited with code $($Process.ExitCode)"
+        if (-not $Process.WaitForExit($TimeoutSeconds * 1000)) {
+            Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
+            if (Test-Path $StdOut) { Get-Content $StdOut }
+            if ((Test-Path $StdErr) -and ((Get-Item $StdErr).Length -gt 0)) { Get-Content $StdErr | Write-Error }
+            throw "$Name timed out after $TimeoutSeconds seconds"
+        }
+
+        if (Test-Path $StdOut) { Get-Content $StdOut }
+        if ((Test-Path $StdErr) -and ((Get-Item $StdErr).Length -gt 0)) { Get-Content $StdErr | Write-Error }
+
+        if ($Process.ExitCode -ne 0) {
+            throw "$Name exited with code $($Process.ExitCode)"
+        }
+    }
+    finally {
+        Remove-Item $StdOut, $StdErr -Force -ErrorAction SilentlyContinue
     }
 }
 
