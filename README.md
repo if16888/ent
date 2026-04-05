@@ -39,10 +39,14 @@
    `cmake --build build --target example01`
 
 8. GitHub Actions
-   当前仓库已提供最小 CI/CD 流程：
-   `CI` 在 Linux (`ubuntu-24.04`) 和 Windows (`windows-2022`) 上执行编译、测试和打包
-   `Release` 在推送 `v*` tag 时执行双平台打包，并把产物发布到 GitHub Release
-   Linux 使用系统开发包：`libsqlite3-dev` 和 `default-libmysqlclient-dev`
-   Windows 使用 `vcpkg` 安装 `sqlite3:x64-windows` 和 `libmysql:x64-windows`
-   Windows 当前执行受支持的测试子集：`test_ent_init`、`test_utl_dll`、`test_utl_thread`、`test_ent_thread`、`test_utl_timer`、`test_ent_log`
-   Windows 默认优先使用 `vcpkg`/系统发现到的库，只有显式允许时才回退到仓库内 `3rd/` 目录
+   当前仓库已提供 Linux (`ubuntu-24.04`) 和 Windows (`windows-2022`) 的 CI。
+   两个平台都通过共享脚本执行：
+   Linux: `./scripts/run-ci-linux.sh`
+   Windows: `.\scripts\run-ci-windows.ps1`
+   阶段统一为：
+   `configure`、`build`、`test`、`perf`
+   当前功能测试已恢复到双平台 `10/10`，性能冒烟也可完整执行。
+
+9. CI 经验文档
+   这次 GitHub Actions 的平台差异、踩坑记录、脚本化经验和后续项目可复用的 checklist 已整理到：
+   `docs/github-actions-ci-playbook.md`
