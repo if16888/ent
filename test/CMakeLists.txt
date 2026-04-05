@@ -148,7 +148,7 @@ endif()
 
 add_test(NAME test_utl_socket COMMAND test_utl_socket)
 
-if(ENT_ENABLE_SQLITE AND ENT_SQLITE_LIBRARY)
+if(ENT_ENABLE_SQLITE AND (NOT WIN32 OR ENT_SQLITE_LIBRARY))
   add_executable(
     test_ent_db
     test_ent_db.c
@@ -211,7 +211,7 @@ endif()
 
 add_test(NAME test_ent_log COMMAND test_ent_log)
 
-if(ENT_ENABLE_SQLITE AND ENT_SQLITE_LIBRARY)
+if(ENT_ENABLE_SQLITE AND (NOT WIN32 OR ENT_SQLITE_LIBRARY))
   add_executable(
     test_security
     test_security.c
