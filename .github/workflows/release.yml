@@ -46,13 +46,33 @@ jobs:
 
   build-windows:
     runs-on: windows-2022
+    env:
+      VCPKG_BINARY_CACHE_DIR: ${{ github.workspace }}\.vcpkg-bincache
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Cache vcpkg downloads
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_INSTALLATION_ROOT }}\downloads
+          key: vcpkg-downloads-${{ runner.os }}-x64-windows-${{ hashFiles('.github/workflows/ci.yml', '.github/workflows/release.yml', 'CMakeLists.txt', 'comm/CMakeLists.txt') }}
+          restore-keys: |
+            vcpkg-downloads-${{ runner.os }}-x64-windows-
+
+      - name: Cache vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_BINARY_CACHE_DIR }}
+          key: vcpkg-bincache-${{ runner.os }}-x64-windows-${{ hashFiles('.github/workflows/ci.yml', '.github/workflows/release.yml', 'CMakeLists.txt', 'comm/CMakeLists.txt') }}
+          restore-keys: |
+            vcpkg-bincache-${{ runner.os }}-x64-windows-
+
       - name: Install vcpkg dependencies
         shell: pwsh
+        env:
+          VCPKG_BINARY_SOURCES: clear;files,${{ env.VCPKG_BINARY_CACHE_DIR }},readwrite
         run: |
           & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install sqlite3:x64-windows libmysql:x64-windows
 
