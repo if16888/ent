@@ -51,12 +51,16 @@ function Invoke-PerfBinary {
         if (-not $Process.WaitForExit($TimeoutSeconds * 1000)) {
             Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
             if (Test-Path $StdOut) { Get-Content $StdOut }
-            if ((Test-Path $StdErr) -and ((Get-Item $StdErr).Length -gt 0)) { Get-Content $StdErr | Write-Error }
+            if ((Test-Path $StdErr) -and ((Get-Item $StdErr).Length -gt 0)) {
+                Get-Content $StdErr | ForEach-Object { [Console]::Error.WriteLine($_) }
+            }
             throw "$Name timed out after $TimeoutSeconds seconds"
         }
 
         if (Test-Path $StdOut) { Get-Content $StdOut }
-        if ((Test-Path $StdErr) -and ((Get-Item $StdErr).Length -gt 0)) { Get-Content $StdErr | Write-Error }
+        if ((Test-Path $StdErr) -and ((Get-Item $StdErr).Length -gt 0)) {
+            Get-Content $StdErr | ForEach-Object { [Console]::Error.WriteLine($_) }
+        }
 
         if ($Process.ExitCode -ne 0) {
             throw "$Name exited with code $($Process.ExitCode)"
