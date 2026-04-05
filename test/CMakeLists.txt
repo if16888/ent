@@ -142,6 +142,10 @@ target_include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/../comm
 )
 
+if(WIN32)
+  target_link_libraries(test_utl_socket PRIVATE Ws2_32)
+endif()
+
 add_test(NAME test_utl_socket COMMAND test_utl_socket)
 
 if(ENT_ENABLE_SQLITE AND ENT_SQLITE_LIBRARY)
