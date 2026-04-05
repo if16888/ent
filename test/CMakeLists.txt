@@ -257,23 +257,25 @@ if(ENT_ENABLE_SQLITE AND ENT_SQLITE_LIBRARY)
   add_test(NAME test_security COMMAND test_security)
 endif()
 
-if(NOT WIN32)
-  add_executable(
-    perf_utl_socket
-    perf_utl_socket.c
-    ../comm/utl_socket.c
-  )
+add_executable(
+  perf_utl_socket
+  perf_utl_socket.c
+  ../comm/utl_socket.c
+)
 
-  target_include_directories(
-    perf_utl_socket
-    PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}/../inc
-      ${CMAKE_CURRENT_SOURCE_DIR}/../comm
-  )
+target_include_directories(
+  perf_utl_socket
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../comm
+)
 
-  if(APPLE OR UNIX)
-    target_link_libraries(perf_utl_socket PRIVATE pthread)
-  endif()
+if(APPLE OR UNIX)
+  target_link_libraries(perf_utl_socket PRIVATE pthread)
+endif()
+
+if(WIN32)
+  target_link_libraries(perf_utl_socket PRIVATE Ws2_32)
 endif()
 
 add_executable(
