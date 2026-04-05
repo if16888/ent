@@ -133,7 +133,11 @@ static DWORD WINAPI quick_thread(void* data)
 static void* quick_thread(void* data)
 #endif
 {
+#ifdef WIN32
+    return (DWORD)(ULONG_PTR)data;
+#else
     return data;
+#endif
 }
 
 #ifdef WIN32

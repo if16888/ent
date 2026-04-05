@@ -140,6 +140,7 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadInit(ENT_THREAD* pthHandle)
 ENT_PUBLIC MSG_ID_T ENT_ThreadDetachCreate(ENT_THREAD handle,PTHREAD_START_ROUTINE thProc,void* thData)
 {
     MSG_ID_T     sts=0;
+    ENT_TH_CTX*  thCtx=NULL;
     HANDLE       tmpHandle;
     DWORD        thId;
 
@@ -147,6 +148,12 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadDetachCreate(ENT_THREAD handle,PTHREAD_START_ROUTI
     {
         IENT_LOG_ERROR("thread handle is null\n");
         return -1;
+    }
+    thCtx=(ENT_TH_CTX*)handle;
+    if(thCtx->tag != ENT_TH_TAG)
+    {
+        IENT_LOG_ERROR("break handle\n");
+        return -2;
     }
 
     tmpHandle = CreateThread(

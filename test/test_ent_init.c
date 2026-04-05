@@ -31,6 +31,27 @@ static const char* s_second_log_init_handle_module = NULL;
 static const char* s_second_log_init_handle_path = NULL;
 static ENT_LOG s_last_closed_log_handle = NULL;
 static ENT_LOG s_last_log_error_handle = NULL;
+static char s_expected_log_path[512];
+
+static const char* expected_log_path_for(const char* work_path)
+{
+    size_t len = strlen(work_path);
+
+#ifdef WIN32
+    if(work_path[len - 1] == '\\' || work_path[len - 1] == '/')
+#else
+    if(work_path[len - 1] == '/')
+#endif
+    {
+        snprintf(s_expected_log_path, sizeof(s_expected_log_path), "%slog", work_path);
+    }
+    else
+    {
+        snprintf(s_expected_log_path, sizeof(s_expected_log_path), "%s%slog", work_path, ENT_FILE_SEP);
+    }
+
+    return s_expected_log_path;
+}
 
 static void reset_wait_capture(void)
 {
@@ -447,6 +468,8 @@ static int test_ent_init_logs_before_tearing_down_logging_when_lock_init_fails(v
 
 static int test_ent_init_builds_paths_without_trailing_separator(void)
 {
+    const char* expected_log_path = expected_log_path_for("/tmp/demo");
+
     memset(&gEntCtx, 0, sizeof(gEntCtx));
     reset_close_counters();
     reset_log_failures();
@@ -469,7 +492,7 @@ static int test_ent_init_builds_paths_without_trailing_separator(void)
         return 1;
     }
 
-    if(expect_true(strcmp(gEntCtx.logPath, "/tmp/demo/log") == 0,
+    if(expect_true(strcmp(gEntCtx.logPath, expected_log_path) == 0,
                    "ENT_Init should append /log when workPath has no trailing separator") != 0)
     {
         return 1;
@@ -493,7 +516,7 @@ static int test_ent_init_builds_paths_without_trailing_separator(void)
         return 1;
     }
 
-    if(expect_true(strcmp(s_first_log_init_handle_path, "/tmp/demo/log") == 0,
+    if(expect_true(strcmp(s_first_log_init_handle_path, expected_log_path) == 0,
                    "ENT_Init should initialize the default logger with the computed log path") != 0)
     {
         return 1;
@@ -505,7 +528,7 @@ static int test_ent_init_builds_paths_without_trailing_separator(void)
         return 1;
     }
 
-    if(expect_true(strcmp(s_second_log_init_handle_path, "/tmp/demo/log") == 0,
+    if(expect_true(strcmp(s_second_log_init_handle_path, expected_log_path) == 0,
                    "ENT_Init should initialize the entity logger with the computed log path") != 0)
     {
         return 1;
@@ -528,6 +551,8 @@ static int test_ent_init_builds_paths_without_trailing_separator(void)
 
 static int test_ent_init_builds_paths_with_trailing_separator(void)
 {
+    const char* expected_log_path = expected_log_path_for("/tmp/demo/");
+
     memset(&gEntCtx, 0, sizeof(gEntCtx));
     reset_close_counters();
     reset_log_failures();
@@ -538,19 +563,19 @@ static int test_ent_init_builds_paths_with_trailing_separator(void)
         return 1;
     }
 
-    if(expect_true(strcmp(gEntCtx.logPath, "/tmp/demo/log") == 0,
+    if(expect_true(strcmp(gEntCtx.logPath, expected_log_path) == 0,
                    "ENT_Init should not duplicate the separator before log") != 0)
     {
         return 1;
     }
 
-    if(expect_true(strcmp(s_first_log_init_handle_path, "/tmp/demo/log") == 0,
+    if(expect_true(strcmp(s_first_log_init_handle_path, expected_log_path) == 0,
                    "The default logger should receive the normalized log path") != 0)
     {
         return 1;
     }
 
-    if(expect_true(strcmp(s_second_log_init_handle_path, "/tmp/demo/log") == 0,
+    if(expect_true(strcmp(s_second_log_init_handle_path, expected_log_path) == 0,
                    "The entity logger should receive the normalized log path") != 0)
     {
         return 1;

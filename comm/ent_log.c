@@ -1236,7 +1236,7 @@ static MSG_ID_T iENT_LogPathCheck(const char* path)
         wPath[len - 1] = L'\0';
     }
     
-    hDir = CreateFile(wPath,
+    hDir = CreateFileW(wPath,
         GENERIC_READ,
         FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
         NULL,
@@ -1247,7 +1247,7 @@ static MSG_ID_T iENT_LogPathCheck(const char* path)
 
     if (INVALID_HANDLE_VALUE == hDir)
     {
-        if(!CreateDirectory(wPath, NULL))
+        if(!CreateDirectoryW(wPath, NULL))
         {
             fprintf(stderr,"Func [%s] Line [%d],Can not create log directory, invalid path name[%s]\n",FUNC_NAME,__LINE__,path);
             if(wPath) free(wPath);
