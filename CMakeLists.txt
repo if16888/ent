@@ -48,12 +48,20 @@ enable_testing()
 add_subdirectory(test)
 
 if(WIN32)
-install(FILES 
-          3rd/mysql/lib/libmysql.dll 
-          3rd/sqlite/sqlite3.dll
-        DESTINATION 
+if(ENT_MYSQL_RUNTIME)
+install(FILES
+          ${ENT_MYSQL_RUNTIME}
+        DESTINATION
           ${CMAKE_INSTALL_BINDIR}
           )
+endif()
+if(ENT_SQLITE_RUNTIME)
+install(FILES
+          ${ENT_SQLITE_RUNTIME}
+        DESTINATION
+          ${CMAKE_INSTALL_BINDIR}
+          )
+endif()
 endif()
 
 
