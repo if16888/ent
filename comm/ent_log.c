@@ -48,6 +48,15 @@
 #define ENT_LOG_FLUSH_BATCH 256
 #define ENT_LOG_FILE_BUFFER_SIZE (64 * 1024)
 
+typedef struct ENT_LOG_MSG_NODE_TAG
+{
+    struct ENT_LOG_MSG_NODE_TAG* next;
+    time_t                       rollTime;
+    size_t                       msgLen;
+    bool                         forceFlush;
+    char                         msg[1];
+} ENT_LOG_MSG_NODE;
+
 #ifdef WIN32
 static CRITICAL_SECTION sLogMutex;
 #pragma warning(disable : 4996)
@@ -73,15 +82,23 @@ typedef struct
 #ifdef WIN32
     CRITICAL_SECTION cs;
     CONDITION_VARIABLE closeCv;
+    CONDITION_VARIABLE bufferCv;
+    HANDLE            bufferThread;
     volatile LONG    closing;
     volatile LONG    activeWriters;
 #else
     pthread_mutex_t  cs;
     pthread_cond_t   closeCv;
+    pthread_cond_t   bufferCv;
+    pthread_t        bufferThread;
     volatile int     closing;
     volatile int     activeWriters;
 #endif
+    bool             bufferThreadStarted;
+    bool             bufferThreadStop;
     int              pendingFlushes;
+    ENT_LOG_MSG_NODE* bufferHead;
+    ENT_LOG_MSG_NODE* bufferTail;
     char*            moduleName;
     char*            logPath;
     int              maxNum;
@@ -95,27 +112,7 @@ static const char* sLogLevelStr[]={
                 "INFO",
                 "DEBUG"};
 
-static ENT_LOG_CTX sDefLog={
-                ENTLOG_TAG,
-                false,
-                false,
-                false,
-                LOG_LEV_WARN_E,//default log LEVEL
-                NULL,
-                {0},
-#ifdef WIN32
-                {0},
-#else
-                {0},
-#endif
-                false,
-                0,
-                0,
-                NULL,
-                NULL,
-                DEF_MAX_NUM_LOG,
-                0
-            };
+static ENT_LOG_CTX sDefLog;
             
 static MSG_ID_T iENT_LogPathCheck(const char* path);
 static MSG_ID_T iENT_LogFormatMessage(const char* format,
@@ -135,6 +132,13 @@ static MSG_ID_T iENT_LogFormatPrefix(ENT_LOG_LEV_E logLevel,
                                      size_t prefixBufLen,
                                      size_t* prefixLen,
                                      time_t* rollTime);
+static MSG_ID_T iENT_LogStartBufferThread(ENT_LOG_CTX* log);
+static void iENT_LogStopBufferThread(ENT_LOG_CTX* log);
+static MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX* log,
+                                     const char* msg,
+                                     size_t msgLen,
+                                     time_t rollTime,
+                                     bool forceFlush);
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :iENT_LogRollCheck
@@ -549,6 +553,286 @@ static MSG_ID_T iENT_LogFormatPrefix(ENT_LOG_LEV_E logLevel,
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
+ * NAME        :iENT_LogBufferThreadMain
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "iENT_LogBufferThreadMain"
+#ifdef WIN32
+static DWORD WINAPI iENT_LogBufferThreadMain(LPVOID data)
+#else
+static void* iENT_LogBufferThreadMain(void* data)
+#endif
+{
+    ENT_LOG_CTX* log = (ENT_LOG_CTX*)data;
+    ENT_LOG_MSG_NODE* head = NULL;
+    ENT_LOG_MSG_NODE* node = NULL;
+
+    for(;;)
+    {
+#ifdef WIN32
+        EnterCriticalSection(&log->cs);
+        while(log->bufferHead == NULL && !log->bufferThreadStop)
+        {
+            SleepConditionVariableCS(&log->bufferCv, &log->cs, INFINITE);
+        }
+        if(log->bufferHead == NULL && log->bufferThreadStop)
+        {
+            log->bufferThreadStarted = false;
+            LeaveCriticalSection(&log->cs);
+            break;
+        }
+#else
+        pthread_mutex_lock(&log->cs);
+        while(log->bufferHead == NULL && !log->bufferThreadStop)
+        {
+            pthread_cond_wait(&log->bufferCv, &log->cs);
+        }
+        if(log->bufferHead == NULL && log->bufferThreadStop)
+        {
+            log->bufferThreadStarted = false;
+            pthread_mutex_unlock(&log->cs);
+            break;
+        }
+#endif
+        head = log->bufferHead;
+        log->bufferHead = NULL;
+        log->bufferTail = NULL;
+#ifdef WIN32
+        LeaveCriticalSection(&log->cs);
+#else
+        pthread_mutex_unlock(&log->cs);
+#endif
+
+        while(head != NULL)
+        {
+            node = head;
+            head = head->next;
+
+#ifdef WIN32
+            EnterCriticalSection(&log->cs);
+#else
+            pthread_mutex_lock(&log->cs);
+#endif
+            iENT_LogRollCheck(log, node->rollTime);
+            {
+                FILE* fp = log->logFp == NULL ? stderr : log->logFp;
+                fwrite(node->msg, 1, node->msgLen, fp);
+                iENT_LogFlushMaybe(log, fp, node->forceFlush || fp == stderr);
+            }
+#ifdef WIN32
+            LeaveCriticalSection(&log->cs);
+#else
+            pthread_mutex_unlock(&log->cs);
+#endif
+            free(node);
+        }
+    }
+
+#ifdef WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :iENT_LogStartBufferThread
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "iENT_LogStartBufferThread"
+static MSG_ID_T iENT_LogStartBufferThread(ENT_LOG_CTX* log)
+{
+    MSG_ID_T sts = 0;
+
+#ifdef WIN32
+    EnterCriticalSection(&log->cs);
+#else
+    pthread_mutex_lock(&log->cs);
+#endif
+    if(log->bufferThreadStarted)
+    {
+#ifdef WIN32
+        LeaveCriticalSection(&log->cs);
+#else
+        pthread_mutex_unlock(&log->cs);
+#endif
+        return 0;
+    }
+    log->bufferThreadStop = false;
+#ifdef WIN32
+    LeaveCriticalSection(&log->cs);
+#else
+    pthread_mutex_unlock(&log->cs);
+#endif
+
+#ifdef WIN32
+    log->bufferThread = CreateThread(NULL, 0, iENT_LogBufferThreadMain, log, 0, NULL);
+    if(log->bufferThread == NULL)
+    {
+        sts = -3;
+    }
+#else
+    if(pthread_create(&log->bufferThread, NULL, iENT_LogBufferThreadMain, log) != 0)
+    {
+        sts = -3;
+    }
+#endif
+
+#ifdef WIN32
+    EnterCriticalSection(&log->cs);
+#else
+    pthread_mutex_lock(&log->cs);
+#endif
+    if(sts == 0)
+    {
+        log->bufferThreadStarted = true;
+    }
+    else
+    {
+        log->isBuffer = false;
+    }
+#ifdef WIN32
+    LeaveCriticalSection(&log->cs);
+#else
+    pthread_mutex_unlock(&log->cs);
+#endif
+
+    return sts;
+}
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :iENT_LogStopBufferThread
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "iENT_LogStopBufferThread"
+static void iENT_LogStopBufferThread(ENT_LOG_CTX* log)
+{
+    bool shouldJoin = false;
+
+#ifdef WIN32
+    EnterCriticalSection(&log->cs);
+#else
+    pthread_mutex_lock(&log->cs);
+#endif
+    if(log->bufferThreadStarted)
+    {
+        log->bufferThreadStop = true;
+        shouldJoin = true;
+#ifdef WIN32
+        WakeAllConditionVariable(&log->bufferCv);
+#else
+        pthread_cond_broadcast(&log->bufferCv);
+#endif
+    }
+#ifdef WIN32
+    LeaveCriticalSection(&log->cs);
+#else
+    pthread_mutex_unlock(&log->cs);
+#endif
+
+    if(!shouldJoin)
+    {
+        return;
+    }
+
+#ifdef WIN32
+    WaitForSingleObject(log->bufferThread, INFINITE);
+    CloseHandle(log->bufferThread);
+    log->bufferThread = NULL;
+#else
+    pthread_join(log->bufferThread, NULL);
+    memset(&log->bufferThread, 0, sizeof(log->bufferThread));
+#endif
+}
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :iENT_LogQueueMessage
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "iENT_LogQueueMessage"
+static MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX* log,
+                                     const char* msg,
+                                     size_t msgLen,
+                                     time_t rollTime,
+                                     bool forceFlush)
+{
+    ENT_LOG_MSG_NODE* node = NULL;
+
+    if(log == NULL || msg == NULL || msgLen == 0)
+    {
+        return -1;
+    }
+
+    node = (ENT_LOG_MSG_NODE*)malloc(sizeof(ENT_LOG_MSG_NODE) + msgLen);
+    if(node == NULL)
+    {
+        return -1;
+    }
+
+    memset(node, 0, sizeof(ENT_LOG_MSG_NODE));
+    node->rollTime = rollTime;
+    node->msgLen = msgLen;
+    node->forceFlush = forceFlush;
+    memcpy(node->msg, msg, msgLen);
+    node->msg[msgLen] = '\0';
+
+#ifdef WIN32
+    EnterCriticalSection(&log->cs);
+#else
+    pthread_mutex_lock(&log->cs);
+#endif
+    if(!log->isBuffer || !log->bufferThreadStarted || log->bufferThreadStop)
+    {
+#ifdef WIN32
+        LeaveCriticalSection(&log->cs);
+#else
+        pthread_mutex_unlock(&log->cs);
+#endif
+        free(node);
+        return 1;
+    }
+
+    if(log->bufferTail != NULL)
+    {
+        log->bufferTail->next = node;
+    }
+    else
+    {
+        log->bufferHead = node;
+    }
+    log->bufferTail = node;
+#ifdef WIN32
+    WakeConditionVariable(&log->bufferCv);
+    LeaveCriticalSection(&log->cs);
+#else
+    pthread_cond_signal(&log->bufferCv);
+    pthread_mutex_unlock(&log->cs);
+#endif
+
+    return 0;
+}
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
  * NAME        :ENT_LogInit
  *
  * DESCRIPTION :   
@@ -689,6 +973,8 @@ ENT_PUBLIC MSG_ID_T  ENT_LogInitHandle(ENT_LOG* pLogHandle,const char* moduleNam
 #ifdef WIN32
     InitializeCriticalSection(&log->cs);
     InitializeConditionVariable(&log->closeCv);
+    InitializeConditionVariable(&log->bufferCv);
+    log->bufferThread = NULL;
 #else
     pthread_mutex_init(&log->cs,NULL);
     if(pthread_cond_init(&log->closeCv,NULL) != 0)
@@ -712,10 +998,36 @@ ENT_PUBLIC MSG_ID_T  ENT_LogInitHandle(ENT_LOG* pLogHandle,const char* moduleNam
         }
         goto END_OF_ROUTINE;
     }
+    if(pthread_cond_init(&log->bufferCv,NULL) != 0)
+    {
+        sts = -1;
+        fprintf(stderr,"Func [%s] Line [%d],pthread_cond_init failed.\n",FUNC_NAME,__LINE__);
+        pthread_cond_destroy(&log->closeCv);
+        pthread_mutex_destroy(&log->cs);
+        if(log->moduleName)
+        {
+            free(log->moduleName);
+            log->moduleName = NULL;
+        }
+        if(log->logPath)
+        {
+            free(log->logPath);
+            log->logPath = NULL;
+        }
+        if(log!=&sDefLog)
+        {
+            free(log);
+        }
+        goto END_OF_ROUTINE;
+    }
 #endif
     log->closing = 0;
     log->activeWriters = 0;
+    log->bufferThreadStarted = false;
+    log->bufferThreadStop = false;
     log->pendingFlushes = 0;
+    log->bufferHead = NULL;
+    log->bufferTail = NULL;
     log->isInit   = true;
     log->isDebug  = false;
     log->isBuffer = false;
@@ -762,6 +1074,8 @@ ENT_PUBLIC MSG_ID_T  ENT_LogSetOption(ENT_LOG logHandle,ENT_LOG_OPTIONS_E option
     ENT_LOG_CTX* log = (ENT_LOG_CTX*)logHandle;
     size_t       len;
     MSG_ID_T     sts=0;
+    MSG_ID_T     bufferSts = 0;
+    bool         startBufferThread = false;
     
     if(sLogMutexInit==false)
     {
@@ -839,6 +1153,7 @@ ENT_PUBLIC MSG_ID_T  ENT_LogSetOption(ENT_LOG logHandle,ENT_LOG_OPTIONS_E option
         
         case ENT_LOG_BUFFER_E:
             log->isBuffer = *(bool*)arg;
+            startBufferThread = log->isBuffer && !log->bufferThreadStarted;
             break;
             
         case ENT_LOG_LEVEL_E:
@@ -854,6 +1169,14 @@ END_OF_ROUTINE:
 #else
     pthread_mutex_unlock(&log->cs);
 #endif
+    if(sts == 0 && startBufferThread)
+    {
+        bufferSts = iENT_LogStartBufferThread(log);
+        if(bufferSts < 0)
+        {
+            sts = bufferSts;
+        }
+    }
     return sts;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
@@ -919,6 +1242,8 @@ ENT_PUBLIC MSG_ID_T ENT_LogCloseHandle(ENT_LOG logHandle)
 #endif
     }
 
+    iENT_LogStopBufferThread(log);
+
     if(log->logFp)
         fclose(log->logFp);
 
@@ -929,6 +1254,7 @@ ENT_PUBLIC MSG_ID_T ENT_LogCloseHandle(ENT_LOG logHandle)
 #else
     pthread_mutex_destroy(&log->cs);
     pthread_cond_destroy(&log->closeCv);
+    pthread_cond_destroy(&log->bufferCv);
 #endif
     
     if(log!=&sDefLog)
@@ -1147,11 +1473,33 @@ static MSG_ID_T iENT_LogVRaw(ENT_LOG_CTX* log,const char* format,va_list va_args
     char* msgBuf = stackBuf;
     size_t msgLen = 0;
     MSG_ID_T sts = 0;
+    bool useBuffer = false;
 
     sts = iENT_LogFormatMessage(format, va_args, stackBuf, sizeof(stackBuf), &msgBuf, &msgLen);
     if(sts < 0)
     {
         return sts;
+    }
+
+#ifdef WIN32
+    EnterCriticalSection(&log->cs);
+#else
+    pthread_mutex_lock(&log->cs);
+#endif
+    useBuffer = log->isBuffer;
+#ifdef WIN32
+    LeaveCriticalSection(&log->cs);
+#else
+    pthread_mutex_unlock(&log->cs);
+#endif
+
+    if(useBuffer && iENT_LogQueueMessage(log, msgBuf, msgLen, time(NULL), false) == 0)
+    {
+        if(msgBuf != stackBuf)
+        {
+            free(msgBuf);
+        }
+        return 0;
     }
 
 #ifdef WIN32
@@ -1244,6 +1592,8 @@ static MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX* log,ENT_LOG_LEV_E logLevel,const cha
     char* lineBuf = lineStackBuf;
     size_t lineLen = 0;
     time_t rollTime = 0;
+    bool debugMirror = false;
+    bool useBuffer = false;
 
     if(iENT_LogFormatMessage(format, va_args, stackBuf, sizeof(stackBuf), &msgBuf, &msgLen) < 0)
     {
@@ -1255,8 +1605,67 @@ static MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX* log,ENT_LOG_LEV_E logLevel,const cha
 #else
     pthread_mutex_lock(&log->cs);
 #endif
+    debugMirror = log->isDebug;
+    useBuffer = log->isBuffer;
+#ifdef WIN32
+    LeaveCriticalSection(&log->cs);
+#else
+    pthread_mutex_unlock(&log->cs);
+#endif
 
-    if(iENT_LogFormatPrefix(logLevel, prefixBuf, sizeof(prefixBuf), &prefixLen, &rollTime) < 0)
+    if(useBuffer)
+    {
+        if(iENT_LogFormatPrefix(logLevel, prefixBuf, sizeof(prefixBuf), &prefixLen, &rollTime) < 0)
+        {
+            if(msgBuf != stackBuf)
+            {
+                free(msgBuf);
+            }
+            return -1;
+        }
+        lineLen = prefixLen + msgLen;
+        if(lineLen + 1 > sizeof(lineStackBuf))
+        {
+            lineBuf = (char*)malloc(lineLen + 1);
+            if(lineBuf == NULL)
+            {
+                if(msgBuf != stackBuf)
+                {
+                    free(msgBuf);
+                }
+                return -1;
+            }
+        }
+        memcpy(lineBuf, prefixBuf, prefixLen);
+        memcpy(lineBuf + prefixLen, msgBuf, msgLen);
+        lineBuf[lineLen] = '\0';
+
+        if(debugMirror)
+        {
+            fwrite(lineBuf, 1, lineLen, stdout);
+        }
+
+        if(iENT_LogQueueMessage(log, lineBuf, lineLen, rollTime, logLevel <= LOG_LEV_ERROR_E) == 0)
+        {
+            if(lineBuf != lineStackBuf)
+            {
+                free(lineBuf);
+            }
+            if(msgBuf != stackBuf)
+            {
+                free(msgBuf);
+            }
+            return 0;
+        }
+    }
+
+#ifdef WIN32
+    EnterCriticalSection(&log->cs);
+#else
+    pthread_mutex_lock(&log->cs);
+#endif
+
+    if(!useBuffer && iENT_LogFormatPrefix(logLevel, prefixBuf, sizeof(prefixBuf), &prefixLen, &rollTime) < 0)
     {
 #ifdef WIN32
         LeaveCriticalSection(&log->cs);
@@ -1270,29 +1679,32 @@ static MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX* log,ENT_LOG_LEV_E logLevel,const cha
         return -1;
     }
     iENT_LogRollCheck(log, rollTime);
-    lineLen = prefixLen + msgLen;
-    if(lineLen + 1 > sizeof(lineStackBuf))
+    if(!useBuffer)
     {
-        lineBuf = (char*)malloc(lineLen + 1);
-        if(lineBuf == NULL)
+        lineLen = prefixLen + msgLen;
+        if(lineLen + 1 > sizeof(lineStackBuf))
         {
-#ifdef WIN32
-            LeaveCriticalSection(&log->cs);
-#else
-            pthread_mutex_unlock(&log->cs);
-#endif
-            if(msgBuf != stackBuf)
+            lineBuf = (char*)malloc(lineLen + 1);
+            if(lineBuf == NULL)
             {
-                free(msgBuf);
+#ifdef WIN32
+                LeaveCriticalSection(&log->cs);
+#else
+                pthread_mutex_unlock(&log->cs);
+#endif
+                if(msgBuf != stackBuf)
+                {
+                    free(msgBuf);
+                }
+                return -1;
             }
-            return -1;
         }
+        memcpy(lineBuf, prefixBuf, prefixLen);
+        memcpy(lineBuf + prefixLen, msgBuf, msgLen);
+        lineBuf[lineLen] = '\0';
     }
-    memcpy(lineBuf, prefixBuf, prefixLen);
-    memcpy(lineBuf + prefixLen, msgBuf, msgLen);
-    lineBuf[lineLen] = '\0';
 
-    if(log->isDebug)
+    if(log->isDebug && !debugMirror)
     {
         fwrite(lineBuf, 1, lineLen, stdout);
     }

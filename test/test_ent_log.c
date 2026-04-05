@@ -718,6 +718,152 @@ cleanup:
 #endif
 }
 
+static int test_buffered_log_close_flushes_queued_messages(void)
+{
+#ifdef WIN32
+    return 0;
+#else
+    ENT_LOG logHandle = NULL;
+    ENT_LOG_LEV_E level = LOG_LEV_INFO_E;
+    bool buffered = true;
+    char dirPath[256];
+    char logFilePath[512];
+    FILE* fp = NULL;
+    char* buffer = NULL;
+    const char* needle = "buffered line=";
+    const char* cursor = NULL;
+    long fileSize = 0;
+    size_t bytesRead = 0;
+    int occurrences = 0;
+    int rc = 1;
+
+    if(make_temp_dir(dirPath, sizeof(dirPath)) != 0)
+    {
+        fprintf(stderr, "failed to create temp buffered directory\n");
+        return 1;
+    }
+
+    format_log_file_path(logFilePath, sizeof(logFilePath), dirPath, "BufferedModule");
+
+    if(expect_true(ENT_LogInit() == 0, "ENT_LogInit should initialize before buffered log testing") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogInitHandle(&logHandle, "BufferedModule", dirPath) == 0,
+                   "ENT_LogInitHandle should create a handle for buffered log testing") != 0)
+    {
+        ENT_LogClose();
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_LEVEL_E, &level) == 0,
+                   "ENT_LogSetOption should enable INFO writes for buffered log testing") != 0)
+    {
+        ENT_LogCloseHandle(logHandle);
+        ENT_LogClose();
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_BUFFER_E, &buffered) == 0,
+                   "ENT_LogSetOption should enable explicit buffered logging") != 0)
+    {
+        ENT_LogCloseHandle(logHandle);
+        ENT_LogClose();
+        goto cleanup;
+    }
+
+    for(int i = 0; i < 128; ++i)
+    {
+        if(expect_true(ENT_LogPrint(logHandle, "buffered line=%d\n", i) == 0,
+                       "ENT_LogPrint should enqueue buffered writes") != 0)
+        {
+            ENT_LogCloseHandle(logHandle);
+            ENT_LogClose();
+            goto cleanup;
+        }
+    }
+
+    if(expect_true(ENT_LogCloseHandle(logHandle) == 0,
+                   "ENT_LogCloseHandle should flush buffered writes before closing") != 0)
+    {
+        ENT_LogClose();
+        goto cleanup;
+    }
+    logHandle = NULL;
+
+    if(expect_true(ENT_LogClose() == 0, "ENT_LogClose should shut down after buffered log testing") != 0)
+    {
+        goto cleanup;
+    }
+
+    fp = fopen(logFilePath, "r");
+    if(expect_true(fp != NULL, "Buffered logging should create a log file") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(fseek(fp, 0, SEEK_END) != 0)
+    {
+        goto cleanup;
+    }
+    fileSize = ftell(fp);
+    if(fileSize < 0)
+    {
+        goto cleanup;
+    }
+    if(fseek(fp, 0, SEEK_SET) != 0)
+    {
+        goto cleanup;
+    }
+    buffer = (char*)calloc((size_t)fileSize + 1, 1);
+    if(buffer == NULL)
+    {
+        goto cleanup;
+    }
+    bytesRead = fread(buffer, 1, (size_t)fileSize, fp);
+    fclose(fp);
+    fp = NULL;
+
+    if(expect_true(bytesRead > 0, "Buffered logging should flush queued messages on close") != 0)
+    {
+        goto cleanup;
+    }
+
+    cursor = buffer;
+    while((cursor = strstr(cursor, needle)) != NULL)
+    {
+        occurrences++;
+        cursor += strlen(needle);
+    }
+
+    if(expect_true(occurrences == 128,
+                   "Buffered logging should flush every queued message before close") != 0)
+    {
+        goto cleanup;
+    }
+
+    rc = 0;
+
+cleanup:
+    if(fp != NULL)
+    {
+        fclose(fp);
+    }
+    if(buffer != NULL)
+    {
+        free(buffer);
+    }
+    if(logHandle != NULL)
+    {
+        ENT_LogCloseHandle(logHandle);
+        ENT_LogClose();
+    }
+    remove_dir_contents(dirPath);
+    return rc;
+#endif
+}
+
 int main(void)
 {
     int failures = 0;
@@ -729,6 +875,7 @@ int main(void)
     failures += test_log_path_option_trims_trailing_separator_and_writes_file();
     failures += test_log_level_filters_debug_messages();
     failures += test_log_close_handle_waits_for_active_writers();
+    failures += test_buffered_log_close_flushes_queued_messages();
 
     if(failures != 0)
     {

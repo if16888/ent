@@ -200,6 +200,92 @@ static int run_multi_thread_benchmark(ENT_LOG log_handle, int workers, int itera
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
+static int run_single_thread_benchmark_named(ENT_LOG log_handle, int iterations, const char* label)
+{
+    double start_ms = now_ms();
+    double elapsed_ms = 0.0;
+
+    for(int i = 0; i < iterations; ++i)
+    {
+        if(ENT_LogPrint(log_handle, "%s single line=%d\n", label, i) != 0)
+        {
+            return EXIT_FAILURE;
+        }
+    }
+
+    elapsed_ms = now_ms() - start_ms;
+    printf("%s_single lines=%d elapsed_ms=%.3f lines_per_sec=%.3f\n",
+           label,
+           iterations,
+           elapsed_ms,
+           iterations / (elapsed_ms / 1000.0));
+    return EXIT_SUCCESS;
+}
+
+static int run_multi_thread_benchmark_named(ENT_LOG log_handle,
+                                            int workers,
+                                            int iterations_per_worker,
+                                            const char* label)
+{
+    PERF_LOG_WORKER* worker_ctx = NULL;
+    double start_ms = 0.0;
+    double elapsed_ms = 0.0;
+    int total_lines = workers * iterations_per_worker;
+    int failures = 0;
+
+    worker_ctx = (PERF_LOG_WORKER*)calloc((size_t)workers, sizeof(PERF_LOG_WORKER));
+    if(worker_ctx == NULL)
+    {
+        return EXIT_FAILURE;
+    }
+
+    start_ms = now_ms();
+    for(int i = 0; i < workers; ++i)
+    {
+        worker_ctx[i].log_handle = log_handle;
+        worker_ctx[i].iterations = iterations_per_worker;
+        worker_ctx[i].worker_id = i;
+
+#ifdef WIN32
+        worker_ctx[i].thread = CreateThread(NULL, 0, perf_log_worker_main, &worker_ctx[i], 0, NULL);
+        if(worker_ctx[i].thread == NULL)
+        {
+            free(worker_ctx);
+            return EXIT_FAILURE;
+        }
+#else
+        if(pthread_create(&worker_ctx[i].thread, NULL, perf_log_worker_main, &worker_ctx[i]) != 0)
+        {
+            free(worker_ctx);
+            return EXIT_FAILURE;
+        }
+#endif
+    }
+
+    for(int i = 0; i < workers; ++i)
+    {
+#ifdef WIN32
+        WaitForSingleObject(worker_ctx[i].thread, INFINITE);
+        CloseHandle(worker_ctx[i].thread);
+#else
+        pthread_join(worker_ctx[i].thread, NULL);
+#endif
+        failures += worker_ctx[i].failures;
+    }
+
+    elapsed_ms = now_ms() - start_ms;
+    printf("%s_multi workers=%d lines=%d elapsed_ms=%.3f lines_per_sec=%.3f failures=%d\n",
+           label,
+           workers,
+           total_lines,
+           elapsed_ms,
+           total_lines / (elapsed_ms / 1000.0),
+           failures);
+
+    free(worker_ctx);
+    return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
 int main(void)
 {
     enum { SINGLE_LINES = 5000, MULTI_WORKERS = 4, MULTI_LINES_PER_WORKER = 2000 };
@@ -207,6 +293,7 @@ int main(void)
     char module_name[64];
     ENT_LOG log_handle = NULL;
     ENT_LOG_LEV_E level = LOG_LEV_INFO_E;
+    bool buffered = true;
 
     memset(log_dir, 0, sizeof(log_dir));
     memset(module_name, 0, sizeof(module_name));
@@ -254,6 +341,27 @@ int main(void)
     }
 
     if(run_multi_thread_benchmark(log_handle, MULTI_WORKERS, MULTI_LINES_PER_WORKER) != EXIT_SUCCESS)
+    {
+        ENT_LogCloseHandle(log_handle);
+        ENT_LogClose();
+        return EXIT_FAILURE;
+    }
+
+    if(ENT_LogSetOption(log_handle, ENT_LOG_BUFFER_E, &buffered) != 0)
+    {
+        ENT_LogCloseHandle(log_handle);
+        ENT_LogClose();
+        return EXIT_FAILURE;
+    }
+
+    if(run_single_thread_benchmark_named(log_handle, SINGLE_LINES, "log_buffered") != EXIT_SUCCESS)
+    {
+        ENT_LogCloseHandle(log_handle);
+        ENT_LogClose();
+        return EXIT_FAILURE;
+    }
+
+    if(run_multi_thread_benchmark_named(log_handle, MULTI_WORKERS, MULTI_LINES_PER_WORKER, "log_buffered") != EXIT_SUCCESS)
     {
         ENT_LogCloseHandle(log_handle);
         ENT_LogClose();
