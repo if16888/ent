@@ -379,13 +379,20 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
         return -2;
     }
 
-    UTL_LockEnter(thCtx->dllLock);
-    while((sts = UTL_DllRemHead(&thCtx->dllHeader,&tmp))==0)
+    while(1)
     {
+        UTL_LockEnter(thCtx->dllLock);
+        sts = UTL_DllRemHead(&thCtx->dllHeader,&tmp);
+        UTL_LockLeave(thCtx->dllLock);
+        if(sts != 0)
+        {
+            break;
+        }
+
         thDb = (THREAD_DB*)tmp;
         if(thDb->thHandle)
         {
-            TerminateThread(thDb->thHandle,1);
+            WaitForSingleObject(thDb->thHandle, INFINITE);
             CloseHandle(thDb->thHandle);
             thDb->thHandle = NULL;
             thDb->thId = 0;
@@ -397,7 +404,6 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
         }
     }
     thCtx->tag = 0x0;
-    UTL_LockLeave(thCtx->dllLock);
     UTL_LockClose(thCtx->dllLock);
     
     free(handle); 
