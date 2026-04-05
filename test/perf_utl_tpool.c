@@ -1,7 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef WIN32
+#include <windows.h>
+#else
 #include <sys/time.h>
+#endif
 
 #include "ient_comm.h"
 #include "ent_utility.h"
@@ -39,10 +43,34 @@ typedef struct
 
 static double now_ms(void)
 {
+#ifdef WIN32
+    static LARGE_INTEGER frequency;
+    static int frequency_initialized = 0;
+    LARGE_INTEGER counter;
+
+    if(!frequency_initialized)
+    {
+        QueryPerformanceFrequency(&frequency);
+        frequency_initialized = 1;
+    }
+
+    QueryPerformanceCounter(&counter);
+    return (double)counter.QuadPart * 1000.0 / (double)frequency.QuadPart;
+#else
     struct timeval tv;
 
     gettimeofday(&tv, NULL);
     return (double)tv.tv_sec * 1000.0 + (double)tv.tv_usec / 1000.0;
+#endif
+}
+
+static void perf_probe_mark_finished(PERF_TPOOL_PROBE* probe)
+{
+#ifdef WIN32
+    InterlockedIncrement((volatile LONG*)&probe->finished);
+#else
+    __sync_add_and_fetch(&probe->finished, 1);
+#endif
 }
 
 static MSG_ID_T perf_task_cb(void* data)
@@ -56,7 +84,7 @@ static MSG_ID_T perf_task_end_cb(void* data, MSG_ID_T* retVal)
     PERF_TPOOL_PROBE* probe = (PERF_TPOOL_PROBE*)data;
 
     (void)retVal;
-    __sync_add_and_fetch(&probe->finished, 1);
+    perf_probe_mark_finished(probe);
     return 0;
 }
 

@@ -1,7 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef WIN32
+#include <windows.h>
+#else
 #include <unistd.h>
+#endif
 
 #include "ient_comm.h"
 #include "ent_db.h"
@@ -100,6 +104,67 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle, const char* format, ...)
     return 0;
 }
 
+static int prepare_temp_db_path(char* db_path, size_t db_path_len)
+{
+#ifdef WIN32
+    char temp_dir[MAX_PATH];
+    char temp_file[MAX_PATH];
+
+    if(GetTempPathA((DWORD)sizeof(temp_dir), temp_dir) == 0)
+    {
+        fprintf(stderr, "GetTempPathA failed\n");
+        return 1;
+    }
+
+    if(GetTempFileNameA(temp_dir, "edb", 0, temp_file) == 0)
+    {
+        fprintf(stderr, "GetTempFileNameA failed\n");
+        return 1;
+    }
+
+    DeleteFileA(temp_file);
+
+    if(snprintf(db_path, db_path_len, "%s.sqlite", temp_file) >= (int)db_path_len)
+    {
+        fprintf(stderr, "temporary SQLite path is too long\n");
+        return 1;
+    }
+
+    DeleteFileA(db_path);
+    return 0;
+#else
+    char db_template[] = "/tmp/ent_db_test_XXXXXX";
+    int fd = mkstemp(db_template);
+
+    if(fd < 0)
+    {
+        perror("mkstemp");
+        return 1;
+    }
+
+    close(fd);
+    unlink(db_template);
+
+    if(snprintf(db_path, db_path_len, "%s.sqlite", db_template) >= (int)db_path_len)
+    {
+        fprintf(stderr, "temporary SQLite path is too long\n");
+        return 1;
+    }
+
+    unlink(db_path);
+    return 0;
+#endif
+}
+
+static void cleanup_temp_db_path(const char* db_path)
+{
+#ifdef WIN32
+    DeleteFileA(db_path);
+#else
+    unlink(db_path);
+#endif
+}
+
 static void capture_single_name_row(char** fields, char** row_res, long long row_num, int column_num, void* user_data)
 {
     DB_READ_CAPTURE* capture = (DB_READ_CAPTURE*)user_data;
@@ -179,22 +244,18 @@ static int test_sqlite_open_rejects_missing_database_path(void)
 
 static int test_sqlite_write_and_read_roundtrip(void)
 {
-    char db_template[] = "/tmp/ent_db_test_XXXXXX.sqlite";
+    char db_path[512];
     DB_HANDLE db_handle = NULL;
     DB_READ_CAPTURE capture;
-    int fd = -1;
     MSG_ID_T init_sts = 0;
 
     memset(&capture, 0, sizeof(capture));
+    memset(db_path, 0, sizeof(db_path));
 
-    fd = mkstemps(db_template, 7);
-    if(fd < 0)
+    if(prepare_temp_db_path(db_path, sizeof(db_path)) != 0)
     {
-        perror("mkstemps");
         return 1;
     }
-    close(fd);
-    unlink(db_template);
 
     init_sts = reset_db_service();
     if(expect_true(init_sts == 0 || init_sts == 1,
@@ -203,11 +264,11 @@ static int test_sqlite_write_and_read_roundtrip(void)
         return 1;
     }
 
-    if(expect_true(ENT_DbInitHandle(&db_handle, SQLITE_TYPE, NULL, db_template, NULL, NULL, 0) == 0,
+    if(expect_true(ENT_DbInitHandle(&db_handle, SQLITE_TYPE, NULL, db_path, NULL, NULL, 0) == 0,
                    "ENT_DbInitHandle should create a SQLite handle") != 0)
     {
         ENT_DbClose();
-        unlink(db_template);
+        cleanup_temp_db_path(db_path);
         return 1;
     }
 
@@ -216,7 +277,7 @@ static int test_sqlite_write_and_read_roundtrip(void)
     {
         ENT_DbCloseHandle(db_handle);
         ENT_DbClose();
-        unlink(db_template);
+        cleanup_temp_db_path(db_path);
         return 1;
     }
 
@@ -225,7 +286,7 @@ static int test_sqlite_write_and_read_roundtrip(void)
     {
         ENT_DbCloseHandle(db_handle);
         ENT_DbClose();
-        unlink(db_template);
+        cleanup_temp_db_path(db_path);
         return 1;
     }
 
@@ -237,7 +298,7 @@ static int test_sqlite_write_and_read_roundtrip(void)
     {
         ENT_DbCloseHandle(db_handle);
         ENT_DbClose();
-        unlink(db_template);
+        cleanup_temp_db_path(db_path);
         return 1;
     }
 
@@ -245,7 +306,7 @@ static int test_sqlite_write_and_read_roundtrip(void)
     {
         ENT_DbCloseHandle(db_handle);
         ENT_DbClose();
-        unlink(db_template);
+        cleanup_temp_db_path(db_path);
         return 1;
     }
 
@@ -253,7 +314,7 @@ static int test_sqlite_write_and_read_roundtrip(void)
     {
         ENT_DbCloseHandle(db_handle);
         ENT_DbClose();
-        unlink(db_template);
+        cleanup_temp_db_path(db_path);
         return 1;
     }
 
@@ -261,7 +322,7 @@ static int test_sqlite_write_and_read_roundtrip(void)
     {
         ENT_DbCloseHandle(db_handle);
         ENT_DbClose();
-        unlink(db_template);
+        cleanup_temp_db_path(db_path);
         return 1;
     }
 
@@ -269,30 +330,27 @@ static int test_sqlite_write_and_read_roundtrip(void)
                    "ENT_DbCloseHandle should close an open SQLite handle") != 0)
     {
         ENT_DbClose();
-        unlink(db_template);
+        cleanup_temp_db_path(db_path);
         return 1;
     }
 
-    unlink(db_template);
+    cleanup_temp_db_path(db_path);
     return expect_true(ENT_DbClose() == 0,
                        "ENT_DbClose should close the DB service after the SQLite roundtrip");
 }
 
 static int test_sqlite_write_rejects_invalid_sql(void)
 {
-    char db_template[] = "/tmp/ent_db_test_XXXXXX.sqlite";
+    char db_path[512];
     DB_HANDLE db_handle = NULL;
-    int fd = -1;
     MSG_ID_T init_sts = 0;
 
-    fd = mkstemps(db_template, 7);
-    if(fd < 0)
+    memset(db_path, 0, sizeof(db_path));
+
+    if(prepare_temp_db_path(db_path, sizeof(db_path)) != 0)
     {
-        perror("mkstemps");
         return 1;
     }
-    close(fd);
-    unlink(db_template);
 
     init_sts = reset_db_service();
     if(expect_true(init_sts == 0 || init_sts == 1,
@@ -301,11 +359,11 @@ static int test_sqlite_write_rejects_invalid_sql(void)
         return 1;
     }
 
-    if(expect_true(ENT_DbInitHandle(&db_handle, SQLITE_TYPE, NULL, db_template, NULL, NULL, 0) == 0,
+    if(expect_true(ENT_DbInitHandle(&db_handle, SQLITE_TYPE, NULL, db_path, NULL, NULL, 0) == 0,
                    "ENT_DbInitHandle should create a SQLite handle for invalid SQL testing") != 0)
     {
         ENT_DbClose();
-        unlink(db_template);
+        cleanup_temp_db_path(db_path);
         return 1;
     }
 
@@ -314,7 +372,7 @@ static int test_sqlite_write_rejects_invalid_sql(void)
     {
         ENT_DbCloseHandle(db_handle);
         ENT_DbClose();
-        unlink(db_template);
+        cleanup_temp_db_path(db_path);
         return 1;
     }
 
@@ -322,33 +380,29 @@ static int test_sqlite_write_rejects_invalid_sql(void)
                    "ENT_DbCloseHandle should close the SQLite handle after invalid SQL") != 0)
     {
         ENT_DbClose();
-        unlink(db_template);
+        cleanup_temp_db_path(db_path);
         return 1;
     }
 
-    unlink(db_template);
+    cleanup_temp_db_path(db_path);
     return expect_true(ENT_DbClose() == 0,
                        "ENT_DbClose should close the DB service after the invalid SQL test");
 }
 
 static int test_sqlite_read_rejects_callback_without_user_data(void)
 {
-    char db_template[] = "/tmp/ent_db_test_XXXXXX.sqlite";
+    char db_path[512];
     DB_HANDLE db_handle = NULL;
     DB_READ_CAPTURE capture;
-    int fd = -1;
     MSG_ID_T init_sts = 0;
 
     memset(&capture, 0, sizeof(capture));
+    memset(db_path, 0, sizeof(db_path));
 
-    fd = mkstemps(db_template, 7);
-    if(fd < 0)
+    if(prepare_temp_db_path(db_path, sizeof(db_path)) != 0)
     {
-        perror("mkstemps");
         return 1;
     }
-    close(fd);
-    unlink(db_template);
 
     init_sts = reset_db_service();
     if(expect_true(init_sts == 0 || init_sts == 1,
@@ -357,11 +411,11 @@ static int test_sqlite_read_rejects_callback_without_user_data(void)
         return 1;
     }
 
-    if(expect_true(ENT_DbInitHandle(&db_handle, SQLITE_TYPE, NULL, db_template, NULL, NULL, 0) == 0,
+    if(expect_true(ENT_DbInitHandle(&db_handle, SQLITE_TYPE, NULL, db_path, NULL, NULL, 0) == 0,
                    "ENT_DbInitHandle should create a SQLite handle for callback validation") != 0)
     {
         ENT_DbClose();
-        unlink(db_template);
+        cleanup_temp_db_path(db_path);
         return 1;
     }
 
@@ -370,7 +424,7 @@ static int test_sqlite_read_rejects_callback_without_user_data(void)
     {
         ENT_DbCloseHandle(db_handle);
         ENT_DbClose();
-        unlink(db_template);
+        cleanup_temp_db_path(db_path);
         return 1;
     }
 
@@ -379,7 +433,7 @@ static int test_sqlite_read_rejects_callback_without_user_data(void)
     {
         ENT_DbCloseHandle(db_handle);
         ENT_DbClose();
-        unlink(db_template);
+        cleanup_temp_db_path(db_path);
         return 1;
     }
 
@@ -391,7 +445,7 @@ static int test_sqlite_read_rejects_callback_without_user_data(void)
     {
         ENT_DbCloseHandle(db_handle);
         ENT_DbClose();
-        unlink(db_template);
+        cleanup_temp_db_path(db_path);
         return 1;
     }
 
@@ -400,7 +454,7 @@ static int test_sqlite_read_rejects_callback_without_user_data(void)
     {
         ENT_DbCloseHandle(db_handle);
         ENT_DbClose();
-        unlink(db_template);
+        cleanup_temp_db_path(db_path);
         return 1;
     }
 
@@ -408,11 +462,11 @@ static int test_sqlite_read_rejects_callback_without_user_data(void)
                    "ENT_DbCloseHandle should close the SQLite handle after callback validation") != 0)
     {
         ENT_DbClose();
-        unlink(db_template);
+        cleanup_temp_db_path(db_path);
         return 1;
     }
 
-    unlink(db_template);
+    cleanup_temp_db_path(db_path);
     return expect_true(ENT_DbClose() == 0,
                        "ENT_DbClose should close the DB service after the callback validation test");
 }

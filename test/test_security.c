@@ -11,10 +11,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <signal.h>
-#include <setjmp.h>
+#ifdef WIN32
+#include <windows.h>
+#else
 #include <unistd.h>
-#include <limits.h>
+#endif
 
 #include "ient_comm.h"
 #include "ent_init.h"
@@ -79,6 +80,115 @@ static void safe_reset_ent(void)
     memset(&gEntCtx, 0, sizeof(gEntCtx));
 }
 
+static int get_temp_root(char* path, size_t path_len)
+{
+#ifdef WIN32
+    DWORD len = GetTempPathA((DWORD)path_len, path);
+    if(len == 0 || len >= path_len)
+    {
+        fprintf(stderr, "GetTempPathA failed\n");
+        return 1;
+    }
+    while(len > 0 && (path[len - 1] == '\\' || path[len - 1] == '/'))
+    {
+        path[--len] = '\0';
+    }
+#else
+    if(snprintf(path, path_len, "/tmp") >= (int)path_len)
+    {
+        fprintf(stderr, "temporary root path is too long\n");
+        return 1;
+    }
+#endif
+    return 0;
+}
+
+static int build_temp_path(char* path, size_t path_len, const char* leaf_name)
+{
+    char temp_root[512];
+
+    memset(temp_root, 0, sizeof(temp_root));
+    if(get_temp_root(temp_root, sizeof(temp_root)) != 0)
+    {
+        return 1;
+    }
+
+    if(snprintf(path, path_len, "%s%s%s", temp_root, ENT_FILE_SEP, leaf_name) >= (int)path_len)
+    {
+        fprintf(stderr, "temporary path is too long\n");
+        return 1;
+    }
+
+    return 0;
+}
+
+static int prepare_temp_db_path(char* db_path, size_t db_path_len, const char* prefix)
+{
+#ifdef WIN32
+    char temp_dir[MAX_PATH];
+    char temp_file[MAX_PATH];
+
+    if(GetTempPathA((DWORD)sizeof(temp_dir), temp_dir) == 0)
+    {
+        fprintf(stderr, "GetTempPathA failed\n");
+        return 1;
+    }
+
+    if(GetTempFileNameA(temp_dir, prefix, 0, temp_file) == 0)
+    {
+        fprintf(stderr, "GetTempFileNameA failed\n");
+        return 1;
+    }
+
+    DeleteFileA(temp_file);
+
+    if(snprintf(db_path, db_path_len, "%s.db", temp_file) >= (int)db_path_len)
+    {
+        fprintf(stderr, "temporary database path is too long\n");
+        return 1;
+    }
+
+    DeleteFileA(db_path);
+#else
+    char db_template[512];
+    int fd = -1;
+
+    if(snprintf(db_template, sizeof(db_template), "/tmp/%s_XXXXXX", prefix) >= (int)sizeof(db_template))
+    {
+        fprintf(stderr, "temporary database template is too long\n");
+        return 1;
+    }
+
+    fd = mkstemp(db_template);
+    if(fd < 0)
+    {
+        perror("mkstemp");
+        return 1;
+    }
+
+    close(fd);
+    unlink(db_template);
+
+    if(snprintf(db_path, db_path_len, "%s.db", db_template) >= (int)db_path_len)
+    {
+        fprintf(stderr, "temporary database path is too long\n");
+        return 1;
+    }
+
+    unlink(db_path);
+#endif
+    return 0;
+}
+
+static void cleanup_temp_db_path(const char* db_path)
+{
+#ifdef WIN32
+    DeleteFileA(db_path);
+#else
+    unlink(db_path);
+#endif
+}
+
 /* ══════════════════════════════════════════════════════════
  * TEST 1: ent_init — 超长 name 不崩溃
  * 风险：sprintf(tmpStr, "ent_%s", name) 无边界检查
@@ -86,8 +196,12 @@ static void safe_reset_ent(void)
 static void test_init_long_name_no_overflow(void)
 {
     TEST_BEGIN("test_init_long_name_no_overflow");
+    char work_path[512];
 
     safe_reset_ent();
+    memset(work_path, 0, sizeof(work_path));
+    ASSERT_EQ(0, build_temp_path(work_path, sizeof(work_path), "sec_test"),
+              "temporary work path should build");
 
     /* 构造一个 4096 字节长的 name */
     char long_name[4097];
@@ -100,7 +214,7 @@ static void test_init_long_name_no_overflow(void)
      * 表示拒绝过长输入。当前代码没有这个检查，所以如果它返回 0
      * 说明风险确实存在，需要记录为 FINDING。
      */
-    MSG_ID_T ret = ENT_Init(long_name, "/tmp/sec_test", LOG_LEV_WARN_E);
+    MSG_ID_T ret = ENT_Init(long_name, work_path, LOG_LEV_WARN_E);
 
     /* 无论成功失败，能走到这里就说明没崩溃 */
     fprintf(stdout, "    → ENT_Init(long_name) returned %d (no crash)\n", ret);
@@ -131,7 +245,13 @@ static void test_init_long_workpath_no_overflow(void)
     /* 构造一个 4096 字节长的路径 */
     char long_path[4097];
     memset(long_path, 'B', 4096);
+#ifdef WIN32
+    long_path[0] = 'C';
+    long_path[1] = ':';
+    long_path[2] = '\\';
+#else
     long_path[0] = '/';  /* 使其看起来像一个绝对路径 */
+#endif
     long_path[4096] = '\0';
 
     MSG_ID_T ret = ENT_Init("sectest", long_path, LOG_LEV_WARN_E);
@@ -189,14 +309,18 @@ static void test_log_empty_path_no_crash(void)
 static void test_log_option_negative_maxnum(void)
 {
     TEST_BEGIN("test_log_option_negative_maxnum");
+    char log_path[512];
 
     MSG_ID_T ret;
+    memset(log_path, 0, sizeof(log_path));
+    ASSERT_EQ(0, build_temp_path(log_path, sizeof(log_path), "sec_maxnum"),
+              "temporary log path should build");
 
     ret = ENT_LogInit();
     ASSERT_EQ(0, ret, "ENT_LogInit should succeed");
 
     ENT_LOG logHandle = NULL;
-    ret = ENT_LogInitHandle(&logHandle, "MaxNumTest", "/tmp/sec_maxnum");
+    ret = ENT_LogInitHandle(&logHandle, "MaxNumTest", log_path);
     ASSERT_EQ(0, ret, "ENT_LogInitHandle should succeed");
     ASSERT_TRUE(logHandle != NULL, "logHandle should not be NULL");
 
@@ -227,14 +351,18 @@ static void test_log_option_negative_maxnum(void)
 static void test_log_invalid_level_no_crash(void)
 {
     TEST_BEGIN("test_log_invalid_level_no_crash");
+    char log_path[512];
 
     MSG_ID_T ret;
+    memset(log_path, 0, sizeof(log_path));
+    ASSERT_EQ(0, build_temp_path(log_path, sizeof(log_path), "sec_level"),
+              "temporary log path should build");
 
     ret = ENT_LogInit();
     ASSERT_EQ(0, ret, "ENT_LogInit should succeed");
 
     ENT_LOG logHandle = NULL;
-    ret = ENT_LogInitHandle(&logHandle, "LevelTest", "/tmp/sec_level");
+    ret = ENT_LogInitHandle(&logHandle, "LevelTest", log_path);
     ASSERT_EQ(0, ret, "ENT_LogInitHandle should succeed");
     ASSERT_TRUE(logHandle != NULL, "logHandle should not be NULL");
 
@@ -272,11 +400,10 @@ static void test_db_sql_injection_drop_table(void)
 {
     TEST_BEGIN("test_db_sql_injection_drop_table");
 
-    char db_template[] = "/tmp/ent_sec_inject_XXXXXX.db";
-    int fd = mkstemps(db_template, 3);
-    ASSERT_TRUE(fd >= 0, "mkstemps should create temp file");
-    close(fd);
-    unlink(db_template);
+    char db_path[512];
+    memset(db_path, 0, sizeof(db_path));
+    ASSERT_EQ(0, prepare_temp_db_path(db_path, sizeof(db_path), "esi"),
+              "temporary database path should build");
 
     /* 初始化 DB 服务 */
     MSG_ID_T ret;
@@ -284,7 +411,7 @@ static void test_db_sql_injection_drop_table(void)
     ASSERT_TRUE(ret == 0 || ret == 1, "ENT_DbInit should succeed");
 
     DB_HANDLE db = NULL;
-    ret = ENT_DbInitHandle(&db, SQLITE_TYPE, NULL, db_template, NULL, NULL, 0);
+    ret = ENT_DbInitHandle(&db, SQLITE_TYPE, NULL, db_path, NULL, NULL, 0);
     ASSERT_EQ(0, ret, "ENT_DbInitHandle should succeed");
 
     /* 建表 */
@@ -316,7 +443,7 @@ static void test_db_sql_injection_drop_table(void)
     /* 清理 */
     ENT_DbCloseHandle(db);
     ENT_DbClose();
-    unlink(db_template);
+    cleanup_temp_db_path(db_path);
 
     TEST_END();
 }
@@ -350,18 +477,17 @@ static void test_db_sql_injection_union_select(void)
 {
     TEST_BEGIN("test_db_sql_injection_union_select");
 
-    char db_template[] = "/tmp/ent_sec_union_XXXXXX.db";
-    int fd = mkstemps(db_template, 3);
-    ASSERT_TRUE(fd >= 0, "mkstemps should create temp file");
-    close(fd);
-    unlink(db_template);
+    char db_path[512];
+    memset(db_path, 0, sizeof(db_path));
+    ASSERT_EQ(0, prepare_temp_db_path(db_path, sizeof(db_path), "esu"),
+              "temporary database path should build");
 
     MSG_ID_T ret;
     ret = ENT_DbInit();
     ASSERT_TRUE(ret == 0 || ret == 1, "ENT_DbInit should succeed");
 
     DB_HANDLE db = NULL;
-    ret = ENT_DbInitHandle(&db, SQLITE_TYPE, NULL, db_template, NULL, NULL, 0);
+    ret = ENT_DbInitHandle(&db, SQLITE_TYPE, NULL, db_path, NULL, NULL, 0);
     ASSERT_EQ(0, ret, "ENT_DbInitHandle should succeed");
 
     /* 建两张表：公开表和私密表 */
@@ -401,7 +527,7 @@ static void test_db_sql_injection_union_select(void)
 
     ENT_DbCloseHandle(db);
     ENT_DbClose();
-    unlink(db_template);
+    cleanup_temp_db_path(db_path);
 
     TEST_END();
 }
@@ -413,18 +539,17 @@ static void test_db_null_sql_rejected(void)
 {
     TEST_BEGIN("test_db_null_sql_rejected");
 
-    char db_template[] = "/tmp/ent_sec_null_XXXXXX.db";
-    int fd = mkstemps(db_template, 3);
-    ASSERT_TRUE(fd >= 0, "mkstemps should create temp file");
-    close(fd);
-    unlink(db_template);
+    char db_path[512];
+    memset(db_path, 0, sizeof(db_path));
+    ASSERT_EQ(0, prepare_temp_db_path(db_path, sizeof(db_path), "esn"),
+              "temporary database path should build");
 
     MSG_ID_T ret;
     ret = ENT_DbInit();
     ASSERT_TRUE(ret == 0 || ret == 1, "ENT_DbInit should succeed");
 
     DB_HANDLE db = NULL;
-    ret = ENT_DbInitHandle(&db, SQLITE_TYPE, NULL, db_template, NULL, NULL, 0);
+    ret = ENT_DbInitHandle(&db, SQLITE_TYPE, NULL, db_path, NULL, NULL, 0);
     ASSERT_EQ(0, ret, "ENT_DbInitHandle should succeed");
 
     /* 传 NULL sql —— 应当被拒绝，返回 -1 */
@@ -436,7 +561,7 @@ static void test_db_null_sql_rejected(void)
 
     ENT_DbCloseHandle(db);
     ENT_DbClose();
-    unlink(db_template);
+    cleanup_temp_db_path(db_path);
 
     TEST_END();
 }

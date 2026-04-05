@@ -1,7 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef WIN32
+#include <windows.h>
+#else
 #include <sys/time.h>
+#endif
 
 #include "ient_comm.h"
 #include "ent_utility.h"
@@ -40,10 +44,25 @@ typedef struct
 
 static double now_ms(void)
 {
+#ifdef WIN32
+    static LARGE_INTEGER frequency;
+    static int frequency_initialized = 0;
+    LARGE_INTEGER counter;
+
+    if(!frequency_initialized)
+    {
+        QueryPerformanceFrequency(&frequency);
+        frequency_initialized = 1;
+    }
+
+    QueryPerformanceCounter(&counter);
+    return (double)counter.QuadPart * 1000.0 / (double)frequency.QuadPart;
+#else
     struct timeval tv;
 
     gettimeofday(&tv, NULL);
     return (double)tv.tv_sec * 1000.0 + (double)tv.tv_usec / 1000.0;
+#endif
 }
 
 static void* perf_timer_cb(void* data)

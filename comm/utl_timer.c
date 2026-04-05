@@ -110,6 +110,40 @@ static void iUTL_TimerSleepMs(int ms)
     pselect(0, NULL, NULL, NULL, &tv, &sigUtl);
 }
 #endif
+
+#if ENT_TIMER_IMPL_LINUX || ENT_TIMER_IMPL_POSIX_FALLBACK
+static void* iUTL_TimerThread(void* data)
+{
+    PTIMER_CTX_T timerCtx = (PTIMER_CTX_T)data;
+
+    if(timerCtx == NULL || timerCtx->tag != UTL_TIMER_TAG)
+    {
+        return NULL;
+    }
+
+    while(timerCtx->isEnable)
+    {
+        iUTL_TimerSleepMs(timerCtx->ms);
+        if(!timerCtx->isEnable)
+        {
+            break;
+        }
+
+        if(timerCtx->timer_ev_cb)
+        {
+            timerCtx->timer_ev_cb(timerCtx->data);
+        }
+
+        if(timerCtx->timerType & UTL_TIMER_E_ONESHOT)
+        {
+            timerCtx->isEnable = false;
+            break;
+        }
+    }
+
+    return NULL;
+}
+#endif
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :UTL_TimerClose
@@ -395,38 +429,6 @@ static void timer_handler(int sig, siginfo_t *si, void *uc)
  *
  *-----------------------------------------------------------------------------
  */
-static void* iUTL_TimerThread(void* data)
-{
-    PTIMER_CTX_T timerCtx = (PTIMER_CTX_T)data;
-
-    if(timerCtx == NULL || timerCtx->tag != UTL_TIMER_TAG)
-    {
-        return NULL;
-    }
-
-    while(timerCtx->isEnable)
-    {
-        iUTL_TimerSleepMs(timerCtx->ms);
-        if(!timerCtx->isEnable)
-        {
-            break;
-        }
-
-        if(timerCtx->timer_ev_cb)
-        {
-            timerCtx->timer_ev_cb(timerCtx->data);
-        }
-
-        if(timerCtx->timerType & UTL_TIMER_E_ONESHOT)
-        {
-            timerCtx->isEnable = false;
-            break;
-        }
-    }
-
-    return NULL;
-}
-
 static long long iUTL_TimerMonotonicNs(void)
 {
     struct timespec ts;

@@ -3,18 +3,24 @@
 #include <stdbool.h>
 #include <string.h>
 #include <time.h>
+#ifdef WIN32
+#include <windows.h>
+#else
 #include <dlfcn.h>
 #include <errno.h>
+#endif
 
 #include "ient_comm.h"
 
 ENT_CTX gEntCtx;
 
+#ifndef WIN32
 static int s_clock_gettime_call_count = 0;
 static struct timespec s_last_timedwait_deadline;
 static int s_timedwait_call_count = 0;
 static int s_fail_pthread_mutex_init = 0;
 static int s_fail_pthread_rwlock_init = 0;
+#endif
 
 static int expect_true(int condition, const char* message)
 {
@@ -29,9 +35,11 @@ static int expect_true(int condition, const char* message)
 
 static void reset_cv_wait_probes(void)
 {
+#ifndef WIN32
     s_clock_gettime_call_count = 0;
     memset(&s_last_timedwait_deadline, 0, sizeof(s_last_timedwait_deadline));
     s_timedwait_call_count = 0;
+#endif
 }
 
 MSG_ID_T ENT_LogInit(void)
@@ -108,6 +116,7 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle, const char* format, ...)
     return 0;
 }
 
+#ifndef WIN32
 int clock_gettime(clockid_t clk_id, struct timespec* tp)
 {
     (void)clk_id;
@@ -169,6 +178,7 @@ int pthread_cond_timedwait(pthread_cond_t* restrict cond,
     }
     return 0;
 }
+#endif
 
 static int test_lock_init_rejects_null_pointer(void)
 {
@@ -191,6 +201,9 @@ static int test_lock_init_ex_rejects_unknown_type(void)
 
 static int test_lock_init_propagates_mutex_init_failure(void)
 {
+#ifdef WIN32
+    return 0;
+#else
     UTL_LOCK lock = (UTL_LOCK)0x1;
 
     s_fail_pthread_mutex_init = 1;
@@ -201,10 +214,14 @@ static int test_lock_init_propagates_mutex_init_failure(void)
     }
 
     return expect_true(lock == NULL, "UTL_LockInit should clear the output pointer when mutex initialization fails");
+#endif
 }
 
 static int test_rw_lock_init_propagates_rwlock_init_failure(void)
 {
+#ifdef WIN32
+    return 0;
+#else
     UTL_LOCK lock = (UTL_LOCK)0x1;
 
     s_fail_pthread_rwlock_init = 1;
@@ -215,6 +232,7 @@ static int test_rw_lock_init_propagates_rwlock_init_failure(void)
     }
 
     return expect_true(lock == NULL, "UTL_LockInitEx should clear the output pointer when rwlock initialization fails");
+#endif
 }
 
 static int test_mutex_lock_roundtrip_succeeds(void)
@@ -332,6 +350,52 @@ static int test_cv_wake_and_wake_all_reject_null(void)
 
 static int test_cv_wait_uses_monotonic_deadline_and_normalized_timespec(void)
 {
+#ifdef WIN32
+    UTL_LOCK lock = NULL;
+    UTL_CV cv = NULL;
+
+    if(expect_true(UTL_LockInit(&lock, "mutex") == 0, "UTL_LockInit should create a mutex for cv wait timing checks") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(UTL_CVInit(&cv, "cv") == 0, "UTL_CVInit should create a condition variable for timing checks") != 0)
+    {
+        UTL_LockClose(lock);
+        return 1;
+    }
+
+    if(expect_true(UTL_LockEnter(lock) == 0, "UTL_LockEnter should lock the mutex before waiting on Windows") != 0)
+    {
+        UTL_CVClose(cv);
+        UTL_LockClose(lock);
+        return 1;
+    }
+
+    if(expect_true(UTL_CVWait(cv, lock, 1, RW_WRITE_E) == 0,
+                   "UTL_CVWait should accept a timed mutex wait on Windows") != 0)
+    {
+        UTL_LockLeave(lock);
+        UTL_CVClose(cv);
+        UTL_LockClose(lock);
+        return 1;
+    }
+
+    if(expect_true(UTL_LockLeave(lock) == 0, "UTL_LockLeave should release the mutex after waiting on Windows") != 0)
+    {
+        UTL_CVClose(cv);
+        UTL_LockClose(lock);
+        return 1;
+    }
+
+    if(expect_true(UTL_CVClose(cv) == 0, "UTL_CVClose should release the condition variable after timing checks") != 0)
+    {
+        UTL_LockClose(lock);
+        return 1;
+    }
+
+    return expect_true(UTL_LockClose(lock) == 0, "UTL_LockClose should release the mutex after timing checks");
+#else
     UTL_LOCK lock = NULL;
     UTL_CV cv = NULL;
 
@@ -387,6 +451,7 @@ static int test_cv_wait_uses_monotonic_deadline_and_normalized_timespec(void)
     }
 
     return expect_true(UTL_LockClose(lock) == 0, "UTL_LockClose should release the mutex after timing checks");
+#endif
 }
 
 int main(void)

@@ -34,6 +34,13 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+      - name: Performance Smoke
+        run: |
+          ./build/bin/perf_utl_socket
+          ./build/bin/perf_utl_timer
+          ./build/bin/perf_utl_timer_rt
+          ./build/bin/perf_utl_tpool
+
   build-windows:
     runs-on: windows-2022
 
@@ -56,4 +63,10 @@ jobs:
       - name: Test
         run: >
           ctest --test-dir build -C Release --output-on-failure
-          -R "test_ent_init|test_utl_dll|test_ent_thread|test_utl_timer|test_ent_log"
+          -R "test_ent_init|test_utl_dll|test_utl_thread|test_ent_thread|test_utl_tpool|test_utl_timer|test_utl_socket|test_ent_db|test_ent_log|test_security"
+
+      - name: Performance Smoke
+        shell: pwsh
+        run: |
+          & ".\build\bin\Release\perf_utl_timer.exe"
+          & ".\build\bin\Release\perf_utl_tpool.exe"

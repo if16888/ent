@@ -2,7 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef WIN32
+#ifdef WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -99,6 +102,50 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle, const char* format, ...)
     return 0;
 }
 
+static void close_native_socket(UTL_D_SOCKET socketDesc)
+{
+#ifdef WIN32
+    if(socketDesc != INVALID_SOCKET)
+    {
+        closesocket(socketDesc);
+    }
+#else
+    if(socketDesc >= 0)
+    {
+        close(socketDesc);
+    }
+#endif
+}
+
+static UTL_D_SOCKET accept_native_socket(UTL_D_SOCKET listenSocket,
+                                         struct sockaddr* addr,
+                                         int* addrLen)
+{
+#ifdef WIN32
+    return accept(listenSocket, addr, addrLen);
+#else
+    socklen_t nativeAddrLen = (addrLen != NULL) ? (socklen_t)*addrLen : 0;
+    UTL_D_SOCKET accepted = accept(listenSocket, addr, (addrLen != NULL) ? &nativeAddrLen : NULL);
+    if(addrLen != NULL)
+    {
+        *addrLen = (int)nativeAddrLen;
+    }
+    return accepted;
+#endif
+}
+
+static int get_socket_name(UTL_D_SOCKET socketDesc, struct sockaddr* addr, int* addrLen)
+{
+#ifdef WIN32
+    return getsockname(socketDesc, addr, addrLen);
+#else
+    socklen_t nativeAddrLen = (socklen_t)*addrLen;
+    int rc = getsockname(socketDesc, addr, &nativeAddrLen);
+    *addrLen = (int)nativeAddrLen;
+    return rc;
+#endif
+}
+
 static int test_socket_rejects_uninitialized_use(void)
 {
     UTL_D_SOCKET sock = -1;
@@ -156,10 +203,11 @@ static int test_socket_local_roundtrip_send_and_recv(void)
 {
     UTL_D_SOCKET server = -1;
     UTL_D_SOCKET client = -1;
-    int accepted = -1;
+    UTL_D_SOCKET accepted = (UTL_D_SOCKET)-1;
     struct sockaddr_in addr;
     struct sockaddr_in acceptedAddr;
-    socklen_t acceptedLen = sizeof(acceptedAddr);
+    int acceptedLen = (int)sizeof(acceptedAddr);
+    int addrLen = (int)sizeof(addr);
     char recvBuf[32];
     char sendBuf[] = "ping";
     int sent = 0;
@@ -200,7 +248,7 @@ static int test_socket_local_roundtrip_send_and_recv(void)
         return 1;
     }
 
-    if(getsockname(server, (struct sockaddr*)&addr, (socklen_t[]){sizeof(addr)}) != 0)
+    if(get_socket_name(server, (struct sockaddr*)&addr, &addrLen) != 0)
     {
         perror("getsockname");
         UTL_CloseSocket(server);
@@ -222,8 +270,12 @@ static int test_socket_local_roundtrip_send_and_recv(void)
         return 1;
     }
 
-    accepted = accept(server, (struct sockaddr*)&acceptedAddr, &acceptedLen);
+    accepted = accept_native_socket(server, (struct sockaddr*)&acceptedAddr, &acceptedLen);
+#ifdef WIN32
+    if(expect_true(accepted != INVALID_SOCKET, "The server should accept the localhost client connection") != 0)
+#else
     if(expect_true(accepted >= 0, "The server should accept the localhost client connection") != 0)
+#endif
     {
         UTL_CloseSocket(client);
         UTL_CloseSocket(server);
@@ -233,7 +285,7 @@ static int test_socket_local_roundtrip_send_and_recv(void)
     if(expect_true(UTL_Send(client, sendBuf, 4, 0, &sent) == 0,
                    "UTL_Send should send data to the connected peer") != 0)
     {
-        close(accepted);
+        close_native_socket(accepted);
         UTL_CloseSocket(client);
         UTL_CloseSocket(server);
         return 1;
@@ -241,7 +293,7 @@ static int test_socket_local_roundtrip_send_and_recv(void)
 
     if(expect_true(sent == 4, "UTL_Send should report the sent byte count") != 0)
     {
-        close(accepted);
+        close_native_socket(accepted);
         UTL_CloseSocket(client);
         UTL_CloseSocket(server);
         return 1;
@@ -250,7 +302,7 @@ static int test_socket_local_roundtrip_send_and_recv(void)
     if(expect_true(UTL_Recv(accepted, recvBuf, (int)sizeof(recvBuf), 0, &recvd) == 0,
                    "UTL_Recv should read data from the peer") != 0)
     {
-        close(accepted);
+        close_native_socket(accepted);
         UTL_CloseSocket(client);
         UTL_CloseSocket(server);
         return 1;
@@ -258,7 +310,7 @@ static int test_socket_local_roundtrip_send_and_recv(void)
 
     if(expect_true(recvd == 4, "UTL_Recv should report the received byte count") != 0)
     {
-        close(accepted);
+        close_native_socket(accepted);
         UTL_CloseSocket(client);
         UTL_CloseSocket(server);
         return 1;
@@ -266,23 +318,23 @@ static int test_socket_local_roundtrip_send_and_recv(void)
 
     if(expect_true(memcmp(recvBuf, "ping", 4) == 0, "UTL_Recv should preserve the sent payload") != 0)
     {
-        close(accepted);
+        close_native_socket(accepted);
         UTL_CloseSocket(client);
         UTL_CloseSocket(server);
         return 1;
     }
 
-    close(accepted);
+    close_native_socket(accepted);
     UTL_CloseSocket(client);
     return expect_true(UTL_CloseSocket(server) == 0, "UTL_CloseSocket should close the listening socket");
 }
 
 static int setup_loopback_tcp_pair(UTL_D_SOCKET* server,
                                    UTL_D_SOCKET* client,
-                                   int* accepted,
+                                   UTL_D_SOCKET* accepted,
                                    struct sockaddr_in* addr)
 {
-    socklen_t addrLen = sizeof(*addr);
+    int addrLen = (int)sizeof(*addr);
 
     *server = -1;
     *client = -1;
@@ -322,7 +374,7 @@ static int setup_loopback_tcp_pair(UTL_D_SOCKET* server,
         return 1;
     }
 
-    if(getsockname(*server, (struct sockaddr*)addr, &addrLen) != 0)
+    if(get_socket_name(*server, (struct sockaddr*)addr, &addrLen) != 0)
     {
         perror("getsockname");
         UTL_CloseSocket(*server);
@@ -348,25 +400,29 @@ static int setup_loopback_tcp_pair(UTL_D_SOCKET* server,
         return 1;
     }
 
-    *accepted = accept(*server, NULL, NULL);
+    *accepted = accept_native_socket(*server, NULL, NULL);
+#ifdef WIN32
+    if(expect_true(*accepted != INVALID_SOCKET, "accept should succeed") != 0)
+#else
     if(expect_true(*accepted >= 0, "accept should succeed") != 0)
+#endif
     {
         UTL_CloseSocket(*client);
         UTL_CloseSocket(*server);
         *client = -1;
         *server = -1;
-        *accepted = -1;
+        *accepted = (UTL_D_SOCKET)-1;
         return 1;
     }
 
     return 0;
 }
 
-static void cleanup_loopback_tcp_pair(UTL_D_SOCKET server, UTL_D_SOCKET client, int accepted)
+static void cleanup_loopback_tcp_pair(UTL_D_SOCKET server, UTL_D_SOCKET client, UTL_D_SOCKET accepted)
 {
-    if(accepted >= 0)
+    if(accepted != (UTL_D_SOCKET)-1)
     {
-        close(accepted);
+        close_native_socket(accepted);
     }
 
     if(client >= 0)
@@ -446,7 +502,7 @@ static int test_socket_reports_peer_close_without_crashing(void)
 {
     UTL_D_SOCKET server = -1;
     UTL_D_SOCKET client = -1;
-    int accepted = -1;
+    UTL_D_SOCKET accepted = (UTL_D_SOCKET)-1;
     struct sockaddr_in addr;
     char recvBuf[16];
     int recvBytes = -1;
@@ -459,8 +515,8 @@ static int test_socket_reports_peer_close_without_crashing(void)
         return 1;
     }
 
-    close(accepted);
-    accepted = -1;
+    close_native_socket(accepted);
+    accepted = (UTL_D_SOCKET)-1;
 
     if(expect_true(UTL_Recv(client, recvBuf, (int)sizeof(recvBuf), 0, &recvBytes) == 0,
                    "recv after peer close should succeed cleanly") != 0)
@@ -483,7 +539,7 @@ static int test_socket_large_payload_roundtrip(void)
 {
     UTL_D_SOCKET server = -1;
     UTL_D_SOCKET client = -1;
-    int accepted = -1;
+    UTL_D_SOCKET accepted = (UTL_D_SOCKET)-1;
     struct sockaddr_in addr;
     enum { PAYLOAD_SIZE = 65536 };
     char* sendBuf = NULL;

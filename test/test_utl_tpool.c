@@ -1,8 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef WIN32
+#include <windows.h>
+#else
 #include <pthread.h>
 #include <unistd.h>
+#endif
 
 #include "ient_comm.h"
 #include "ent_thread.h"
@@ -19,9 +23,31 @@ static int s_use_real_threads = 0;
 
 typedef struct
 {
+#ifdef WIN32
+    HANDLE thread;
+#else
     pthread_t thread;
+#endif
     int joined;
 } TEST_THREAD_ID;
+
+#ifdef WIN32
+typedef struct
+{
+    PTHREAD_START_ROUTINE thProc;
+    void* thData;
+} TEST_THREAD_START_DATA;
+
+static DWORD WINAPI test_thread_start(LPVOID data)
+{
+    TEST_THREAD_START_DATA* startData = (TEST_THREAD_START_DATA*)data;
+    PTHREAD_START_ROUTINE thProc = startData->thProc;
+    void* thData = startData->thData;
+    free(startData);
+    (void)thProc(thData);
+    return 0;
+}
+#endif
 
 typedef struct
 {
@@ -188,11 +214,32 @@ MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid, ENT_THREAD handle, PTHREAD_START_R
             return -6;
         }
 
+#ifdef WIN32
+        {
+            TEST_THREAD_START_DATA* startData =
+                (TEST_THREAD_START_DATA*)calloc(1, sizeof(TEST_THREAD_START_DATA));
+            if(startData == NULL)
+            {
+                free(threadId);
+                return -6;
+            }
+            startData->thProc = thProc;
+            startData->thData = thData;
+            threadId->thread = CreateThread(NULL, 0, test_thread_start, startData, 0, NULL);
+            if(threadId->thread == NULL)
+            {
+                free(startData);
+                free(threadId);
+                return -7;
+            }
+        }
+#else
         if(pthread_create(&threadId->thread, NULL, thProc, thData) != 0)
         {
             free(threadId);
             return -7;
         }
+#endif
 
         *tid = (ENT_THREAD_ID)threadId;
     }
@@ -216,7 +263,12 @@ MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid, ENT_THREAD handle, int ms)
             threadId = (TEST_THREAD_ID*)(*tid);
             if(!threadId->joined)
             {
+#ifdef WIN32
+                WaitForSingleObject(threadId->thread, INFINITE);
+                CloseHandle(threadId->thread);
+#else
                 pthread_join(threadId->thread, NULL);
+#endif
                 threadId->joined = 1;
             }
             free(threadId);
@@ -237,7 +289,11 @@ MSG_ID_T UTL_Sleep(int ms)
 {
     if(ms > 0)
     {
+#ifdef WIN32
+        Sleep((DWORD)ms);
+#else
         usleep((useconds_t)ms * 1000U);
+#endif
     }
     return 0;
 }

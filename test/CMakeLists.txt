@@ -30,26 +30,24 @@ target_include_directories(
 
 add_test(NAME test_utl_dll COMMAND test_utl_dll)
 
-if(NOT WIN32)
-  add_executable(
-    test_utl_thread
-    test_utl_thread.c
-    ../comm/utl_thread.c
-  )
+add_executable(
+  test_utl_thread
+  test_utl_thread.c
+  ../comm/utl_thread.c
+)
 
-  target_include_directories(
-    test_utl_thread
-    PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}/../inc
-      ${CMAKE_CURRENT_SOURCE_DIR}/../comm
-  )
+target_include_directories(
+  test_utl_thread
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../comm
+)
 
-  if(APPLE OR UNIX)
-    target_link_libraries(test_utl_thread PRIVATE pthread)
-  endif()
-
-  add_test(NAME test_utl_thread COMMAND test_utl_thread)
+if(APPLE OR UNIX)
+  target_link_libraries(test_utl_thread PRIVATE pthread)
 endif()
+
+add_test(NAME test_utl_thread COMMAND test_utl_thread)
 
 add_executable(
   test_ent_thread
@@ -81,28 +79,26 @@ endif()
 
 add_test(NAME test_ent_thread COMMAND test_ent_thread)
 
-if(NOT WIN32)
-  add_executable(
-    test_utl_tpool
-    test_utl_tpool.c
-    ../comm/utl_tpool.c
-    ../comm/utl_thread.c
-    ../comm/utl_dll.c
-  )
+add_executable(
+  test_utl_tpool
+  test_utl_tpool.c
+  ../comm/utl_tpool.c
+  ../comm/utl_thread.c
+  ../comm/utl_dll.c
+)
 
-  target_include_directories(
-    test_utl_tpool
-    PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}/../inc
-      ${CMAKE_CURRENT_SOURCE_DIR}/../comm
-  )
+target_include_directories(
+  test_utl_tpool
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../comm
+)
 
-  if(APPLE OR UNIX)
-    target_link_libraries(test_utl_tpool PRIVATE pthread)
-  endif()
-
-  add_test(NAME test_utl_tpool COMMAND test_utl_tpool)
+if(APPLE OR UNIX)
+  target_link_libraries(test_utl_tpool PRIVATE pthread)
 endif()
+
+add_test(NAME test_utl_tpool COMMAND test_utl_tpool)
 
 add_executable(
   test_utl_timer
@@ -133,22 +129,22 @@ endif()
 
 add_test(NAME test_utl_timer COMMAND test_utl_timer)
 
-if(NOT WIN32)
-  add_executable(
-    test_utl_socket
-    test_utl_socket.c
-    ../comm/utl_socket.c
-  )
+add_executable(
+  test_utl_socket
+  test_utl_socket.c
+  ../comm/utl_socket.c
+)
 
-  target_include_directories(
-    test_utl_socket
-    PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}/../inc
-      ${CMAKE_CURRENT_SOURCE_DIR}/../comm
-  )
+target_include_directories(
+  test_utl_socket
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../comm
+)
 
-  add_test(NAME test_utl_socket COMMAND test_utl_socket)
+add_test(NAME test_utl_socket COMMAND test_utl_socket)
 
+if(ENT_ENABLE_SQLITE AND ENT_SQLITE_LIBRARY)
   add_executable(
     test_ent_db
     test_ent_db.c
@@ -169,7 +165,21 @@ if(NOT WIN32)
       ENT_ENABLE_MYSQL=0
   )
 
-  if(APPLE OR UNIX)
+  if(WIN32)
+    if(ENT_SQLITE_INCLUDE_DIR)
+      target_include_directories(test_ent_db PRIVATE ${ENT_SQLITE_INCLUDE_DIR})
+    endif()
+    target_link_libraries(test_ent_db PRIVATE ${ENT_SQLITE_LIBRARY})
+    if(ENT_SQLITE_RUNTIME)
+      add_custom_command(
+        TARGET test_ent_db
+        POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          ${ENT_SQLITE_RUNTIME}
+          $<TARGET_FILE_DIR:test_ent_db>
+      )
+    endif()
+  else()
     target_link_libraries(test_ent_db PRIVATE pthread sqlite3)
   endif()
 
@@ -197,7 +207,7 @@ endif()
 
 add_test(NAME test_ent_log COMMAND test_ent_log)
 
-if(NOT WIN32)
+if(ENT_ENABLE_SQLITE AND ENT_SQLITE_LIBRARY)
   add_executable(
     test_security
     test_security.c
@@ -222,12 +232,28 @@ if(NOT WIN32)
       ENT_ENABLE_MYSQL=0
   )
 
-  if(APPLE OR UNIX)
+  if(WIN32)
+    if(ENT_SQLITE_INCLUDE_DIR)
+      target_include_directories(test_security PRIVATE ${ENT_SQLITE_INCLUDE_DIR})
+    endif()
+    target_link_libraries(test_security PRIVATE ${ENT_SQLITE_LIBRARY})
+    if(ENT_SQLITE_RUNTIME)
+      add_custom_command(
+        TARGET test_security
+        POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          ${ENT_SQLITE_RUNTIME}
+          $<TARGET_FILE_DIR:test_security>
+      )
+    endif()
+  else()
     target_link_libraries(test_security PRIVATE pthread sqlite3)
   endif()
 
   add_test(NAME test_security COMMAND test_security)
+endif()
 
+if(NOT WIN32)
   add_executable(
     perf_utl_socket
     perf_utl_socket.c
@@ -244,29 +270,33 @@ if(NOT WIN32)
   if(APPLE OR UNIX)
     target_link_libraries(perf_utl_socket PRIVATE pthread)
   endif()
+endif()
 
-  add_executable(
-    perf_utl_timer
-    perf_utl_timer.c
-    ../comm/utl_timer.c
-    ../comm/utl_thread.c
-    ../comm/utl_dll.c
-  )
+add_executable(
+  perf_utl_timer
+  perf_utl_timer.c
+  ../comm/utl_timer.c
+  ../comm/utl_thread.c
+  ../comm/utl_dll.c
+)
 
-  target_include_directories(
-    perf_utl_timer
-    PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}/../inc
-      ${CMAKE_CURRENT_SOURCE_DIR}/../comm
-  )
+target_include_directories(
+  perf_utl_timer
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../comm
+)
 
-  if(APPLE OR UNIX)
-    target_link_libraries(perf_utl_timer PRIVATE pthread)
-  endif()
+if(APPLE OR UNIX)
+  target_link_libraries(perf_utl_timer PRIVATE pthread)
+endif()
 
-  if(UNIX AND NOT APPLE)
-    target_link_libraries(perf_utl_timer PRIVATE rt)
-  endif()
+if(WIN32)
+  target_link_libraries(perf_utl_timer PRIVATE Winmm)
+endif()
+
+if(UNIX AND NOT APPLE)
+  target_link_libraries(perf_utl_timer PRIVATE rt)
 endif()
 
 if(UNIX AND NOT APPLE)
@@ -289,25 +319,27 @@ if(UNIX AND NOT APPLE)
   target_link_libraries(perf_utl_timer_rt PRIVATE rt)
 endif()
 
-if(NOT WIN32)
-  add_executable(
-    perf_utl_tpool
-    perf_utl_tpool.c
-    ../comm/utl_tpool.c
-    ../comm/utl_thread.c
-    ../comm/utl_dll.c
-    ../comm/ent_thread.c
-    ../comm/utl_timer.c
-  )
+add_executable(
+  perf_utl_tpool
+  perf_utl_tpool.c
+  ../comm/utl_tpool.c
+  ../comm/utl_thread.c
+  ../comm/utl_dll.c
+  ../comm/ent_thread.c
+  ../comm/utl_timer.c
+)
 
-  target_include_directories(
-    perf_utl_tpool
-    PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}/../inc
-      ${CMAKE_CURRENT_SOURCE_DIR}/../comm
-  )
+target_include_directories(
+  perf_utl_tpool
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../comm
+)
 
-  if(APPLE OR UNIX)
-    target_link_libraries(perf_utl_tpool PRIVATE pthread)
-  endif()
+if(APPLE OR UNIX)
+  target_link_libraries(perf_utl_tpool PRIVATE pthread)
+endif()
+
+if(WIN32)
+  target_link_libraries(perf_utl_tpool PRIVATE Winmm)
 endif()
