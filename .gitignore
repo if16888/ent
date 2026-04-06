@@ -1,6 +1,8 @@
 /tmp/
 /build/
+/build-install*/
 /build-ci*/
+.local-install/
 .vscode/
 
 #cmake
