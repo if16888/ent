@@ -50,3 +50,11 @@
 9. CI 经验文档
    这次 GitHub Actions 的平台差异、踩坑记录、脚本化经验和后续项目可复用的 checklist 已整理到：
    `docs/github-actions-ci-playbook.md`
+
+10. 本地下游消费安装
+   如需让其他 CMake 项目通过 `find_package(ent CONFIG REQUIRED)` 使用本库，可先本地安装：
+   `cmake -S . -B build-install -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release`
+   `cmake --build build-install --parallel 4`
+   `cmake --install build-install --prefix /Users/lifei/test/ent/.local-install`
+   下游项目配置时传入：
+   `-DCMAKE_PREFIX_PATH=/Users/lifei/test/ent/.local-install`
