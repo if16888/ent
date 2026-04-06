@@ -16,6 +16,7 @@ endif()
 message(STATUS "Build type set to ${CMAKE_BUILD_TYPE}")
 
 include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY
     ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY
@@ -67,6 +68,32 @@ install(FILES
           )
 endif()
 endif()
+
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/entConfigVersion.cmake"
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/entConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/entConfig.cmake"
+    INSTALL_DESTINATION ${INSTALL_CMAKEDIR}
+)
+
+install(
+    EXPORT entTargets
+    FILE entTargets.cmake
+    NAMESPACE ent::
+    DESTINATION ${INSTALL_CMAKEDIR}
+)
+
+install(
+    FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/entConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/entConfigVersion.cmake"
+    DESTINATION ${INSTALL_CMAKEDIR}
+)
 
 
 include(InstallRequiredSystemLibraries)

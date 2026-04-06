@@ -242,6 +242,20 @@ add_library(
   SHARED
         $<TARGET_OBJECTS:${LIB_NAME_OBJS}>
   )
+
+target_include_directories(
+  ${LIB_NAME_SHARE}
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../inc>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+
+target_compile_definitions(
+  ${LIB_NAME_SHARE}
+  PUBLIC
+    ENT_ENABLE_SQLITE=$<BOOL:${ENT_ENABLE_SQLITE}>
+    ENT_ENABLE_MYSQL=$<BOOL:${ENT_ENABLE_MYSQL}>
+)
   
   set_target_properties(${LIB_NAME_SHARE} 
                          PROPERTIES 
@@ -275,9 +289,25 @@ add_library(
         $<TARGET_OBJECTS:${LIB_NAME_OBJS}>
   )
 
+target_include_directories(
+  ${LIB_NAME_STATIC}
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../inc>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+
+target_compile_definitions(
+  ${LIB_NAME_STATIC}
+  PUBLIC
+    ENT_ENABLE_SQLITE=$<BOOL:${ENT_ENABLE_SQLITE}>
+    ENT_ENABLE_MYSQL=$<BOOL:${ENT_ENABLE_MYSQL}>
+)
+
 install(
   TARGETS
       ${LIB_NAME_SHARE} ${LIB_NAME_STATIC}
+  EXPORT
+    entTargets
   ARCHIVE
     DESTINATION ${INSTALL_LIBDIR}
     COMPONENT devel
