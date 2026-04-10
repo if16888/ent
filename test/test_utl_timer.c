@@ -259,6 +259,7 @@ static int test_periodic_timer_fires_until_deleted(void)
     UTL_TIMER_T timer = NULL;
     int hits = 0;
     int beforeDelete = 0;
+    int afterDelete = 0;
 
     if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before creating a periodic timer") != 0)
     {
@@ -286,10 +287,11 @@ static int test_periodic_timer_fires_until_deleted(void)
         UTL_TimerClose();
         return 1;
     }
+    afterDelete = hits;
 
     UTL_Sleep(80);
 
-    if(expect_true(hits == beforeDelete, "A deleted periodic timer should stop firing") != 0)
+    if(expect_true(hits == afterDelete, "A deleted periodic timer should stop firing") != 0)
     {
         UTL_TimerClose();
         return 1;

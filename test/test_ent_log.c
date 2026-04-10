@@ -864,6 +864,133 @@ cleanup:
 #endif
 }
 
+static int test_buffered_log_flush_interval_writes_without_close(void)
+{
+#ifdef WIN32
+    return 0;
+#else
+    ENT_LOG logHandle = NULL;
+    ENT_LOG_LEV_E level = LOG_LEV_INFO_E;
+    bool buffered = true;
+    int flushBatch = 10000;
+    int flushIntervalMs = 20;
+    char dirPath[256];
+    char logFilePath[512];
+    char readBuf[1024];
+    int found = 0;
+    int rc = 1;
+
+    if(make_temp_dir(dirPath, sizeof(dirPath)) != 0)
+    {
+        fprintf(stderr, "failed to create temp flush-interval directory\n");
+        return 1;
+    }
+
+    format_log_file_path(logFilePath, sizeof(logFilePath), dirPath, "FlushIntervalModule");
+
+    if(expect_true(ENT_LogInit() == 0, "ENT_LogInit should initialize before flush-interval testing") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogInitHandle(&logHandle, "FlushIntervalModule", dirPath) == 0,
+                   "ENT_LogInitHandle should create a handle for flush-interval testing") != 0)
+    {
+        ENT_LogClose();
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_LEVEL_E, &level) == 0,
+                   "ENT_LogSetOption should enable INFO writes for flush-interval testing") != 0)
+    {
+        ENT_LogCloseHandle(logHandle);
+        ENT_LogClose();
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_BUFFER_E, &buffered) == 0,
+                   "ENT_LogSetOption should enable buffered logging for flush-interval testing") != 0)
+    {
+        ENT_LogCloseHandle(logHandle);
+        ENT_LogClose();
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_FLUSH_BATCH_E, &flushBatch) == 0,
+                   "ENT_LogSetOption should apply custom flush batch for flush-interval testing") != 0)
+    {
+        ENT_LogCloseHandle(logHandle);
+        ENT_LogClose();
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_FLUSH_INTERVAL_E, &flushIntervalMs) == 0,
+                   "ENT_LogSetOption should apply custom flush interval") != 0)
+    {
+        ENT_LogCloseHandle(logHandle);
+        ENT_LogClose();
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogPrint(logHandle, "flush interval line\n") == 0,
+                   "ENT_LogPrint should enqueue flush-interval message") != 0)
+    {
+        ENT_LogCloseHandle(logHandle);
+        ENT_LogClose();
+        goto cleanup;
+    }
+
+    for(int i = 0; i < 100; ++i)
+    {
+        FILE* fp = fopen(logFilePath, "r");
+        memset(readBuf, 0, sizeof(readBuf));
+        if(fp != NULL)
+        {
+            fread(readBuf, 1, sizeof(readBuf) - 1, fp);
+            fclose(fp);
+            if(strstr(readBuf, "flush interval line") != NULL)
+            {
+                found = 1;
+                break;
+            }
+        }
+        usleep(10000);
+    }
+
+    if(expect_true(found == 1,
+                   "Buffered logging should flush by interval before close") != 0)
+    {
+        ENT_LogCloseHandle(logHandle);
+        ENT_LogClose();
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogCloseHandle(logHandle) == 0,
+                   "ENT_LogCloseHandle should close handle after flush-interval testing") != 0)
+    {
+        ENT_LogClose();
+        goto cleanup;
+    }
+    logHandle = NULL;
+
+    if(expect_true(ENT_LogClose() == 0, "ENT_LogClose should shut down after flush-interval testing") != 0)
+    {
+        goto cleanup;
+    }
+
+    rc = 0;
+
+cleanup:
+    if(logHandle != NULL)
+    {
+        ENT_LogCloseHandle(logHandle);
+        ENT_LogClose();
+    }
+    remove_dir_contents(dirPath);
+    return rc;
+#endif
+}
+
 int main(void)
 {
     int failures = 0;
@@ -876,6 +1003,7 @@ int main(void)
     failures += test_log_level_filters_debug_messages();
     failures += test_log_close_handle_waits_for_active_writers();
     failures += test_buffered_log_close_flushes_queued_messages();
+    failures += test_buffered_log_flush_interval_writes_without_close();
 
     if(failures != 0)
     {

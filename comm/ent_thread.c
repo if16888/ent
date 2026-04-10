@@ -38,7 +38,6 @@ typedef struct THREAD_DB
 #else
     void*          thHandle;
     pthread_t      thId;
-    pthread_attr_t thAttr;
     PTHREAD_START_ROUTINE thProc;
     void*          thData;
     void*          thRet;
@@ -467,7 +466,7 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadDetachCreate(ENT_THREAD handle,PTHREAD_START_ROUTI
      }
      IENT_LOG_PRINT("pthread_create sucessful,thread id is %ld\n",thId);
      
-     pthread_attr_destroy(&thAttr);
+     s = pthread_attr_destroy(&thAttr);
      if(s != 0)
      {
         IENT_LOG_ERROR("pthread_attr_destroy failed,error [%d]->[%s]\n",s,strerror(s));
@@ -498,7 +497,6 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
     ENT_TH_CTX*    thCtx=(ENT_TH_CTX*)handle;
     THREAD_DB*     tmp=NULL;
     int            s;
-    pthread_attr_t thAttr;
     
     if(handle==NULL || thProc==NULL)
     {
@@ -520,22 +518,6 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
          goto END_OF_ROUTINE;
     }
     memset(tmp,0,sizeof(THREAD_DB));
-    
-    s = pthread_attr_init(&thAttr);
-    if(s != 0)
-    {
-        IENT_LOG_ERROR("pthread_attr_init failed,error [%d]->[%s]\n",s,strerror(s));
-        free(tmp);
-        sts = -3;
-        goto END_OF_ROUTINE;
-    }
-
-    //s = pthread_attr_setdetachstate(&thAttr, PTHREAD_CREATE_DETACHED);
-    //if (s != 0)
-    //{
-    //    IENT_LOG_ERROR("pthread_attr_setdetachstate failed,error [%d]->[%s]\n",s,strerror(s));
-    //    return -4;
-    //}
     
     tmp->thProc = thProc;
     tmp->thData = thData;
@@ -559,14 +541,13 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
         goto END_OF_ROUTINE;
     }
 
-    s = pthread_create(&tmp->thId, &thAttr, iENT_ThreadProc, tmp); 
+    s = pthread_create(&tmp->thId, NULL, iENT_ThreadProc, tmp); 
     if(s != 0)
     {
        IENT_LOG_ERROR("pthread_create failed,error [%d] ->[%s]\n",s,strerror(s));
        pthread_cond_destroy(&tmp->doneCv);
        pthread_mutex_destroy(&tmp->doneMutex);
        free(tmp);
-       pthread_attr_destroy(&thAttr);
        sts = -5;
        goto END_OF_ROUTINE;
     }
@@ -574,12 +555,6 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
     tmp->thHandle = NULL;
     tmp->tag = ENT_TH_TAG;
     
-    pthread_attr_destroy(&thAttr);
-    if(s != 0)
-    {
-       IENT_LOG_WARN("pthread_attr_destroy failed,error [%d]->[%s]\n",s,strerror(s));
-    }
-
     UTL_LockEnter(thCtx->dllLock);
     sts = UTL_DllInsHead(&thCtx->dllHeader,(DLL_D_HDR*)tmp);
     UTL_LockLeave(thCtx->dllLock);

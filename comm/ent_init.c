@@ -19,6 +19,12 @@
 #pragma warning(disable : 4996)
 #else
 #include <limits.h>
+#include <errno.h>
+#include <sys/mman.h>
+#ifdef __linux__
+#include <pthread.h>
+#include <sched.h>
+#endif
 #ifndef PATH_MAX
 #define PATH_MAX 4096
 #endif
@@ -36,6 +42,12 @@ static inline void iENT_CTXResetRuntime(ENT_CTX* ctx)
     if(ctx == NULL)
         return;
 
+    ctx->rtRequested = false;
+    ctx->rtEnabled = false;
+    ctx->rtCpu = -1;
+    ctx->rtPolicy = ENT_RT_POLICY_OTHER_E;
+    ctx->rtPriority = 0;
+    ctx->rtLastError = 0;
     ctx->entLog = NULL;
     ctx->entLock = NULL;
     ctx->entCV = NULL;
@@ -90,6 +102,139 @@ static inline void iENT_CTXFree(ENT_CTX* ctx)
         ctx->logPath = NULL;
     }
 }
+
+static inline void iENT_CTXSetRtRequestedState(ENT_CTX* ctx,
+                                               ENT_MODE_E mode)
+{
+    if(ctx == NULL)
+        return;
+
+    ctx->rtRequested = (mode == ENT_MODE_REALTIME_E) ? true : false;
+    ctx->rtEnabled = false;
+    ctx->rtCpu = -1;
+    ctx->rtPolicy = ENT_RT_POLICY_OTHER_E;
+    ctx->rtPriority = 0;
+    ctx->rtLastError = 0;
+}
+
+static MSG_ID_T iENT_CTXApplyRtMode(ENT_CTX* ctx,
+                                    ENT_MODE_E mode)
+{
+    iENT_CTXSetRtRequestedState(ctx, mode);
+    if(mode != ENT_MODE_REALTIME_E)
+    {
+        return 0;
+    }
+
+#ifdef WIN32
+    IENT_LOG_WARN("rt mode not supported on current platform,fallback to normal mode\n");
+#else
+    if(mlockall(MCL_CURRENT | MCL_FUTURE) == 0)
+    {
+        ctx->rtEnabled = true;
+        IENT_LOG_PRINT("rt mode enabled via mlockall\n");
+    }
+    else
+    {
+        ctx->rtLastError = errno;
+        IENT_LOG_WARN("mlockall failed,error [%d]->[%s],fallback to normal mode\n",
+                      errno,
+                      strerror(errno));
+    }
+#endif
+    return 0;
+}
+
+static MSG_ID_T iENT_CTXApplyRtAttributes(ENT_CTX* ctx,
+                                          int rtCpu,
+                                          ENT_RT_POLICY_E rtPolicy,
+                                          int rtPriority)
+{
+    if(ctx == NULL)
+    {
+        return -1;
+    }
+
+    if(rtPolicy != ENT_RT_POLICY_OTHER_E &&
+       rtPolicy != ENT_RT_POLICY_FIFO_E &&
+       rtPolicy != ENT_RT_POLICY_RR_E)
+    {
+        IENT_LOG_ERROR("invalid rt policy [%d]\n",(int)rtPolicy);
+        return -2;
+    }
+
+    ctx->rtCpu = rtCpu;
+    ctx->rtPolicy = (int)rtPolicy;
+    ctx->rtPriority = rtPriority;
+    ctx->rtLastError = 0;
+
+#ifdef __linux__
+    if(rtCpu >= 0)
+    {
+        cpu_set_t cpuSet;
+        int ret = 0;
+
+        if(rtCpu >= CPU_SETSIZE)
+        {
+            ctx->rtLastError = EINVAL;
+            IENT_LOG_WARN("rt affinity cpu [%d] invalid\n",rtCpu);
+            return -3;
+        }
+        CPU_ZERO(&cpuSet);
+        CPU_SET(rtCpu,&cpuSet);
+        ret = pthread_setaffinity_np(pthread_self(),sizeof(cpuSet),&cpuSet);
+        if(ret != 0)
+        {
+            ctx->rtLastError = ret;
+            IENT_LOG_WARN("pthread_setaffinity_np failed,error [%d]->[%s]\n",ret,strerror(ret));
+            return -3;
+        }
+    }
+
+    if(rtPolicy == ENT_RT_POLICY_FIFO_E || rtPolicy == ENT_RT_POLICY_RR_E)
+    {
+        int nativePolicy = (rtPolicy == ENT_RT_POLICY_FIFO_E) ? SCHED_FIFO : SCHED_RR;
+        int minPrio = sched_get_priority_min(nativePolicy);
+        int maxPrio = sched_get_priority_max(nativePolicy);
+        int targetPrio = rtPriority;
+        struct sched_param sch;
+        int ret = 0;
+
+        if(minPrio == -1 || maxPrio == -1)
+        {
+            ctx->rtLastError = errno;
+            IENT_LOG_WARN("sched priority range query failed,error [%d]->[%s]\n",errno,strerror(errno));
+            return -4;
+        }
+        if(targetPrio < minPrio)
+        {
+            targetPrio = minPrio;
+        }
+        if(targetPrio > maxPrio)
+        {
+            targetPrio = maxPrio;
+        }
+        memset(&sch,0,sizeof(sch));
+        sch.sched_priority = targetPrio;
+        ret = pthread_setschedparam(pthread_self(),nativePolicy,&sch);
+        if(ret != 0)
+        {
+            ctx->rtLastError = ret;
+            IENT_LOG_WARN("pthread_setschedparam failed,error [%d]->[%s]\n",ret,strerror(ret));
+            return -4;
+        }
+        ctx->rtPriority = targetPrio;
+    }
+    return 0;
+#else
+    if(rtCpu >= 0 || rtPolicy != ENT_RT_POLICY_OTHER_E)
+    {
+        IENT_LOG_WARN("rt cpu/policy attributes are unsupported on this platform\n");
+        return -5;
+    }
+    return 0;
+#endif
+}
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :ENT_Init
@@ -106,7 +251,10 @@ static inline void iENT_CTXFree(ENT_CTX* ctx)
  *
  *-----------------------------------------------------------------------------
  */
-ENT_PUBLIC MSG_ID_T  ENT_Init(const char* name,const char* workPath,ENT_LOG_LEV_E logLevel)
+ENT_PUBLIC MSG_ID_T  ENT_Init(const char* name,
+                              const char* workPath,
+                              ENT_LOG_LEV_E logLevel,
+                              ENT_MODE_E mode)
 {
     MSG_ID_T  sts=0;
     if(gEntCtx.isInit)
@@ -234,6 +382,7 @@ ENT_PUBLIC MSG_ID_T  ENT_Init(const char* name,const char* workPath,ENT_LOG_LEV_
         return -10;
     }
 
+    iENT_CTXApplyRtMode(&gEntCtx,mode);
     gEntCtx.isInit = true;
 
     return 0;
@@ -262,6 +411,16 @@ ENT_PUBLIC MSG_ID_T  ENT_Close()
         return -1;
     }
 
+#ifndef WIN32
+    if(gEntCtx.rtEnabled)
+    {
+        if(munlockall() != 0)
+        {
+            IENT_LOG_WARN("munlockall failed,error [%d]->[%s]\n",errno,strerror(errno));
+        }
+    }
+#endif
+
     sts = UTL_CVClose(gEntCtx.entCV);
     gEntCtx.entCV = NULL;
 
@@ -276,8 +435,25 @@ ENT_PUBLIC MSG_ID_T  ENT_Close()
     sts = ENT_LogClose();
 
     iENT_CTXFree(&gEntCtx);
-    gEntCtx.isInit =false;
+    iENT_CTXResetRuntime(&gEntCtx);
     return 0;
+}
+
+ENT_PUBLIC MSG_ID_T  ENT_SetRtAttributes(int rtCpu,
+                                         ENT_RT_POLICY_E rtPolicy,
+                                         int rtPriority)
+{
+    if(!gEntCtx.isInit)
+    {
+        return -1;
+    }
+
+    if(!gEntCtx.rtRequested)
+    {
+        IENT_LOG_WARN("rt attributes requested while mode is normal\n");
+    }
+
+    return iENT_CTXApplyRtAttributes(&gEntCtx,rtCpu,rtPolicy,rtPriority);
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *

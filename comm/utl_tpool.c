@@ -83,7 +83,6 @@ static DWORD iUTL_TPoolTaskPro(void* data)
     UTL_TPOOL_CTX*      poolCtx = NULL;
     UTL_TPOOL_TASK*     taskCtx = NULL;
     DLL_D_HDR*          tmp = NULL;
-    BOOL                isEmpty = FALSE;
     if(data == NULL)
     {
         IENT_LOG_ERROR("arguments invalid\n");
@@ -98,17 +97,14 @@ static DWORD iUTL_TPoolTaskPro(void* data)
         UTL_LockEnter(poolCtx->taskLock);
         while(tmp==NULL)
         {
-            UTL_DllIsEmpty(&isEmpty,&poolCtx->taskActiveHeader);
-            if(isEmpty)
+            if(poolCtx->taskActiveHeader.fw_ptr == &poolCtx->taskActiveHeader)
             {
                 if(thCtx->taskType==TASK_E_TYPE_QUIT)
                 {
-                    IENT_LOG_DEBUG("thread end\n");
                     poolCtx->threadNum--;
                     UTL_LockLeave(poolCtx->taskLock);
                     return 0;
                 }
-                IENT_LOG_DEBUG("task is empty\n");
                 poolCtx->waitNum++;
                 sts = UTL_CVWait(poolCtx->taskEmptyCV,poolCtx->taskLock,0,RW_WRITE_E);
                 poolCtx->waitNum--;
@@ -132,7 +128,6 @@ static DWORD iUTL_TPoolTaskPro(void* data)
             }
             if(tmp==NULL&&thCtx->taskType==TASK_E_TYPE_QUIT)
             {
-                IENT_LOG_DEBUG("thread end\n");
                 poolCtx->threadNum--;
                 UTL_LockLeave(poolCtx->taskLock);
                 return 0;
@@ -155,7 +150,6 @@ static DWORD iUTL_TPoolTaskPro(void* data)
         UTL_LockEnter(poolCtx->taskLock);
         if(thCtx->taskType==TASK_E_TYPE_QUIT)
         {
-            IENT_LOG_DEBUG("thread end\n");
             poolCtx->threadNum--;
             UTL_LockLeave(poolCtx->taskLock);
             break;
@@ -443,7 +437,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolAddTask(UTL_TPOOL pool,UTL_TP_TASK_F taskCb,UTL_TP
     UTL_LockEnter(poolCtx->taskLock);
     poolCtx->taskNum++;
     UTL_DllInsHead(&poolCtx->taskActiveHeader,(DLL_D_HDR*)taskDb);
-    shouldWake = poolCtx->waitNum > 0 && poolCtx->taskNum <= poolCtx->waitNum;
+    shouldWake = (poolCtx->waitNum > 0) ? TRUE : FALSE;
     UTL_LockLeave(poolCtx->taskLock);
     if(shouldWake)
     {

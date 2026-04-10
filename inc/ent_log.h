@@ -30,6 +30,8 @@ typedef enum
     ENT_LOG_MAX_E,
     ENT_LOG_BUFFER_E,
     ENT_LOG_LEVEL_E,
+    ENT_LOG_FLUSH_BATCH_E,
+    ENT_LOG_FLUSH_INTERVAL_E,
 } ENT_LOG_OPTIONS_E;
 
 typedef enum

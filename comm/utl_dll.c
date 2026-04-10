@@ -38,14 +38,7 @@ ENT_PUBLIC MSG_ID_T  UTL_DllIsEmpty(BOOL* isEmpty,const DLL_D_HDR *dll_hdr)
         IENT_LOG_ERROR("arguments validations is NULL\n") ;
         return -1;
     }
-    if(dll_hdr->fw_ptr == dll_hdr && dll_hdr->bw_ptr == dll_hdr)
-    {
-        *isEmpty = TRUE;
-    }
-    else
-    {
-        *isEmpty = FALSE;
-    }
+    *isEmpty = (dll_hdr->fw_ptr == dll_hdr) ? TRUE : FALSE;
     return 0;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
@@ -217,17 +210,18 @@ ENT_PUBLIC MSG_ID_T  UTL_DllRemHead(DLL_D_HDR *dll_hdr,DLL_D_HDR **dll_elem )
      }
      else
      {
+        if(dll_hdr->fw_ptr == dll_hdr)
+        {
+            *dll_elem = NULL;
+            sts = -2;
+            goto EXIT;
+        }
         removed_elem = dll_hdr->fw_ptr;
         dll_hdr->fw_ptr = removed_elem->fw_ptr;
         next_dll_elem = removed_elem->fw_ptr;
         next_dll_elem->bw_ptr = dll_hdr;
 
         *dll_elem = removed_elem;
-        if( removed_elem == dll_hdr )
-        {
-            *dll_elem = NULL;
-            sts = -2;
-        }
      }
 
 EXIT:
@@ -263,7 +257,11 @@ ENT_PUBLIC MSG_ID_T  UTL_DllRemCurr(DLL_D_HDR *dll_hdr,DLL_D_HDR **dll_elem)
      }
      else
      {
-        sts = UTL_DllRemHead(dll_hdr->bw_ptr,dll_elem);
+        DLL_D_HDR* prev = dll_hdr->bw_ptr;
+        DLL_D_HDR* next = dll_hdr->fw_ptr;
+        prev->fw_ptr = next;
+        next->bw_ptr = prev;
+        *dll_elem = dll_hdr;
      }
 
 EXIT:
@@ -294,17 +292,18 @@ ENT_PUBLIC MSG_ID_T  UTL_DllRemTail(DLL_D_HDR   *dll_hdr,DLL_D_HDR   **dll_elem 
      }
      else
      {
+        if(dll_hdr->bw_ptr == dll_hdr)
+        {
+            *dll_elem = NULL;
+            sts = -2;
+            goto EXIT;
+        }
         removed_elem = dll_hdr->bw_ptr;
         dll_hdr->bw_ptr = removed_elem->bw_ptr;
         prev_dll_elem = removed_elem->bw_ptr;
         prev_dll_elem->fw_ptr = dll_hdr;
 
         *dll_elem = removed_elem;
-        if ( removed_elem == dll_hdr )
-        {
-            *dll_elem = NULL;
-            sts = -2;
-        }
      }
 
 EXIT:

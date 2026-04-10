@@ -24,10 +24,16 @@
 
 typedef struct ENT_CTX {
     bool           isInit;
+    bool           rtRequested;
+    bool           rtEnabled;
     char*          entName;
     char*          workPath;
     char*          logName;
     char*          logPath;
+    int            rtCpu;
+    int            rtPolicy;
+    int            rtPriority;
+    int            rtLastError;
     ENT_LOG_LEV_E  logLevel;       
     ENT_LOG        entLog; 
     UTL_LOCK       entLock;

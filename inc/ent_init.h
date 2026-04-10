@@ -25,7 +25,27 @@
 extern "C" {
 #endif
 
-ENT_PUBLIC MSG_ID_T  ENT_Init(const char* name,const char* workPath,ENT_LOG_LEV_E logLevel);
+typedef enum
+{
+    ENT_MODE_NORMAL_E = 0,
+    ENT_MODE_REALTIME_E
+} ENT_MODE_E;
+
+typedef enum
+{
+    ENT_RT_POLICY_OTHER_E = 0,
+    ENT_RT_POLICY_FIFO_E,
+    ENT_RT_POLICY_RR_E
+} ENT_RT_POLICY_E;
+
+ENT_PUBLIC MSG_ID_T  ENT_Init(const char* name,
+                              const char* workPath,
+                              ENT_LOG_LEV_E logLevel,
+                              ENT_MODE_E mode);
+
+ENT_PUBLIC MSG_ID_T  ENT_SetRtAttributes(int rtCpu,
+                                         ENT_RT_POLICY_E rtPolicy,
+                                         int rtPriority);
 
 ENT_PUBLIC MSG_ID_T  ENT_Close();
 

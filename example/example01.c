@@ -231,7 +231,7 @@ int main(int argc,char* argv[])
 {
     MSG_ID_T  sts=0;
     
-    sts = ENT_Init("example",".",LOG_LEV_DEBUG_E);
+    sts = ENT_Init("example",".",LOG_LEV_DEBUG_E,ENT_MODE_NORMAL_E);
     if(sts < 0)
     {
         ENT_LOG_FATAL("ENT_Init failed sts [%d]\n",sts);

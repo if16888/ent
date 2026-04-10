@@ -46,14 +46,19 @@
 
 #define DEF_MAX_NUM_LOG  15
 #define ENT_LOG_FLUSH_BATCH 256
+#define ENT_LOG_WRITE_BATCH 64
 #define ENT_LOG_FILE_BUFFER_SIZE (64 * 1024)
+#define ENT_LOG_POOL_MSG_SIZE 1024
+#define ENT_LOG_POOL_MAX_FREE_NODES 512
 
 typedef struct ENT_LOG_MSG_NODE_TAG
 {
     struct ENT_LOG_MSG_NODE_TAG* next;
     time_t                       rollTime;
     size_t                       msgLen;
+    size_t                       msgCap;
     bool                         forceFlush;
+    bool                         pooled;
     char                         msg[1];
 } ENT_LOG_MSG_NODE;
 
@@ -86,6 +91,8 @@ typedef struct
     HANDLE            bufferThread;
     volatile LONG    closing;
     volatile LONG    activeWriters;
+    volatile LONG    isDebugFast;
+    volatile LONG    isBufferFast;
 #else
     pthread_mutex_t  cs;
     pthread_cond_t   closeCv;
@@ -93,12 +100,19 @@ typedef struct
     pthread_t        bufferThread;
     volatile int     closing;
     volatile int     activeWriters;
+    volatile int     isDebugFast;
+    volatile int     isBufferFast;
 #endif
     bool             bufferThreadStarted;
     bool             bufferThreadStop;
     int              pendingFlushes;
+    int              flushBatch;
+    int              flushIntervalMs;
+    long long        lastFlushMs;
     ENT_LOG_MSG_NODE* bufferHead;
     ENT_LOG_MSG_NODE* bufferTail;
+    ENT_LOG_MSG_NODE* poolFreeHead;
+    int              poolFreeCount;
     char*            moduleName;
     char*            logPath;
     int              maxNum;
@@ -139,6 +153,24 @@ static MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX* log,
                                      size_t msgLen,
                                      time_t rollTime,
                                      bool forceFlush);
+static int iENT_LogFastFlagGet(
+#ifdef WIN32
+                               const volatile LONG* flag
+#else
+                               const volatile int* flag
+#endif
+                               );
+static void iENT_LogFastFlagSet(
+#ifdef WIN32
+                                volatile LONG* flag,
+#else
+                                volatile int* flag,
+#endif
+                                int value);
+static long long iENT_LogNowMs(void);
+static bool iENT_LogBufferReady(const ENT_LOG_CTX* log);
+static ENT_LOG_MSG_NODE* iENT_LogAllocNode(size_t msgCap, bool pooled);
+static void iENT_LogFreePoolNodes(ENT_LOG_CTX* log);
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :iENT_LogRollCheck
@@ -361,22 +393,192 @@ static MSG_ID_T iENT_LogFormatMessage(const char* format,
 #define FUNC_NAME "iENT_LogFlushMaybe"
 static void iENT_LogFlushMaybe(ENT_LOG_CTX* log, FILE* fp, bool forceFlush)
 {
+    long long nowMs = 0;
+    int flushBatch = 0;
+    int flushIntervalMs = 0;
+
     if(log == NULL || fp == NULL)
     {
         return;
     }
 
+    nowMs = iENT_LogNowMs();
+    flushBatch = log->flushBatch > 0 ? log->flushBatch : ENT_LOG_FLUSH_BATCH;
+    flushIntervalMs = log->flushIntervalMs;
+
     if(forceFlush || !log->isBuffer)
     {
         fflush(fp);
         log->pendingFlushes = 0;
+        log->lastFlushMs = nowMs;
         return;
     }
 
-    if(++log->pendingFlushes >= ENT_LOG_FLUSH_BATCH)
+    log->pendingFlushes++;
+    if(log->lastFlushMs == 0)
+    {
+        log->lastFlushMs = nowMs;
+    }
+
+    if(log->pendingFlushes >= flushBatch ||
+       (flushIntervalMs > 0 && nowMs - log->lastFlushMs >= (long long)flushIntervalMs))
     {
         fflush(fp);
         log->pendingFlushes = 0;
+        log->lastFlushMs = nowMs;
+    }
+}
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :iENT_LogFastFlagGet
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "iENT_LogFastFlagGet"
+static int iENT_LogFastFlagGet(
+#ifdef WIN32
+                               const volatile LONG* flag
+#else
+                               const volatile int* flag
+#endif
+                               )
+{
+#ifdef WIN32
+    return InterlockedCompareExchange((volatile LONG*)flag, 0, 0) != 0;
+#else
+    return __sync_val_compare_and_swap((volatile int*)flag, 0, 0) != 0;
+#endif
+}
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :iENT_LogFastFlagSet
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "iENT_LogFastFlagSet"
+static void iENT_LogFastFlagSet(
+#ifdef WIN32
+                                volatile LONG* flag,
+#else
+                                volatile int* flag,
+#endif
+                                int value)
+{
+#ifdef WIN32
+    InterlockedExchange(flag, value ? 1 : 0);
+#else
+    __sync_lock_test_and_set(flag, value ? 1 : 0);
+#endif
+}
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :iENT_LogNowMs
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "iENT_LogNowMs"
+static long long iENT_LogNowMs(void)
+{
+#ifdef WIN32
+    return (long long)GetTickCount64();
+#else
+    struct timespec ts;
+    if(clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+    {
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        return (long long)tv.tv_sec * 1000LL + (long long)tv.tv_usec / 1000LL;
+    }
+    return (long long)ts.tv_sec * 1000LL + (long long)ts.tv_nsec / 1000000LL;
+#endif
+}
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :iENT_LogBufferReady
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "iENT_LogBufferReady"
+static bool iENT_LogBufferReady(const ENT_LOG_CTX* log)
+{
+    return log != NULL && log->isBuffer && log->bufferThreadStarted && !log->bufferThreadStop;
+}
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :iENT_LogAllocNode
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "iENT_LogAllocNode"
+static ENT_LOG_MSG_NODE* iENT_LogAllocNode(size_t msgCap, bool pooled)
+{
+    ENT_LOG_MSG_NODE* node = NULL;
+    size_t allocSize = sizeof(ENT_LOG_MSG_NODE) + msgCap;
+
+    node = (ENT_LOG_MSG_NODE*)malloc(allocSize);
+    if(node == NULL)
+    {
+        return NULL;
+    }
+
+    node->next = NULL;
+    node->rollTime = 0;
+    node->msgLen = 0;
+    node->msgCap = msgCap;
+    node->forceFlush = false;
+    node->pooled = pooled;
+    node->msg[0] = '\0';
+    return node;
+}
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :iENT_LogFreePoolNodes
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "iENT_LogFreePoolNodes"
+static void iENT_LogFreePoolNodes(ENT_LOG_CTX* log)
+{
+    ENT_LOG_MSG_NODE* node = NULL;
+    ENT_LOG_MSG_NODE* next = NULL;
+
+    if(log == NULL)
+    {
+        return;
+    }
+
+    node = log->poolFreeHead;
+    log->poolFreeHead = NULL;
+    log->poolFreeCount = 0;
+    while(node != NULL)
+    {
+        next = node->next;
+        free(node);
+        node = next;
     }
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
@@ -570,7 +772,11 @@ static void* iENT_LogBufferThreadMain(void* data)
 {
     ENT_LOG_CTX* log = (ENT_LOG_CTX*)data;
     ENT_LOG_MSG_NODE* head = NULL;
+    ENT_LOG_MSG_NODE* batchHead = NULL;
+    ENT_LOG_MSG_NODE* batchTail = NULL;
     ENT_LOG_MSG_NODE* node = NULL;
+    ENT_LOG_MSG_NODE* nextNode = NULL;
+    int batchCount = 0;
 
     for(;;)
     {
@@ -578,7 +784,26 @@ static void* iENT_LogBufferThreadMain(void* data)
         EnterCriticalSection(&log->cs);
         while(log->bufferHead == NULL && !log->bufferThreadStop)
         {
-            SleepConditionVariableCS(&log->bufferCv, &log->cs, INFINITE);
+            DWORD waitMs = INFINITE;
+            if(log->flushIntervalMs > 0 && log->pendingFlushes > 0)
+            {
+                long long nowMs = iENT_LogNowMs();
+                long long elapsedMs = nowMs - log->lastFlushMs;
+                if(log->lastFlushMs == 0 || elapsedMs >= (long long)log->flushIntervalMs)
+                {
+                    FILE* flushFp = log->logFp == NULL ? stderr : log->logFp;
+                    fflush(flushFp);
+                    log->pendingFlushes = 0;
+                    log->lastFlushMs = nowMs;
+                    continue;
+                }
+                waitMs = (DWORD)(log->flushIntervalMs - (int)elapsedMs);
+                if(waitMs == 0)
+                {
+                    waitMs = 1;
+                }
+            }
+            SleepConditionVariableCS(&log->bufferCv, &log->cs, waitMs);
         }
         if(log->bufferHead == NULL && log->bufferThreadStop)
         {
@@ -590,6 +815,39 @@ static void* iENT_LogBufferThreadMain(void* data)
         pthread_mutex_lock(&log->cs);
         while(log->bufferHead == NULL && !log->bufferThreadStop)
         {
+            if(log->flushIntervalMs > 0 && log->pendingFlushes > 0)
+            {
+                long long nowMs = iENT_LogNowMs();
+                long long elapsedMs = nowMs - log->lastFlushMs;
+                if(log->lastFlushMs == 0 || elapsedMs >= (long long)log->flushIntervalMs)
+                {
+                    FILE* flushFp = log->logFp == NULL ? stderr : log->logFp;
+                    fflush(flushFp);
+                    log->pendingFlushes = 0;
+                    log->lastFlushMs = nowMs;
+                    continue;
+                }
+                else
+                {
+                    int waitMs = log->flushIntervalMs - (int)elapsedMs;
+                    struct timespec ts;
+
+                    if(waitMs <= 0)
+                    {
+                        waitMs = 1;
+                    }
+                    clock_gettime(CLOCK_REALTIME, &ts);
+                    ts.tv_sec += waitMs / 1000;
+                    ts.tv_nsec += (long)(waitMs % 1000) * 1000000L;
+                    if(ts.tv_nsec >= 1000000000L)
+                    {
+                        ts.tv_sec++;
+                        ts.tv_nsec -= 1000000000L;
+                    }
+                    pthread_cond_timedwait(&log->bufferCv, &log->cs, &ts);
+                    continue;
+                }
+            }
             pthread_cond_wait(&log->bufferCv, &log->cs);
         }
         if(log->bufferHead == NULL && log->bufferThreadStop)
@@ -610,26 +868,65 @@ static void* iENT_LogBufferThreadMain(void* data)
 
         while(head != NULL)
         {
-            node = head;
-            head = head->next;
+            ENT_LOG_MSG_NODE* freeHead = NULL;
+            batchHead = head;
+            batchTail = NULL;
+            batchCount = 0;
+            while(head != NULL && batchCount < ENT_LOG_WRITE_BATCH)
+            {
+                batchTail = head;
+                head = head->next;
+                batchCount++;
+            }
+            if(batchTail != NULL)
+            {
+                batchTail->next = NULL;
+            }
 
 #ifdef WIN32
             EnterCriticalSection(&log->cs);
 #else
             pthread_mutex_lock(&log->cs);
 #endif
-            iENT_LogRollCheck(log, node->rollTime);
+            for(node = batchHead; node != NULL; node = node->next)
             {
-                FILE* fp = log->logFp == NULL ? stderr : log->logFp;
-                fwrite(node->msg, 1, node->msgLen, fp);
-                iENT_LogFlushMaybe(log, fp, node->forceFlush || fp == stderr);
+                iENT_LogRollCheck(log, node->rollTime);
+                {
+                    FILE* fp = log->logFp == NULL ? stderr : log->logFp;
+                    fwrite(node->msg, 1, node->msgLen, fp);
+                    iENT_LogFlushMaybe(log, fp, node->forceFlush || fp == stderr);
+                }
+            }
+
+            node = batchHead;
+            while(node != NULL)
+            {
+                nextNode = node->next;
+                if(node->pooled && log->poolFreeCount < ENT_LOG_POOL_MAX_FREE_NODES)
+                {
+                    node->next = log->poolFreeHead;
+                    log->poolFreeHead = node;
+                    log->poolFreeCount++;
+                }
+                else
+                {
+                    node->next = freeHead;
+                    freeHead = node;
+                }
+                node = nextNode;
             }
 #ifdef WIN32
             LeaveCriticalSection(&log->cs);
 #else
             pthread_mutex_unlock(&log->cs);
 #endif
-            free(node);
+
+            while(freeHead != NULL)
+            {
+                nextNode = freeHead->next;
+                free(freeHead);
+                freeHead = nextNode;
+            }
         }
     }
 
@@ -700,6 +997,7 @@ static MSG_ID_T iENT_LogStartBufferThread(ENT_LOG_CTX* log)
     else
     {
         log->isBuffer = false;
+        iENT_LogFastFlagSet(&log->isBufferFast, 0);
     }
 #ifdef WIN32
     LeaveCriticalSection(&log->cs);
@@ -777,19 +1075,68 @@ static MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX* log,
                                      bool forceFlush)
 {
     ENT_LOG_MSG_NODE* node = NULL;
+    bool usePool = false;
 
     if(log == NULL || msg == NULL || msgLen == 0)
     {
         return -1;
     }
 
-    node = (ENT_LOG_MSG_NODE*)malloc(sizeof(ENT_LOG_MSG_NODE) + msgLen);
-    if(node == NULL)
+    if(!iENT_LogFastFlagGet(&log->isBufferFast))
     {
-        return -1;
+        return 1;
     }
 
-    memset(node, 0, sizeof(ENT_LOG_MSG_NODE));
+    usePool = msgLen <= ENT_LOG_POOL_MSG_SIZE;
+
+#ifdef WIN32
+    EnterCriticalSection(&log->cs);
+#else
+    pthread_mutex_lock(&log->cs);
+#endif
+    if(!iENT_LogBufferReady(log))
+    {
+#ifdef WIN32
+        LeaveCriticalSection(&log->cs);
+#else
+        pthread_mutex_unlock(&log->cs);
+#endif
+        return 1;
+    }
+
+    if(usePool && log->poolFreeHead != NULL)
+    {
+        node = log->poolFreeHead;
+        log->poolFreeHead = node->next;
+        if(log->poolFreeCount > 0)
+        {
+            log->poolFreeCount--;
+        }
+    }
+
+#ifdef WIN32
+    LeaveCriticalSection(&log->cs);
+#else
+    pthread_mutex_unlock(&log->cs);
+#endif
+
+    if(node == NULL)
+    {
+        if(usePool)
+        {
+            node = iENT_LogAllocNode(ENT_LOG_POOL_MSG_SIZE, true);
+        }
+        else
+        {
+            node = iENT_LogAllocNode(msgLen, false);
+        }
+        if(node == NULL)
+        {
+            return -1;
+        }
+    }
+
+    node->next = NULL;
     node->rollTime = rollTime;
     node->msgLen = msgLen;
     node->forceFlush = forceFlush;
@@ -801,14 +1148,25 @@ static MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX* log,
 #else
     pthread_mutex_lock(&log->cs);
 #endif
-    if(!log->isBuffer || !log->bufferThreadStarted || log->bufferThreadStop)
+    if(!iENT_LogBufferReady(log))
     {
+        bool recycled = false;
+        if(node->pooled && log->poolFreeCount < ENT_LOG_POOL_MAX_FREE_NODES)
+        {
+            node->next = log->poolFreeHead;
+            log->poolFreeHead = node;
+            log->poolFreeCount++;
+            recycled = true;
+        }
 #ifdef WIN32
         LeaveCriticalSection(&log->cs);
 #else
         pthread_mutex_unlock(&log->cs);
 #endif
-        free(node);
+        if(!recycled)
+        {
+            free(node);
+        }
         return 1;
     }
 
@@ -1026,11 +1384,18 @@ ENT_PUBLIC MSG_ID_T  ENT_LogInitHandle(ENT_LOG* pLogHandle,const char* moduleNam
     log->bufferThreadStarted = false;
     log->bufferThreadStop = false;
     log->pendingFlushes = 0;
+    log->flushBatch = ENT_LOG_FLUSH_BATCH;
+    log->flushIntervalMs = 0;
+    log->lastFlushMs = 0;
     log->bufferHead = NULL;
     log->bufferTail = NULL;
+    log->poolFreeHead = NULL;
+    log->poolFreeCount = 0;
     log->isInit   = true;
     log->isDebug  = false;
     log->isBuffer = false;
+    iENT_LogFastFlagSet(&log->isDebugFast, 0);
+    iENT_LogFastFlagSet(&log->isBufferFast, 0);
     log->logLevel = LOG_LEV_WARN_E;
     log->maxNum   = DEF_MAX_NUM_LOG;
     log->tag      = ENTLOG_TAG;
@@ -1115,6 +1480,7 @@ ENT_PUBLIC MSG_ID_T  ENT_LogSetOption(ENT_LOG logHandle,ENT_LOG_OPTIONS_E option
     {
         case ENT_LOG_DEBUG_E:
             log->isDebug = *(bool*)arg;
+            iENT_LogFastFlagSet(&log->isDebugFast, log->isDebug ? 1 : 0);
             break;
         
         case ENT_LOG_PATH_E:
@@ -1153,12 +1519,40 @@ ENT_PUBLIC MSG_ID_T  ENT_LogSetOption(ENT_LOG logHandle,ENT_LOG_OPTIONS_E option
         
         case ENT_LOG_BUFFER_E:
             log->isBuffer = *(bool*)arg;
+            iENT_LogFastFlagSet(&log->isBufferFast, log->isBuffer ? 1 : 0);
+            log->pendingFlushes = 0;
+            log->lastFlushMs = iENT_LogNowMs();
             startBufferThread = log->isBuffer && !log->bufferThreadStarted;
             break;
             
         case ENT_LOG_LEVEL_E:
             log->logLevel = *(ENT_LOG_LEV_E*)arg;
             break;
+
+        case ENT_LOG_FLUSH_BATCH_E:
+        {
+            int flushBatch = *(int*)arg;
+            if(flushBatch <= 0)
+            {
+                sts = -1;
+                break;
+            }
+            log->flushBatch = flushBatch;
+            break;
+        }
+
+        case ENT_LOG_FLUSH_INTERVAL_E:
+        {
+            int flushIntervalMs = *(int*)arg;
+            if(flushIntervalMs < 0)
+            {
+                sts = -1;
+                break;
+            }
+            log->flushIntervalMs = flushIntervalMs;
+            log->lastFlushMs = iENT_LogNowMs();
+            break;
+        }
             
         default:
             break;
@@ -1242,7 +1636,13 @@ ENT_PUBLIC MSG_ID_T ENT_LogCloseHandle(ENT_LOG logHandle)
 #endif
     }
 
+    log->isBuffer = false;
+    iENT_LogFastFlagSet(&log->isBufferFast, 0);
+    log->isDebug = false;
+    iENT_LogFastFlagSet(&log->isDebugFast, 0);
+
     iENT_LogStopBufferThread(log);
+    iENT_LogFreePoolNodes(log);
 
     if(log->logFp)
         fclose(log->logFp);
@@ -1481,17 +1881,7 @@ static MSG_ID_T iENT_LogVRaw(ENT_LOG_CTX* log,const char* format,va_list va_args
         return sts;
     }
 
-#ifdef WIN32
-    EnterCriticalSection(&log->cs);
-#else
-    pthread_mutex_lock(&log->cs);
-#endif
-    useBuffer = log->isBuffer;
-#ifdef WIN32
-    LeaveCriticalSection(&log->cs);
-#else
-    pthread_mutex_unlock(&log->cs);
-#endif
+    useBuffer = iENT_LogFastFlagGet(&log->isBufferFast) ? true : false;
 
     if(useBuffer && iENT_LogQueueMessage(log, msgBuf, msgLen, time(NULL), false) == 0)
     {
@@ -1600,22 +1990,20 @@ static MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX* log,ENT_LOG_LEV_E logLevel,const cha
         return -1;
     }
 
-#ifdef WIN32
-    EnterCriticalSection(&log->cs);
-#else
-    pthread_mutex_lock(&log->cs);
-#endif
-    debugMirror = log->isDebug;
-    useBuffer = log->isBuffer;
-#ifdef WIN32
-    LeaveCriticalSection(&log->cs);
-#else
-    pthread_mutex_unlock(&log->cs);
-#endif
-
-    if(useBuffer)
+    if(iENT_LogFormatPrefix(logLevel, prefixBuf, sizeof(prefixBuf), &prefixLen, &rollTime) < 0)
     {
-        if(iENT_LogFormatPrefix(logLevel, prefixBuf, sizeof(prefixBuf), &prefixLen, &rollTime) < 0)
+        if(msgBuf != stackBuf)
+        {
+            free(msgBuf);
+        }
+        return -1;
+    }
+
+    lineLen = prefixLen + msgLen;
+    if(lineLen + 1 > sizeof(lineStackBuf))
+    {
+        lineBuf = (char*)malloc(lineLen + 1);
+        if(lineBuf == NULL)
         {
             if(msgBuf != stackBuf)
             {
@@ -1623,28 +2011,20 @@ static MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX* log,ENT_LOG_LEV_E logLevel,const cha
             }
             return -1;
         }
-        lineLen = prefixLen + msgLen;
-        if(lineLen + 1 > sizeof(lineStackBuf))
-        {
-            lineBuf = (char*)malloc(lineLen + 1);
-            if(lineBuf == NULL)
-            {
-                if(msgBuf != stackBuf)
-                {
-                    free(msgBuf);
-                }
-                return -1;
-            }
-        }
-        memcpy(lineBuf, prefixBuf, prefixLen);
-        memcpy(lineBuf + prefixLen, msgBuf, msgLen);
-        lineBuf[lineLen] = '\0';
+    }
+    memcpy(lineBuf, prefixBuf, prefixLen);
+    memcpy(lineBuf + prefixLen, msgBuf, msgLen);
+    lineBuf[lineLen] = '\0';
 
-        if(debugMirror)
-        {
-            fwrite(lineBuf, 1, lineLen, stdout);
-        }
+    debugMirror = iENT_LogFastFlagGet(&log->isDebugFast) ? true : false;
+    if(debugMirror)
+    {
+        fwrite(lineBuf, 1, lineLen, stdout);
+    }
 
+    useBuffer = iENT_LogFastFlagGet(&log->isBufferFast) ? true : false;
+    if(useBuffer)
+    {
         if(iENT_LogQueueMessage(log, lineBuf, lineLen, rollTime, logLevel <= LOG_LEV_ERROR_E) == 0)
         {
             if(lineBuf != lineStackBuf)
@@ -1665,49 +2045,7 @@ static MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX* log,ENT_LOG_LEV_E logLevel,const cha
     pthread_mutex_lock(&log->cs);
 #endif
 
-    if(!useBuffer && iENT_LogFormatPrefix(logLevel, prefixBuf, sizeof(prefixBuf), &prefixLen, &rollTime) < 0)
-    {
-#ifdef WIN32
-        LeaveCriticalSection(&log->cs);
-#else
-        pthread_mutex_unlock(&log->cs);
-#endif
-        if(msgBuf != stackBuf)
-        {
-            free(msgBuf);
-        }
-        return -1;
-    }
     iENT_LogRollCheck(log, rollTime);
-    if(!useBuffer)
-    {
-        lineLen = prefixLen + msgLen;
-        if(lineLen + 1 > sizeof(lineStackBuf))
-        {
-            lineBuf = (char*)malloc(lineLen + 1);
-            if(lineBuf == NULL)
-            {
-#ifdef WIN32
-                LeaveCriticalSection(&log->cs);
-#else
-                pthread_mutex_unlock(&log->cs);
-#endif
-                if(msgBuf != stackBuf)
-                {
-                    free(msgBuf);
-                }
-                return -1;
-            }
-        }
-        memcpy(lineBuf, prefixBuf, prefixLen);
-        memcpy(lineBuf + prefixLen, msgBuf, msgLen);
-        lineBuf[lineLen] = '\0';
-    }
-
-    if(log->isDebug && !debugMirror)
-    {
-        fwrite(lineBuf, 1, lineLen, stdout);
-    }
     FILE* fp = log->logFp==NULL?stderr:log->logFp;
 
     fwrite(lineBuf, 1, lineLen, fp);

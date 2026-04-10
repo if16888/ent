@@ -113,7 +113,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Socket(
 {
     MSG_ID_T  sts = 0;	       
 
-    if (!sUtlInitFlag)
+	if (!sUtlInitFlag) 
     {
         IENT_LOG_ERROR("unintilized.\n");
         return -1;
@@ -706,6 +706,11 @@ MSG_ID_T	UTL_Bind(
         return -2;
     }
 
+    {
+        int reuseAddr = 1;
+        (void)setsockopt(SockDesc, SOL_SOCKET, SO_REUSEADDR, (void*)&reuseAddr, sizeof(reuseAddr));
+    }
+
 	while ( ( (stat = bind (
 	    SockDesc,
 	    addr,
@@ -762,6 +767,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Connect(
     {
 	    if ( (errno == EINTR) && sUtlRetryFlag )
 		    continue;
+        break;
 	}
 
 	if ( stat < 0 )

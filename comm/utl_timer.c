@@ -506,9 +506,13 @@ static void* iUTL_TimerRtWorker(void* data)
         }
 
         UTL_LockEnter(timerCtx->cbLock);
+        BOOL needWake = (timerCtx->pendingCallbacks == 0) ? TRUE : FALSE;
         timerCtx->pendingCallbacks++;
         UTL_LockLeave(timerCtx->cbLock);
-        UTL_CVWake(timerCtx->cbCv);
+        if(needWake)
+        {
+            UTL_CVWake(timerCtx->cbCv);
+        }
 
         if(timerCtx->timerType & UTL_TIMER_E_ONESHOT)
         {
@@ -536,6 +540,7 @@ static void* iUTL_TimerCallbackWorker(void* data)
         void* timerData = NULL;
         BOOL stopCallbackWorker = FALSE;
         BOOL oneshot = FALSE;
+        unsigned int callbackBatch = 0;
 
         UTL_LockEnter(timerCtx->cbLock);
         while(timerCtx->pendingCallbacks == 0 && !timerCtx->stopCallbackWorker)
@@ -549,15 +554,28 @@ static void* iUTL_TimerCallbackWorker(void* data)
             break;
         }
 
-        timerCtx->pendingCallbacks--;
+        callbackBatch = timerCtx->pendingCallbacks;
+        if(callbackBatch > 64U)
+        {
+            callbackBatch = 64U;
+        }
+        timerCtx->pendingCallbacks -= callbackBatch;
         timerCb = timerCtx->timer_ev_cb;
         timerData = timerCtx->data;
         oneshot = (timerCtx->timerType & UTL_TIMER_E_ONESHOT) ? TRUE : FALSE;
         UTL_LockLeave(timerCtx->cbLock);
 
-        if(timerCb)
+        while(callbackBatch > 0)
         {
-            timerCb(timerData);
+            if(timerCb)
+            {
+                timerCb(timerData);
+            }
+            callbackBatch--;
+            if(oneshot)
+            {
+                break;
+            }
         }
 
         if(oneshot)
