@@ -18,13 +18,13 @@
 #ifdef WIN32
 #pragma warning(disable : 4996)
 #else
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <limits.h>
 #include <errno.h>
 #include <sys/mman.h>
 #ifdef __linux__
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
 #include <pthread.h>
 #include <sched.h>
 #endif
