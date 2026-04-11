@@ -1,6 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef WIN32
+#include <sys/resource.h>
+#endif
 
 #include "ient_comm.h"
 #include "ent_init.h"
@@ -622,25 +625,76 @@ static int test_ent_init_realtime_mode_can_degrade_to_normal(void)
     reset_close_counters();
     reset_log_failures();
 
+#ifndef WIN32
+    struct rlimit oldLimit;
+    struct rlimit zeroLimit = {0, 0};
+    int limitAdjusted = 0;
+    if(getrlimit(RLIMIT_MEMLOCK, &oldLimit) == 0 &&
+       setrlimit(RLIMIT_MEMLOCK, &zeroLimit) == 0)
+    {
+        limitAdjusted = 1;
+    }
+#endif
+
     if(expect_true(ENT_Init("demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_REALTIME_E) == ENT_SYS_NORMAL,
                    "ENT_Init should still succeed when realtime mode degrades to normal mode") != 0)
     {
+#ifndef WIN32
+        if(limitAdjusted)
+        {
+            setrlimit(RLIMIT_MEMLOCK, &oldLimit);
+        }
+#endif
         return 1;
     }
 
     if(expect_true(gEntCtx.rtRequested == true, "ENT_Init should persist that realtime mode was requested") != 0)
     {
+#ifndef WIN32
+        if(limitAdjusted)
+        {
+            setrlimit(RLIMIT_MEMLOCK, &oldLimit);
+        }
+#endif
         ENT_Close();
         return 1;
     }
 
+#ifdef WIN32
     if(expect_true(gEntCtx.rtEnabled == false, "ENT_Init should report degraded normal mode when realtime is not applied") != 0)
     {
         ENT_Close();
         return 1;
     }
+#else
+    if(limitAdjusted)
+    {
+        if(expect_true(gEntCtx.rtEnabled == false, "ENT_Init should report degraded normal mode when realtime is not applied") != 0)
+        {
+            ENT_Close();
+            setrlimit(RLIMIT_MEMLOCK, &oldLimit);
+            return 1;
+        }
+    }
+    else
+    {
+        if(expect_true(gEntCtx.rtEnabled == true, "ENT_Init should enable realtime when memlock limit is unlimited") != 0)
+        {
+            ENT_Close();
+            return 1;
+        }
+    }
+#endif
 
-    return expect_true(ENT_Close() == ENT_SYS_NORMAL, "ENT_Close should succeed after realtime degrade initialization");
+    int closeStatus = ENT_Close();
+#ifndef WIN32
+    if(limitAdjusted)
+    {
+        setrlimit(RLIMIT_MEMLOCK, &oldLimit);
+    }
+#endif
+
+    return expect_true(closeStatus == ENT_SYS_NORMAL, "ENT_Close should succeed after realtime degrade initialization");
 }
 
 static int test_ent_set_rt_attributes_rejects_uninitialized_context(void)
