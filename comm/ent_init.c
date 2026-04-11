@@ -455,6 +455,7 @@ ENT_PUBLIC MSG_ID_T  ENT_SetRtAttributes(int rtCpu,
     if(!gEntCtx.rtRequested)
     {
         IENT_LOG_WARN("rt attributes requested while mode is normal\n");
+        return ENT_RT_NOTRT;
     }
 
     return iENT_CTXApplyRtAttributes(&gEntCtx,rtCpu,rtPolicy,rtPriority);

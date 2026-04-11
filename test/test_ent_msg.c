@@ -96,5 +96,38 @@ int main(void)
         return EXIT_FAILURE;
     }
 
+    {
+        MSG_ID_T built = 0;
+        if(expect_true(ENT_MsgTryBuild(&built, false, 1u, 2u, 3u) == ENT_SYS_NORMAL,
+                       "ENT_MsgTryBuild should accept valid parts") != 0)
+        {
+            return EXIT_FAILURE;
+        }
+        if(expect_true(ENT_MsgIsError(built) == false, "ENT_MsgTryBuild should preserve severity") != 0)
+        {
+            return EXIT_FAILURE;
+        }
+    }
+
+    {
+        MSG_ID_T built = 0;
+        if(expect_true(ENT_MsgTryBuild(&built, true, 0x1FFu, 2u, 3u) == ENT_SYS_INVALID_MSGCODE,
+                       "ENT_MsgTryBuild should reject out-of-range module ids") != 0)
+        {
+            return EXIT_FAILURE;
+        }
+        if(expect_true(built == ENT_SYS_INVALID_MSGCODE,
+                       "ENT_MsgTryBuild should return the invalid-code sentinel through outCode") != 0)
+        {
+            return EXIT_FAILURE;
+        }
+    }
+
+    if(expect_true(ENT_MsgBuild(true, 0x1FFu, 2u, 3u) == ENT_SYS_INVALID_MSGCODE,
+                   "ENT_MsgBuild should reject out-of-range parts instead of truncating") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
     return EXIT_SUCCESS;
 }

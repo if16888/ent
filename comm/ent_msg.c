@@ -49,12 +49,50 @@ ENT_PUBLIC MSG_ID_T ENT_MsgBuild(bool isError,
                                  unsigned int submoduleId,
                                  unsigned int innerCode)
 {
-    if(isError)
+    MSG_ID_T code = ENT_SYS_INVALID_MSGCODE;
+
+    if(ENT_MsgTryBuild(&code, isError, moduleId, submoduleId, innerCode) != ENT_SYS_NORMAL)
     {
-        return ENT_MSG_MAKE_ERR(moduleId, submoduleId, innerCode);
+        fprintf(stderr,
+                "ENT_MsgBuild invalid parts,module[%u] submodule[%u] inner[%u]\n",
+                moduleId,
+                submoduleId,
+                innerCode);
+        return ENT_SYS_INVALID_MSGCODE;
     }
 
-    return ENT_MSG_MAKE_OK(moduleId, submoduleId, innerCode);
+    return code;
+}
+
+ENT_PUBLIC MSG_ID_T ENT_MsgTryBuild(MSG_ID_T* outCode,
+                                    bool isError,
+                                    unsigned int moduleId,
+                                    unsigned int submoduleId,
+                                    unsigned int innerCode)
+{
+    if(outCode == NULL)
+    {
+        return ENT_SYS_INVALID_MSGCODE;
+    }
+
+    if(moduleId > ENT_MSG_MODULE_MASK ||
+       submoduleId > ENT_MSG_SUBMODULE_MASK ||
+       innerCode > ENT_MSG_INNER_MASK)
+    {
+        *outCode = ENT_SYS_INVALID_MSGCODE;
+        return ENT_SYS_INVALID_MSGCODE;
+    }
+
+    if(isError)
+    {
+        *outCode = ENT_MSG_MAKE_ERR(moduleId, submoduleId, innerCode);
+    }
+    else
+    {
+        *outCode = ENT_MSG_MAKE_OK(moduleId, submoduleId, innerCode);
+    }
+
+    return ENT_SYS_NORMAL;
 }
 
 ENT_PUBLIC const char* ENT_MsgText(MSG_ID_T code)

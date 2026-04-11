@@ -1,9 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef WIN32
-#include <sys/resource.h>
-#endif
+#include <errno.h>
 
 #include "ient_comm.h"
 #include "ent_init.h"
@@ -26,6 +24,12 @@ static int s_log_error_calls = 0;
 static int s_event_counter = 0;
 static int s_log_error_order = 0;
 static int s_log_close_order = 0;
+static int s_mlockall_result = 0;
+static int s_mlockall_errno = 0;
+static int s_mlockall_calls = 0;
+static int s_munlockall_result = 0;
+static int s_munlockall_errno = 0;
+static int s_munlockall_calls = 0;
 static ENT_LOG s_ent_log_at_lock_init = NULL;
 static const char* s_last_log_init_handle_module = NULL;
 static const char* s_last_log_init_handle_path = NULL;
@@ -93,6 +97,12 @@ static void reset_log_failures(void)
     s_second_log_init_handle_path = NULL;
     s_last_closed_log_handle = NULL;
     s_last_log_error_handle = NULL;
+    s_mlockall_result = 0;
+    s_mlockall_errno = 0;
+    s_mlockall_calls = 0;
+    s_munlockall_result = 0;
+    s_munlockall_errno = 0;
+    s_munlockall_calls = 0;
 }
 
 static int expect_true(int condition, const char* message)
@@ -105,6 +115,29 @@ static int expect_true(int condition, const char* message)
 
     return 0;
 }
+
+#ifndef WIN32
+int mlockall(int flags)
+{
+    (void)flags;
+    s_mlockall_calls++;
+    if(s_mlockall_result != 0)
+    {
+        errno = s_mlockall_errno;
+    }
+    return s_mlockall_result;
+}
+
+int munlockall(void)
+{
+    s_munlockall_calls++;
+    if(s_munlockall_result != 0)
+    {
+        errno = s_munlockall_errno;
+    }
+    return s_munlockall_result;
+}
+#endif
 
 MSG_ID_T ENT_LogInit(void)
 {
@@ -626,73 +659,43 @@ static int test_ent_init_realtime_mode_can_degrade_to_normal(void)
     reset_log_failures();
 
 #ifndef WIN32
-    struct rlimit oldLimit;
-    struct rlimit zeroLimit = {0, 0};
-    int limitAdjusted = 0;
-    if(getrlimit(RLIMIT_MEMLOCK, &oldLimit) == 0 &&
-       setrlimit(RLIMIT_MEMLOCK, &zeroLimit) == 0)
-    {
-        limitAdjusted = 1;
-    }
+    s_mlockall_result = -1;
+    s_mlockall_errno = EPERM;
 #endif
 
     if(expect_true(ENT_Init("demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_REALTIME_E) == ENT_SYS_NORMAL,
                    "ENT_Init should still succeed when realtime mode degrades to normal mode") != 0)
     {
-#ifndef WIN32
-        if(limitAdjusted)
-        {
-            setrlimit(RLIMIT_MEMLOCK, &oldLimit);
-        }
-#endif
         return 1;
     }
 
     if(expect_true(gEntCtx.rtRequested == true, "ENT_Init should persist that realtime mode was requested") != 0)
     {
-#ifndef WIN32
-        if(limitAdjusted)
-        {
-            setrlimit(RLIMIT_MEMLOCK, &oldLimit);
-        }
-#endif
         ENT_Close();
         return 1;
     }
 
-#ifdef WIN32
     if(expect_true(gEntCtx.rtEnabled == false, "ENT_Init should report degraded normal mode when realtime is not applied") != 0)
     {
         ENT_Close();
         return 1;
     }
-#else
-    if(limitAdjusted)
+
+#ifndef WIN32
+    if(expect_true(gEntCtx.rtLastError == EPERM, "ENT_Init should preserve the mlockall errno when realtime degrades") != 0)
     {
-        if(expect_true(gEntCtx.rtEnabled == false, "ENT_Init should report degraded normal mode when realtime is not applied") != 0)
-        {
-            ENT_Close();
-            setrlimit(RLIMIT_MEMLOCK, &oldLimit);
-            return 1;
-        }
+        ENT_Close();
+        return 1;
     }
-    else
+
+    if(expect_true(s_mlockall_calls == 1, "ENT_Init should attempt mlockall once for realtime mode") != 0)
     {
-        if(expect_true(gEntCtx.rtEnabled == true, "ENT_Init should enable realtime when memlock limit is unlimited") != 0)
-        {
-            ENT_Close();
-            return 1;
-        }
+        ENT_Close();
+        return 1;
     }
 #endif
 
     int closeStatus = ENT_Close();
-#ifndef WIN32
-    if(limitAdjusted)
-    {
-        setrlimit(RLIMIT_MEMLOCK, &oldLimit);
-    }
-#endif
 
     return expect_true(closeStatus == ENT_SYS_NORMAL, "ENT_Close should succeed after realtime degrade initialization");
 }
@@ -726,6 +729,35 @@ static int test_ent_set_rt_attributes_allows_noop_after_init(void)
     return expect_true(ENT_Close() == ENT_SYS_NORMAL, "ENT_Close should succeed after ENT_SetRtAttributes noop");
 }
 
+static int test_ent_set_rt_attributes_rejects_normal_mode(void)
+{
+    memset(&gEntCtx, 0, sizeof(gEntCtx));
+    reset_close_counters();
+    reset_log_failures();
+
+    if(expect_true(ENT_Init("demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
+                   "ENT_Init should succeed in normal mode before checking rt attribute rejection") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(ENT_SetRtAttributes(0, ENT_RT_POLICY_FIFO_E, 1) == ENT_RT_NOTRT,
+                   "ENT_SetRtAttributes should reject realtime attributes when init mode is normal") != 0)
+    {
+        ENT_Close();
+        return 1;
+    }
+
+    if(expect_true(gEntCtx.rtCpu == -1 && gEntCtx.rtPolicy == ENT_RT_POLICY_OTHER_E && gEntCtx.rtPriority == 0,
+                   "ENT_SetRtAttributes should leave rt settings unchanged when mode is normal") != 0)
+    {
+        ENT_Close();
+        return 1;
+    }
+
+    return expect_true(ENT_Close() == ENT_SYS_NORMAL, "ENT_Close should succeed after normal-mode rt rejection");
+}
+
 int main(void)
 {
     int failures = 0;
@@ -741,6 +773,7 @@ int main(void)
     failures += test_ent_init_realtime_mode_can_degrade_to_normal();
     failures += test_ent_set_rt_attributes_rejects_uninitialized_context();
     failures += test_ent_set_rt_attributes_allows_noop_after_init();
+    failures += test_ent_set_rt_attributes_rejects_normal_mode();
 
     if(failures != 0)
     {

@@ -112,6 +112,16 @@ const char* ENT_MsgSubmoduleName(MSG_ID_T code);
 bool ENT_MsgIsError(MSG_ID_T code);
 ```
 
+Build helpers:
+
+```c
+MSG_ID_T ENT_MsgBuild(bool isError, unsigned int moduleId, unsigned int submoduleId, unsigned int innerCode);
+MSG_ID_T ENT_MsgTryBuild(MSG_ID_T* outCode, bool isError, unsigned int moduleId, unsigned int submoduleId, unsigned int innerCode);
+```
+
+`ENT_MsgTryBuild` is the checked form and returns `ENT_SYS_NORMAL` only when all parts fit in the encoded bit-width.
+`ENT_MsgBuild` keeps the direct return-value style, but now returns `ENT_SYS_INVALID_MSGCODE` instead of silently truncating invalid parts.
+
 Formatting helpers:
 
 ```c

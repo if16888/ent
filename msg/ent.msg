@@ -37,6 +37,7 @@ NORMAL              ok  0  success
 ALREADY_INITIALIZED ok  1  ent already initialized
 CLOSE_UNINITIALIZED err 1  ent not initialized for close
 RUN_UNINITIALIZED   err 2  ent not initialized for run
+INVALID_MSGCODE    err  3  invalid message code parts: module[%u] submodule[%u] inner[%u]
 
 # ----------------------------------------------------------------------------
 # INIT: ENT_Init / ENT_Close / runtime init flow
@@ -64,6 +65,7 @@ AFFINITY_FAILED     err 4  set realtime cpu affinity failed, status[%d]
 SCHED_QUERYFAIL     err 5  query realtime schedule priority range failed, errno[%d]
 SCHED_SETFAIL       err 6  set realtime scheduling policy failed, status[%d]
 UNSUPPORTED_PLATFORM err 7 realtime cpu or policy is unsupported on this platform
+NOTRT              err 8  realtime attributes require realtime init mode
 
 # ----------------------------------------------------------------------------
 # THRD: ENT thread service

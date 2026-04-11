@@ -81,6 +81,11 @@ ENT_PUBLIC MSG_ID_T ENT_MsgBuild(bool isError,
                                  unsigned int moduleId,
                                  unsigned int submoduleId,
                                  unsigned int innerCode);
+ENT_PUBLIC MSG_ID_T ENT_MsgTryBuild(MSG_ID_T* outCode,
+                                    bool isError,
+                                    unsigned int moduleId,
+                                    unsigned int submoduleId,
+                                    unsigned int innerCode);
 
 ENT_PUBLIC const char* ENT_MsgText(MSG_ID_T code);
 ENT_PUBLIC const char* ENT_MsgModuleName(MSG_ID_T code);
