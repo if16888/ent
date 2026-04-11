@@ -27,10 +27,18 @@
 #include "lualib.h"
 #endif
 
+#ifndef ENT_SCRIPT_PATH_MAX
+#ifdef WIN32
+#define ENT_SCRIPT_PATH_MAX 260
+#else
+#define ENT_SCRIPT_PATH_MAX 1024
+#endif
+#endif
+
 typedef struct
 {
     bool isInit;
-    char scriptRoot[MAX_PATH];
+    char scriptRoot[ENT_SCRIPT_PATH_MAX];
 #if ENT_ENABLE_LUA
     lua_State* state;
 #endif
@@ -159,7 +167,7 @@ ENT_PUBLIC MSG_ID_T ENT_ScriptInit(const char* scriptRoot)
 ENT_PUBLIC MSG_ID_T ENT_ScriptReload(const char* scriptName)
 {
 #if ENT_ENABLE_LUA
-    char scriptPath[MAX_PATH] = {0};
+    char scriptPath[ENT_SCRIPT_PATH_MAX] = {0};
     MSG_ID_T sts = ENT_SYS_NORMAL;
     int rc = 0;
 #endif
