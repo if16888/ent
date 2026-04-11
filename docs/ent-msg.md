@@ -58,6 +58,7 @@ CONNECT_FAILED err 7  connect socket failed
 - `MODULE_NAME` must be uppercase
 - `SUBMODULE_NAME` must be uppercase
 - `MODULE_NAME` length must be `<= 4`
+- Prefer `MODULE_NAME` length `== 3` when possible
 - `SUBMODULE_NAME` length must be `<= 4`
 - `MSG_NAME` uses uppercase snake case
 
@@ -72,6 +73,7 @@ Current `ENT` submodules:
 - `TMR`
 - `TPL`
 - `DLL`
+- `SCR`
 
 ## Generated Macros
 

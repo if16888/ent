@@ -153,3 +153,16 @@ BAD_ARGUMENT err 1  invalid double-linked-list argument
 SAME_NODE    err 2  inserting list head into itself is invalid
 EMPTY_LIST   err 3  list has no element
 HEAD_NODE    err 4  current node is head and cannot be removed
+
+# ----------------------------------------------------------------------------
+# SCR: script engine service
+# ----------------------------------------------------------------------------
+submodule SCR 9
+NOT_INITIALIZED err 1  script engine is not initialized
+ALREADY_INIT    err 2  script engine has already been initialized
+BAD_ARGUMENT    err 3  invalid script api argument
+LOAD_FAILED     err 4  script root path is invalid or too long
+COMPILE_FAILED  err 5  load script chunk failed, file[%s]
+RUNTIME_FAILED  err 6  execute script chunk failed, file[%s]
+FUNC_NOTFOUND   err 7  script function not found, fn[%s]
+UNSUPPORTED     err 8  script runtime is not enabled in current build

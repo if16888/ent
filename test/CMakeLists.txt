@@ -43,6 +43,26 @@ if(TARGET ent_s)
   target_link_libraries(test_ent_msg PRIVATE ent_s)
 
   add_test(NAME test_ent_msg COMMAND test_ent_msg)
+
+  add_executable(
+    test_ent_script
+    test_ent_script.c
+  )
+
+  target_include_directories(
+    test_ent_script
+    PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+      ${CMAKE_CURRENT_SOURCE_DIR}/../comm
+  )
+
+  if(TARGET ent_msg_codegen)
+    add_dependencies(test_ent_script ent_msg_codegen)
+  endif()
+
+  target_link_libraries(test_ent_script PRIVATE ent_s)
+
+  add_test(NAME test_ent_script COMMAND test_ent_script)
 endif()
 
 add_executable(

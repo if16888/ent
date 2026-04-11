@@ -6,6 +6,8 @@
 2. 构建项目
    cmake --build .
    如需禁用数据库后端，可在配置时追加 `-DENT_ENABLE_MYSQL=OFF` 或 `-DENT_ENABLE_SQLITE=OFF`
+   如需启用 Lua 脚本后端，可在配置时追加 `-DENT_ENABLE_LUA=ON`
+   Lua 链接方式默认静态，可通过 `-DENT_LUA_LINK_MODE=shared` 切换为动态库
 3. 切换构建类型
    cmake -D CMAKE_BUILD_TYPE=Release ..
 4. 使用ide
@@ -30,7 +32,15 @@
    当前数据库测试按 SQLite-only 方式验证，可使用以下命令重新配置：
    `cmake -S . -B build -DENT_ENABLE_SQLITE=ON -DENT_ENABLE_MYSQL=OFF`
 
-7. 验证命令
+7. Lua 第三方源码约定（静态链接优先）
+   默认约定 Lua 源码位于：
+   `3rd/lua/src`
+   其中应包含 `lua.h` 和 Lua 5.4 的核心 `.c` 文件（不含 `lua.c` / `luac.c` 可执行入口也可）。
+   启用 Lua 静态构建示例：
+   `cmake -S . -B build -DENT_ENABLE_LUA=ON -DENT_LUA_LINK_MODE=static`
+   若源码不存在，构建系统会给出警告并自动关闭 Lua 后端。
+
+8. 验证命令
    在 `build` 目录执行：
    `ctest --output-on-failure`
    如需单独验证数据库测试：
@@ -38,7 +48,7 @@
    示例程序构建验证：
    `cmake --build build --target example01`
 
-8. GitHub Actions
+9. GitHub Actions
    当前仓库已提供 Linux (`ubuntu-24.04`) 和 Windows (`windows-2022`) 的 CI。
    两个平台都通过共享脚本执行：
    Linux: `./scripts/run-ci-linux.sh`
@@ -47,11 +57,11 @@
    `configure`、`build`、`test`、`perf`
    当前功能测试已恢复到双平台 `10/10`，性能冒烟也可完整执行。
 
-9. CI 经验文档
+10. CI 经验文档
    这次 GitHub Actions 的平台差异、踩坑记录、脚本化经验和后续项目可复用的 checklist 已整理到：
    `docs/github-actions-ci-playbook.md`
 
-10. 本地下游消费安装
+11. 本地下游消费安装
    如需让其他 CMake 项目通过 `find_package(ent CONFIG REQUIRED)` 使用本库，可先本地安装：
    `cmake -S . -B build-install -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release`
    `cmake --build build-install --parallel 4`

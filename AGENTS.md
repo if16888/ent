@@ -17,6 +17,15 @@ Build all targets with `cmake --build .`. Run the sample app with `./bin/example
 ## Coding Style & Naming Conventions
 Follow the existing C style: 4-space indentation, braces on their own line for functions and control blocks, and compact `if(...)` / `for(...)` spacing as used in `comm/ent_init.c`. Preserve the current naming scheme: public APIs use `ENT_` or `UTL_` prefixes, internal helpers use an `i` prefix (for example `iENT_CTXFree`), types are upper snake case (`MSG_ID_T`), and source/header pairs keep matching `ent_*` or `utl_*` names. No formatter configuration is committed, so keep changes stylistically consistent with adjacent files.
 
+## Message Code Rules
+When editing `msg/ent.msg` or generated message-code usage, follow these constraints:
+- `module` and `submodule` names must be uppercase and must not exceed 4 characters.
+- Prefer `module` names with 3 characters when possible for readability and long-term consistency.
+- Keep message symbols aligned with the existing `ENT_<SUBMODULE>_<NAME>` convention.
+- Current ENT submodules are: `SYS`, `INIT`, `RT`, `THRD`, `UTHD`, `SOCK`, `TMR`, `TPL`, `DLL`, `SCR`.
+- `SCR` submodule is reserved for script runtime lifecycle and execution errors (load/compile/runtime/function lookup).
+- Any message-code change (new/removed/renamed submodule, code, or text) must be synced in this `AGENTS.md` file in the same change set so future contributors see the latest rules and conventions.
+
 ## Testing Guidelines
 There is no active test suite in this repository yet: the top-level CMake test block is present but commented out. Treat `example/example01.c` as the current smoke test and rebuild it after changes to library code. If you add tests, prefer a dedicated `test/` directory with CMake integration via `enable_testing()` and name files after the module under test, such as `test_ent_log.c`.
 
