@@ -4,6 +4,7 @@
 
 #include "ient_comm.h"
 #include "ent_init.h"
+#include "ent_msg.h"
 
 static UTL_CV s_last_cv = NULL;
 static UTL_LOCK s_last_lock = NULL;
@@ -306,7 +307,7 @@ static int test_ent_run_rejects_uninitialized_context(void)
     memset(&gEntCtx, 0, sizeof(gEntCtx));
     reset_wait_capture();
 
-    if(expect_true(ENT_Run() == -1, "ENT_Run should reject an uninitialized context") != 0)
+    if(expect_true(ENT_Run() == ENT_SYS_RUN_UNINITIALIZED, "ENT_Run should reject an uninitialized context") != 0)
     {
         return 1;
     }
@@ -322,7 +323,7 @@ static int test_ent_run_waits_on_cv_with_lock(void)
     gEntCtx.entLock = (UTL_LOCK)0x5678;
     reset_wait_capture();
 
-    if(expect_true(ENT_Run() == 0, "ENT_Run should succeed after initialization") != 0)
+    if(expect_true(ENT_Run() == ENT_SYS_NORMAL, "ENT_Run should succeed after initialization") != 0)
     {
         return 1;
     }
@@ -349,7 +350,7 @@ static int test_ent_close_clears_runtime_handles(void)
     gEntCtx.entCV = (UTL_CV)0x33;
     reset_close_counters();
 
-    if(expect_true(ENT_Close() == 0, "ENT_Close should succeed for an initialized context") != 0)
+    if(expect_true(ENT_Close() == ENT_SYS_NORMAL, "ENT_Close should succeed for an initialized context") != 0)
     {
         return 1;
     }
@@ -399,7 +400,7 @@ static int test_ent_init_closes_logging_when_default_log_level_setup_fails(void)
     reset_log_failures();
     s_fail_log_set_option_call = 1;
 
-    if(expect_true(ENT_Init("demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == -6,
+    if(expect_true(ENT_Init("demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_INIT_DEFAULT_LEVELFAIL,
                    "ENT_Init should report default log level setup failure") != 0)
     {
         return 1;
@@ -427,7 +428,7 @@ static int test_ent_init_logs_before_tearing_down_logging_when_lock_init_fails(v
     reset_log_failures();
     s_fail_lock_init = -1;
 
-    if(expect_true(ENT_Init("demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == -9,
+    if(expect_true(ENT_Init("demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_INIT_LOCK_INITFAIL,
                    "ENT_Init should report lock initialization failure") != 0)
     {
         return 1;
@@ -474,7 +475,7 @@ static int test_ent_init_builds_paths_without_trailing_separator(void)
     reset_close_counters();
     reset_log_failures();
 
-    if(expect_true(ENT_Init("demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == 0,
+    if(expect_true(ENT_Init("demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
                    "ENT_Init should succeed for a normal work path") != 0)
     {
         return 1;
@@ -540,7 +541,7 @@ static int test_ent_init_builds_paths_without_trailing_separator(void)
         return 1;
     }
 
-    if(expect_true(ENT_Close() == 0, "ENT_Close should succeed after a successful ENT_Init") != 0)
+    if(expect_true(ENT_Close() == ENT_SYS_NORMAL, "ENT_Close should succeed after a successful ENT_Init") != 0)
     {
         return 1;
     }
@@ -557,7 +558,7 @@ static int test_ent_init_builds_paths_with_trailing_separator(void)
     reset_close_counters();
     reset_log_failures();
 
-    if(expect_true(ENT_Init("demo", "/tmp/demo/", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == 0,
+    if(expect_true(ENT_Init("demo", "/tmp/demo/", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
                    "ENT_Init should succeed for a work path that already ends with a separator") != 0)
     {
         return 1;
@@ -581,7 +582,7 @@ static int test_ent_init_builds_paths_with_trailing_separator(void)
         return 1;
     }
 
-    return expect_true(ENT_Close() == 0, "ENT_Close should succeed after trailing-separator initialization");
+    return expect_true(ENT_Close() == ENT_SYS_NORMAL, "ENT_Close should succeed after trailing-separator initialization");
 }
 
 static int test_ent_init_rejects_empty_name_or_work_path(void)
@@ -593,14 +594,14 @@ static int test_ent_init_rejects_empty_name_or_work_path(void)
     reset_log_failures();
 
     sts = ENT_Init("", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E);
-    if(expect_true(sts == -1,
+    if(expect_true(sts == ENT_INIT_INVALID_ARGUMENT,
                    "ENT_Init should reject an empty entity name") != 0)
     {
         return 1;
     }
 
     sts = ENT_Init("demo", "", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E);
-    if(expect_true(sts == -1,
+    if(expect_true(sts == ENT_INIT_INVALID_ARGUMENT,
                    "ENT_Init should reject an empty workPath") != 0)
     {
         return 1;
@@ -621,7 +622,7 @@ static int test_ent_init_realtime_mode_can_degrade_to_normal(void)
     reset_close_counters();
     reset_log_failures();
 
-    if(expect_true(ENT_Init("demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_REALTIME_E) == 0,
+    if(expect_true(ENT_Init("demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_REALTIME_E) == ENT_SYS_NORMAL,
                    "ENT_Init should still succeed when realtime mode degrades to normal mode") != 0)
     {
         return 1;
@@ -639,13 +640,13 @@ static int test_ent_init_realtime_mode_can_degrade_to_normal(void)
         return 1;
     }
 
-    return expect_true(ENT_Close() == 0, "ENT_Close should succeed after realtime degrade initialization");
+    return expect_true(ENT_Close() == ENT_SYS_NORMAL, "ENT_Close should succeed after realtime degrade initialization");
 }
 
 static int test_ent_set_rt_attributes_rejects_uninitialized_context(void)
 {
     memset(&gEntCtx, 0, sizeof(gEntCtx));
-    return expect_true(ENT_SetRtAttributes(-1, ENT_RT_POLICY_OTHER_E, 0) == -1,
+    return expect_true(ENT_SetRtAttributes(-1, ENT_RT_POLICY_OTHER_E, 0) == ENT_RT_NOT_INITIALIZED,
                        "ENT_SetRtAttributes should reject an uninitialized context");
 }
 
@@ -655,20 +656,20 @@ static int test_ent_set_rt_attributes_allows_noop_after_init(void)
     reset_close_counters();
     reset_log_failures();
 
-    if(expect_true(ENT_Init("demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_REALTIME_E) == 0,
+    if(expect_true(ENT_Init("demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_REALTIME_E) == ENT_SYS_NORMAL,
                    "ENT_Init should succeed before applying RT attributes") != 0)
     {
         return 1;
     }
 
-    if(expect_true(ENT_SetRtAttributes(-1, ENT_RT_POLICY_OTHER_E, 0) == 0,
+    if(expect_true(ENT_SetRtAttributes(-1, ENT_RT_POLICY_OTHER_E, 0) == ENT_SYS_NORMAL,
                    "ENT_SetRtAttributes should allow noop configuration after init") != 0)
     {
         ENT_Close();
         return 1;
     }
 
-    return expect_true(ENT_Close() == 0, "ENT_Close should succeed after ENT_SetRtAttributes noop");
+    return expect_true(ENT_Close() == ENT_SYS_NORMAL, "ENT_Close should succeed after ENT_SetRtAttributes noop");
 }
 
 int main(void)

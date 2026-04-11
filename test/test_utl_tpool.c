@@ -9,6 +9,7 @@
 #endif
 
 #include "ient_comm.h"
+#include "ent_msg.h"
 #include "ent_thread.h"
 #include "ent_utility.h"
 
@@ -328,7 +329,7 @@ static MSG_ID_T slow_task_cb(void* data)
 
 static int test_tpool_init_rejects_null_output_pointer(void)
 {
-    return expect_true(UTL_TPoolInit(NULL, 1) == -1,
+    return expect_true(UTL_TPoolInit(NULL, 1) == ENT_TPL_BAD_ARGUMENT,
                        "UTL_TPoolInit should reject a NULL output pointer");
 }
 
@@ -336,25 +337,25 @@ static int test_tpool_add_task_rejects_invalid_arguments(void)
 {
     MSG_ID_T retVal = 0;
 
-    if(expect_true(UTL_TPoolAddTask(NULL, NULL, NULL, NULL, NULL) == -1,
+    if(expect_true(UTL_TPoolAddTask(NULL, NULL, NULL, NULL, NULL) == ENT_TPL_BAD_ARGUMENT,
                    "UTL_TPoolAddTask should reject a NULL pool and callback") != 0)
     {
         return 1;
     }
 
-    if(expect_true(UTL_TPoolAddTask(NULL, (UTL_TP_TASK_F)1, NULL, NULL, &retVal) == -1,
+    if(expect_true(UTL_TPoolAddTask(NULL, (UTL_TP_TASK_F)1, NULL, NULL, &retVal) == ENT_TPL_BAD_ARGUMENT,
                    "UTL_TPoolAddTask should reject a NULL pool") != 0)
     {
         return 1;
     }
 
-    if(expect_true(UTL_TPoolAddTask((UTL_TPOOL)1, (UTL_TP_TASK_F)1, NULL, NULL, NULL) == -1,
+    if(expect_true(UTL_TPoolAddTask((UTL_TPOOL)1, (UTL_TP_TASK_F)1, NULL, NULL, NULL) == ENT_TPL_BAD_ARGUMENT,
                    "UTL_TPoolAddTask should reject a NULL return-value pointer") != 0)
     {
         return 1;
     }
 
-    return expect_true(UTL_TPoolAddTask((UTL_TPOOL)1, NULL, NULL, NULL, &retVal) == -1,
+    return expect_true(UTL_TPoolAddTask((UTL_TPOOL)1, NULL, NULL, NULL, &retVal) == ENT_TPL_BAD_ARGUMENT,
                        "UTL_TPoolAddTask should reject a NULL task callback");
 }
 
@@ -365,7 +366,7 @@ static int test_tpool_init_fails_when_no_worker_threads_start(void)
     reset_thread_counters();
     s_fail_thread_create = 1;
 
-    if(expect_true(UTL_TPoolInit(&pool, 2) == -6,
+    if(expect_true(UTL_TPoolInit(&pool, 2) == ENT_TPL_WORKER_CREATEFAIL,
                    "UTL_TPoolInit should fail when no worker threads can be created") != 0)
     {
         s_fail_thread_create = 0;
@@ -474,7 +475,7 @@ static int test_tpool_close_reclaims_partially_started_workers(void)
 
 static int test_tpool_close_rejects_null_pool(void)
 {
-    return expect_true(UTL_TPoolClose(NULL) == -1,
+    return expect_true(UTL_TPoolClose(NULL) == ENT_TPL_BAD_ARGUMENT,
                        "UTL_TPoolClose should reject a NULL pool handle");
 }
 

@@ -13,6 +13,7 @@
 #endif
 
 #include "ient_comm.h"
+#include "ent_msg.h"
 #include "ent_utility.h"
 
 ENT_CTX gEntCtx;
@@ -151,19 +152,19 @@ static int test_socket_rejects_uninitialized_use(void)
     UTL_D_SOCKET sock = -1;
     int bytes = 0;
 
-    if(expect_true(UTL_Socket(AF_INET, SOCK_STREAM, 0, &sock) == -1,
+    if(expect_true(UTL_Socket(AF_INET, SOCK_STREAM, 0, &sock) == ENT_SOCK_NOT_INITIALIZED,
                    "UTL_Socket should reject use before UTL_SocketInit") != 0)
     {
         return 1;
     }
 
-    if(expect_true(UTL_Send(sock, "x", 1, 0, &bytes) == -1,
+    if(expect_true(UTL_Send(sock, "x", 1, 0, &bytes) == ENT_SOCK_NOT_INITIALIZED,
                    "UTL_Send should reject use before UTL_SocketInit") != 0)
     {
         return 1;
     }
 
-    return expect_true(UTL_CloseSocket(sock) == -1,
+    return expect_true(UTL_CloseSocket(sock) == ENT_SOCK_NOT_INITIALIZED,
                        "UTL_CloseSocket should reject use before UTL_SocketInit");
 }
 
@@ -182,14 +183,14 @@ static int test_socket_bind_and_connect_reject_null_addr(void)
         return 1;
     }
 
-    if(expect_true(UTL_Bind(sock, NULL, 0) == -2,
+    if(expect_true(UTL_Bind(sock, NULL, 0) == ENT_SOCK_BAD_ARGUMENT,
                    "UTL_Bind should reject a NULL address") != 0)
     {
         UTL_CloseSocket(sock);
         return 1;
     }
 
-    if(expect_true(UTL_Connect(sock, NULL, 0) == -2,
+    if(expect_true(UTL_Connect(sock, NULL, 0) == ENT_SOCK_BAD_ARGUMENT,
                    "UTL_Connect should reject a NULL address") != 0)
     {
         UTL_CloseSocket(sock);

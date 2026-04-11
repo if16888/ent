@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "ient_comm.h"
+#include "ent_msg.h"
 #include "ent_thread.h"
 #include "ent_utility.h"
 
@@ -86,7 +87,7 @@ static DWORD iUTL_TPoolTaskPro(void* data)
     if(data == NULL)
     {
         IENT_LOG_ERROR("arguments invalid\n");
-        return -1;
+        return ENT_TPL_BAD_ARGUMENT;
     }
 
     thCtx = (UTL_TPOOL_THREAD*)data;
@@ -213,13 +214,13 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolInit(UTL_TPOOL*  pool,int num)
     if(pool==NULL)
     {
         IENT_LOG_ERROR("thread pool init handle is null\n");
-        return -1;
+        return ENT_TPL_BAD_ARGUMENT;
     }
     poolCtx = (UTL_TPOOL_CTX*)malloc(sizeof(UTL_TPOOL_CTX));
     if(poolCtx == NULL)
     {
         IENT_LOG_ERROR("malloc failed\n");
-        return -2;
+        return ENT_TPL_ALLOC_FAILED;
     }
     memset(poolCtx,0,sizeof(UTL_TPOOL_CTX));
 
@@ -227,7 +228,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolInit(UTL_TPOOL*  pool,int num)
     if(sts < 0)
     {
         IENT_LOG_ERROR("ENT_ThreadInit failed,sts [%d]\n",sts);
-        return -3;
+        return ENT_TPL_THREAD_INITFAIL;
     }
 
     sts = UTL_LockInit(&poolCtx->taskLock,"");
@@ -235,7 +236,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolInit(UTL_TPOOL*  pool,int num)
     {
         ENT_ThreadClose(poolCtx->thHandle);
         IENT_LOG_ERROR("UTL_LockInit failed,sts [%d]\n",sts);
-        return -4;
+        return ENT_TPL_LOCK_INITFAIL;
     }
 
     sts = UTL_LockInitEx(&poolCtx->recycleLock,"",LOCK_SPIN_E);
@@ -244,7 +245,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolInit(UTL_TPOOL*  pool,int num)
         UTL_LockClose(poolCtx->taskLock);
         ENT_ThreadClose(poolCtx->thHandle);
         IENT_LOG_ERROR("UTL_LockInitEx failed,sts [%d]\n",sts);
-        return -5;
+        return ENT_TPL_RECYCLE_LOCKFAIL;
     }
 
     sts = UTL_CVInit(&poolCtx->taskEmptyCV,"");
@@ -254,7 +255,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolInit(UTL_TPOOL*  pool,int num)
         UTL_LockClose(poolCtx->taskLock);
         ENT_ThreadClose(poolCtx->thHandle);
         IENT_LOG_ERROR("UTL_LockInit failed,sts [%d]\n",sts);
-        return -6;
+        return ENT_TPL_CV_INITFAIL;
     }
 
     sts = UTL_DllInitHead(&poolCtx->taskActiveHeader);
@@ -294,12 +295,12 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolInit(UTL_TPOOL*  pool,int num)
         ENT_ThreadClose(poolCtx->thHandle);
         free(poolCtx);
         *pool = NULL;
-        return -6;
+        return ENT_TPL_WORKER_CREATEFAIL;
     }
 
     *pool = poolCtx;
 
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -323,7 +324,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolClose(UTL_TPOOL  pool)
     if(pool==NULL)
     {
         IENT_LOG_ERROR("thread pool init handle is null\n");
-        return -1;
+        return ENT_TPL_BAD_ARGUMENT;
     }
     poolCtx=(UTL_TPOOL_CTX*)pool;
 
@@ -385,7 +386,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolClose(UTL_TPOOL  pool)
     ENT_ThreadClose(poolCtx->thHandle);
     
     free(poolCtx);
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -408,7 +409,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolAddTask(UTL_TPOOL pool,UTL_TP_TASK_F taskCb,UTL_TP
     if(pool==NULL || taskCb==NULL || retVal == NULL)
     {
         IENT_LOG_ERROR("invalid arguments\n");
-        return -1;
+        return ENT_TPL_BAD_ARGUMENT;
     }
 
     poolCtx=(UTL_TPOOL_CTX*)pool;
@@ -422,7 +423,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolAddTask(UTL_TPOOL pool,UTL_TP_TASK_F taskCb,UTL_TP
         if(taskDb == NULL)
         {
             IENT_LOG_ERROR("malloc size [%d] failed\n",sizeof(UTL_TPOOL_TASK));
-            return -1;
+            return ENT_TPL_TASK_ALLOCFAIL;
         }
     }
     else
@@ -444,5 +445,5 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolAddTask(UTL_TPOOL pool,UTL_TP_TASK_F taskCb,UTL_TP
         UTL_CVWake(poolCtx->taskEmptyCV);
     }
     
-    return 0;
+    return ENT_SYS_NORMAL;
 }

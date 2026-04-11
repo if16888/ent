@@ -27,6 +27,7 @@
 #include <string.h>
 #endif
 #include "ient_comm.h"
+#include "ent_msg.h"
 #include "ent_utility.h"
 
 static bool sUtlInitFlag  = false;
@@ -57,7 +58,7 @@ ENT_PUBLIC MSG_ID_T UTL_SocketInit()
     
     if(sUtlInitFlag)
     {
-        return 0;
+        return ENT_SYS_NORMAL;
     }
 
     sUtlInitFlag = true;
@@ -69,7 +70,7 @@ ENT_PUBLIC MSG_ID_T UTL_SocketInit()
         /* WinSock DLL.                                  */
         IENT_LOG_ERROR("WSAStartup failed,error [%d]\n",GetLastError());
         sUtlInitFlag = false;
-        return -1;
+        return ENT_SOCK_INIT_FAILED;
     }
      
     /* Confirm that the WinSock DLL supports 2.2.*/
@@ -85,9 +86,9 @@ ENT_PUBLIC MSG_ID_T UTL_SocketInit()
         WSACleanup( );
         IENT_LOG_ERROR("win sock do not support 2.2\n");
         sUtlInitFlag = false;
-        return -2; 
+        return ENT_SOCK_VERSION_UNSUPPORTED; 
     }
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -116,7 +117,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Socket(
 	if (!sUtlInitFlag) 
     {
         IENT_LOG_ERROR("unintilized.\n");
-        return -1;
+        return ENT_SOCK_NOT_INITIALIZED;
     }
 
     while ( ( (*pSocketDesc = socket (AddrFamily,SocketType,Protocol)) == INVALID_SOCKET )
@@ -124,7 +125,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Socket(
 
     if ( *pSocketDesc == INVALID_SOCKET )
     {
-        sts = -2;
+        sts = ENT_SOCK_CREATE_FAILED;
         IENT_LOG_ERROR("socket failed,error [%d].\n",WSAGetLastError());
     }
 
@@ -157,12 +158,12 @@ MSG_ID_T	UTL_Bind(
     if (!sUtlInitFlag) 
     {
         IENT_LOG_ERROR("unintilized.\n");
-        return -1;
+        return ENT_SOCK_NOT_INITIALIZED;
     }
     if (addr == NULL )
     {
         IENT_LOG_ERROR("unvalid args.\n");
-        return -2;
+        return ENT_SOCK_BAD_ARGUMENT;
     }
 
 	while ( ( (stat = bind (
@@ -173,7 +174,7 @@ MSG_ID_T	UTL_Bind(
 
 	if ( stat == SOCKET_ERROR )
     {
-        sts = -3;
+        sts = ENT_SOCK_BIND_FAILED;
         IENT_LOG_ERROR("bind failed,error [%d].\n",WSAGetLastError());
     }
 
@@ -207,12 +208,12 @@ ENT_PUBLIC MSG_ID_T  UTL_Connect(
     if (!sUtlInitFlag) 
     {
         IENT_LOG_ERROR("unintilized.\n");
-        return -1;
+        return ENT_SOCK_NOT_INITIALIZED;
     }
     if (addr == NULL )
     {
         IENT_LOG_ERROR("unvalid args.\n");
-        return -2;
+        return ENT_SOCK_BAD_ARGUMENT;
     }
 
 	while ( (stat = connect (
@@ -226,7 +227,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Connect(
 
 	if ( stat == SOCKET_ERROR )
     {
-        sts = -3;
+        sts = ENT_SOCK_CONNECT_FAILED;
         IENT_LOG_ERROR("connect failed,error [%d].\n",WSAGetLastError());
     }
 
@@ -259,7 +260,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Listen(
     if (!sUtlInitFlag) 
     {
         IENT_LOG_ERROR("unintilized.\n");
-        return -1;
+        return ENT_SOCK_NOT_INITIALIZED;
     }
 
     while ( ( (stat = listen (SocketDesc,MaxBacklog)) == SOCKET_ERROR )
@@ -267,7 +268,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Listen(
 
     if ( stat == SOCKET_ERROR )
     {
-        sts = -3;
+        sts = ENT_SOCK_LISTEN_FAILED;
         IENT_LOG_ERROR("listen failed,error [%d].\n",WSAGetLastError());
     }
 
@@ -303,7 +304,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Accept(
     if (!sUtlInitFlag) 
     {
         IENT_LOG_ERROR("unintilized.\n");
-        return -1;
+        return ENT_SOCK_NOT_INITIALIZED;
     }
 
     SockaddrLen= sizeof(struct sockaddr);
@@ -315,7 +316,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Accept(
 
     if ( ret == INVALID_SOCKET )
     {
-        sts = -3;
+        sts = ENT_SOCK_ACCEPT_FAILED;
         IENT_LOG_ERROR("accpet failed,error [%d].\n",WSAGetLastError());
     }
 
@@ -346,7 +347,7 @@ ENT_PUBLIC MSG_ID_T  UTL_CloseSocket(
     if (!sUtlInitFlag) 
     {
         IENT_LOG_ERROR("unintilized.\n");
-        return -1;
+        return ENT_SOCK_NOT_INITIALIZED;
     }
 
     while ( ( (stat = closesocket (SocketDesc)) == SOCKET_ERROR )
@@ -354,7 +355,7 @@ ENT_PUBLIC MSG_ID_T  UTL_CloseSocket(
 
     if ( stat == SOCKET_ERROR )
     {
-        sts = -3;
+        sts = ENT_SOCK_CLOSE_FAILED;
         IENT_LOG_ERROR("closesocket failed,error [%d].\n",WSAGetLastError());
     }
 	
@@ -390,7 +391,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Recv(
     if (!sUtlInitFlag) 
     {
         IENT_LOG_ERROR("unintilized.\n");
-        return -1;
+        return ENT_SOCK_NOT_INITIALIZED;
     }
 
     while ( ((BytesRecvd=recv (
@@ -402,7 +403,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Recv(
 
     if (BytesRecvd == SOCKET_ERROR )
     {
-        sts = -3;
+        sts = ENT_SOCK_RECV_FAILED;
         IENT_LOG_ERROR("recv failed,error [%d].\n",WSAGetLastError());
     }
     else
@@ -441,7 +442,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Send(
     if (!sUtlInitFlag) 
     {
         IENT_LOG_ERROR("unintilized.\n");
-        return -1;
+        return ENT_SOCK_NOT_INITIALIZED;
     }
 
     while ( ((TempBytesSent=send (
@@ -453,7 +454,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Send(
 
     if ( TempBytesSent == SOCKET_ERROR )
     {
-        sts = -3;
+        sts = ENT_SOCK_SEND_FAILED;
         IENT_LOG_ERROR("send failed,error [%d].\n",WSAGetLastError());
     }
     else
@@ -492,7 +493,7 @@ ENT_PUBLIC MSG_ID_T  UTL_SetSockOpt(
     if (!sUtlInitFlag) 
     {
         IENT_LOG_ERROR("unintilized.\n");
-        return -1;
+        return ENT_SOCK_NOT_INITIALIZED;
     }
 
     while ( ((stat =  setsockopt (
@@ -505,7 +506,7 @@ ENT_PUBLIC MSG_ID_T  UTL_SetSockOpt(
 
     if ( stat < 0 )
     {
-        sts = -3;
+        sts = ENT_SOCK_SETOPT_FAILED;
         IENT_LOG_ERROR("setsockopt failed,error [%d].\n",WSAGetLastError());
     }
 
@@ -537,7 +538,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Shutdown(
     if (!sUtlInitFlag) 
     {
         IENT_LOG_ERROR("unintilized.\n");
-        return -1;
+        return ENT_SOCK_NOT_INITIALIZED;
     }
 
     while ( ((stat = shutdown (
@@ -547,7 +548,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Shutdown(
 
     if ( stat < 0 )
     {
-        sts = -3;
+        sts = ENT_SOCK_SHUTDOWN_FAILED;
         IENT_LOG_ERROR("setsockopt failed,error [%d].\n",WSAGetLastError());
     }
 
@@ -582,7 +583,7 @@ ENT_PUBLIC MSG_ID_T  UTL_GetSockOpt(
     if (!sUtlInitFlag) 
     {
         IENT_LOG_ERROR("unintilized.\n");
-        return -1;
+        return ENT_SOCK_NOT_INITIALIZED;
     }
 
     if ( ( (stat = getsockopt (
@@ -597,7 +598,7 @@ ENT_PUBLIC MSG_ID_T  UTL_GetSockOpt(
 
     if (stat < 0)
     {
-        sts = -3;
+        sts = ENT_SOCK_GETOPT_FAILED;
         IENT_LOG_ERROR("getsockopt failed,error [%d].\n",WSAGetLastError());
     }
 
@@ -624,11 +625,11 @@ ENT_PUBLIC MSG_ID_T UTL_SocketInit()
 {   
     if(sUtlInitFlag)
     {
-        return 0;
+        return ENT_SYS_NORMAL;
     }
 
     sUtlInitFlag = true;
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -657,7 +658,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Socket(
     if (!sUtlInitFlag)
     {
         IENT_LOG_ERROR("unintilized.\n");
-        return -1;
+        return ENT_SOCK_NOT_INITIALIZED;
     }
 
     while ( ( (*pSocketDesc = socket(AddrFamily,SocketType,Protocol)) < 0 )
@@ -665,7 +666,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Socket(
 
     if ( *pSocketDesc < 0 )
     {
-        sts = -2;
+        sts = ENT_SOCK_CREATE_FAILED;
         IENT_LOG_ERROR("socket failed,error [%d]->[%s].\n",errno,strerror(errno));
     }
 
@@ -698,12 +699,12 @@ MSG_ID_T	UTL_Bind(
     if (!sUtlInitFlag) 
     {
         IENT_LOG_ERROR("unintilized.\n");
-        return -1;
+        return ENT_SOCK_NOT_INITIALIZED;
     }
     if (addr == NULL )
     {
         IENT_LOG_ERROR("unvalid args.\n");
-        return -2;
+        return ENT_SOCK_BAD_ARGUMENT;
     }
 
     {
@@ -719,7 +720,7 @@ MSG_ID_T	UTL_Bind(
 
 	if ( stat <0 )
     {
-        sts = -3;
+        sts = ENT_SOCK_BIND_FAILED;
         IENT_LOG_ERROR("bind failed,error [%d]->[%s].\n",errno,strerror(errno));
     }
 
@@ -752,12 +753,12 @@ ENT_PUBLIC MSG_ID_T  UTL_Connect(
     if (!sUtlInitFlag) 
     {
         IENT_LOG_ERROR("unintilized.\n");
-        return -1;
+        return ENT_SOCK_NOT_INITIALIZED;
     }
     if (addr == NULL )
     {
         IENT_LOG_ERROR("unvalid args.\n");
-        return -2;
+        return ENT_SOCK_BAD_ARGUMENT;
     }
 
 	while ( (stat = connect (
@@ -772,7 +773,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Connect(
 
 	if ( stat < 0 )
     {
-        sts = -3;
+        sts = ENT_SOCK_CONNECT_FAILED;
         IENT_LOG_ERROR("connect failed,error [%d]->[%s].\n",errno,strerror(errno));
     }
 
@@ -805,7 +806,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Listen(
     if (!sUtlInitFlag) 
     {
         IENT_LOG_ERROR("unintilized.\n");
-        return -1;
+        return ENT_SOCK_NOT_INITIALIZED;
     }
 
     while ( ( (stat = listen (SocketDesc,MaxBacklog)) < 0 )
@@ -813,7 +814,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Listen(
 
     if ( stat < 0 )
     {
-        sts = -3;
+        sts = ENT_SOCK_LISTEN_FAILED;
         IENT_LOG_ERROR("listen failed,error [%d]->[%s].\n",errno,strerror(errno));
     }
 
@@ -849,7 +850,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Accept(
     if (!sUtlInitFlag) 
     {
         IENT_LOG_ERROR("unintilized.\n");
-        return -1;
+        return ENT_SOCK_NOT_INITIALIZED;
     }
 
     SockaddrLen= sizeof(struct sockaddr);
@@ -861,7 +862,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Accept(
 
     if ( ret < 0 )
     {
-        sts = -3;
+        sts = ENT_SOCK_ACCEPT_FAILED;
         IENT_LOG_ERROR("accpet failed,error [%d]->[%s].\n",errno,strerror(errno));
     }
 
@@ -892,7 +893,7 @@ ENT_PUBLIC MSG_ID_T  UTL_CloseSocket(
     if (!sUtlInitFlag) 
     {
         IENT_LOG_ERROR("unintilized.\n");
-        return -1;
+        return ENT_SOCK_NOT_INITIALIZED;
     }
 
     while ( ( (stat = close(SocketDesc)) < 0 )
@@ -900,7 +901,7 @@ ENT_PUBLIC MSG_ID_T  UTL_CloseSocket(
 
     if ( stat < 0 )
     {
-        sts = -3;
+        sts = ENT_SOCK_CLOSE_FAILED;
         IENT_LOG_ERROR("closesocket failed,error [%d]->[%s].\n",errno,strerror(errno));
     }
 	
@@ -936,7 +937,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Recv(
     if (!sUtlInitFlag) 
     {
         IENT_LOG_ERROR("unintilized.\n");
-        return -1;
+        return ENT_SOCK_NOT_INITIALIZED;
     }
 
     while ( ((BytesRecvd=recv (
@@ -948,7 +949,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Recv(
 
     if (BytesRecvd < 0 )
     {
-        sts = -3;
+        sts = ENT_SOCK_RECV_FAILED;
         IENT_LOG_ERROR("recv failed,error [%d]->[%s].\n",errno,strerror(errno));
     }
     else
@@ -987,7 +988,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Send(
     if (!sUtlInitFlag) 
     {
         IENT_LOG_ERROR("unintilized.\n");
-        return -1;
+        return ENT_SOCK_NOT_INITIALIZED;
     }
 
     while ( ((TempBytesSent=send (
@@ -999,7 +1000,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Send(
 
     if ( TempBytesSent < 0 )
     {
-        sts = -3;
+        sts = ENT_SOCK_SEND_FAILED;
         IENT_LOG_ERROR("send failed,error [%d]->[%s].\n",errno,strerror(errno));
     }
     else
@@ -1038,7 +1039,7 @@ ENT_PUBLIC MSG_ID_T  UTL_SetSockOpt(
     if (!sUtlInitFlag) 
     {
         IENT_LOG_ERROR("unintilized.\n");
-        return -1;
+        return ENT_SOCK_NOT_INITIALIZED;
     }
 
     while ( ((stat =  setsockopt (
@@ -1051,7 +1052,7 @@ ENT_PUBLIC MSG_ID_T  UTL_SetSockOpt(
 
     if ( stat < 0 )
     {
-        sts = -3;
+        sts = ENT_SOCK_SETOPT_FAILED;
         IENT_LOG_ERROR("setsockopt failed,error [%d]->[%s].\n",errno,strerror(errno));
     }
 
@@ -1083,7 +1084,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Shutdown(
     if (!sUtlInitFlag) 
     {
         IENT_LOG_ERROR("unintilized.\n");
-        return -1;
+        return ENT_SOCK_NOT_INITIALIZED;
     }
 
     while ( ((stat = shutdown (
@@ -1093,7 +1094,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Shutdown(
 
     if ( stat < 0 )
     {
-        sts = -3;
+        sts = ENT_SOCK_SHUTDOWN_FAILED;
         IENT_LOG_ERROR("setsockopt failed,error [%d]->[%s].\n",errno,strerror(errno));
     }
 
@@ -1128,7 +1129,7 @@ ENT_PUBLIC MSG_ID_T  UTL_GetSockOpt(
     if (!sUtlInitFlag) 
     {
         IENT_LOG_ERROR("unintilized.\n");
-        return -1;
+        return ENT_SOCK_NOT_INITIALIZED;
     }
 
     if ( ( (stat = getsockopt(
@@ -1143,7 +1144,7 @@ ENT_PUBLIC MSG_ID_T  UTL_GetSockOpt(
 
     if (stat < 0)
     {
-        sts = -3;
+        sts = ENT_SOCK_GETOPT_FAILED;
         IENT_LOG_ERROR("getsockopt failed,error [%d]->[%s].\n",errno,strerror(errno));
     }
 

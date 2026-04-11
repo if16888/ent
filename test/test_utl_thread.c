@@ -11,6 +11,7 @@
 #endif
 
 #include "ient_comm.h"
+#include "ent_msg.h"
 
 ENT_CTX gEntCtx;
 
@@ -182,7 +183,7 @@ int pthread_cond_timedwait(pthread_cond_t* restrict cond,
 
 static int test_lock_init_rejects_null_pointer(void)
 {
-    return expect_true(UTL_LockInit(NULL, "lock") == -1,
+    return expect_true(UTL_LockInit(NULL, "lock") == ENT_UTHD_INVALID_ARGUMENT,
                        "UTL_LockInit should reject a NULL output pointer");
 }
 
@@ -190,7 +191,7 @@ static int test_lock_init_ex_rejects_unknown_type(void)
 {
     UTL_LOCK lock = (UTL_LOCK)0x1;
 
-    if(expect_true(UTL_LockInitEx(&lock, "lock", (UTL_LOCK_TYPE_T)99) == -2,
+    if(expect_true(UTL_LockInitEx(&lock, "lock", (UTL_LOCK_TYPE_T)99) == ENT_UTHD_INVALID_TYPE,
                    "UTL_LockInitEx should reject an unknown lock type") != 0)
     {
         return 1;
@@ -207,7 +208,7 @@ static int test_lock_init_propagates_mutex_init_failure(void)
     UTL_LOCK lock = (UTL_LOCK)0x1;
 
     s_fail_pthread_mutex_init = 1;
-    if(expect_true(UTL_LockInit(&lock, "mutex") == -3,
+    if(expect_true(UTL_LockInit(&lock, "mutex") == ENT_UTHD_INIT_FAILED,
                    "UTL_LockInit should propagate pthread_mutex_init failures") != 0)
     {
         return 1;
@@ -225,7 +226,7 @@ static int test_rw_lock_init_propagates_rwlock_init_failure(void)
     UTL_LOCK lock = (UTL_LOCK)0x1;
 
     s_fail_pthread_rwlock_init = 1;
-    if(expect_true(UTL_LockInitEx(&lock, "rw", LOCK_RW_E) == -3,
+    if(expect_true(UTL_LockInitEx(&lock, "rw", LOCK_RW_E) == ENT_UTHD_INIT_FAILED,
                    "UTL_LockInitEx should propagate pthread_rwlock_init failures") != 0)
     {
         return 1;
@@ -288,14 +289,14 @@ static int test_rw_lock_requires_explicit_enter_and_leave_mode(void)
         return 1;
     }
 
-    if(expect_true(UTL_LockEnter(lock) == -2,
+    if(expect_true(UTL_LockEnter(lock) == ENT_UTHD_RWMODE_REQUIRED,
                    "UTL_LockEnter should reject rw locks unless the caller specifies read or write mode explicitly") != 0)
     {
         UTL_LockClose(lock);
         return 1;
     }
 
-    if(expect_true(UTL_LockLeave(lock) == -2,
+    if(expect_true(UTL_LockLeave(lock) == ENT_UTHD_RWMODE_REQUIRED,
                    "UTL_LockLeave should reject rw locks unless the caller specifies read or write mode explicitly") != 0)
     {
         UTL_LockClose(lock);
@@ -321,7 +322,7 @@ static int test_cv_wait_rejects_spin_lock(void)
         return 1;
     }
 
-    if(expect_true(UTL_CVWait(cv, lock, 1, RW_WRITE_E) == -3,
+    if(expect_true(UTL_CVWait(cv, lock, 1, RW_WRITE_E) == ENT_UTHD_UNSUPPORTED_LOCK,
                    "UTL_CVWait should reject unsupported spin locks") != 0)
     {
         UTL_CVClose(cv);
@@ -340,12 +341,12 @@ static int test_cv_wait_rejects_spin_lock(void)
 
 static int test_cv_wake_and_wake_all_reject_null(void)
 {
-    if(expect_true(UTL_CVWake(NULL) == -1, "UTL_CVWake should reject NULL") != 0)
+    if(expect_true(UTL_CVWake(NULL) == ENT_UTHD_INVALID_ARGUMENT, "UTL_CVWake should reject NULL") != 0)
     {
         return 1;
     }
 
-    return expect_true(UTL_CVWakeAll(NULL) == -1, "UTL_CVWakeAll should reject NULL");
+    return expect_true(UTL_CVWakeAll(NULL) == ENT_UTHD_INVALID_ARGUMENT, "UTL_CVWakeAll should reject NULL");
 }
 
 static int test_cv_wait_uses_monotonic_deadline_and_normalized_timespec(void)

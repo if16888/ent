@@ -19,8 +19,9 @@
 #define  _ENT_TYPES_H_
 
 #include <stdbool.h>
+#include <stdint.h>
 
-typedef int MSG_ID_T;
+typedef int32_t MSG_ID_T;
 
 typedef void *DB_HANDLE;
 

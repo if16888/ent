@@ -7,6 +7,7 @@
 #endif
 
 #include "ient_comm.h"
+#include "ent_msg.h"
 #include "ent_thread.h"
 
 ENT_CTX gEntCtx;
@@ -176,7 +177,7 @@ static void* short_lived_thread(void* data)
 
 static int test_thread_init_rejects_null_pointer(void)
 {
-    return expect_true(ENT_ThreadInit(NULL) == -1, "ENT_ThreadInit should reject a NULL output pointer");
+    return expect_true(ENT_ThreadInit(NULL) == ENT_THRD_INVALID_ARGUMENT, "ENT_ThreadInit should reject a NULL output pointer");
 }
 
 static int test_thread_detach_create_rejects_invalid_handle(void)
@@ -188,7 +189,7 @@ static int test_thread_detach_create_rejects_invalid_handle(void)
     badHandle.tag = 0x12345678;
 
     sts = ENT_ThreadDetachCreate((ENT_THREAD)&badHandle, quick_thread, NULL);
-    if(expect_true(sts == -2, "ENT_ThreadDetachCreate should reject an invalid thread handle") != 0)
+    if(expect_true(sts == ENT_THRD_INVALID_HANDLE, "ENT_ThreadDetachCreate should reject an invalid thread handle") != 0)
     {
         return 1;
     }
@@ -258,7 +259,7 @@ static int test_thread_wait_timeout_returns_retry_signal(void)
     }
 
     sts = ENT_ThreadWaitById(&tid, handle, 1);
-    if(expect_true(sts == 1, "ENT_ThreadWaitById should return 1 when the thread is still running") != 0)
+    if(expect_true(sts == ENT_THRD_WAIT_TIMEOUT, "ENT_ThreadWaitById should return timeout when the thread is still running") != 0)
     {
         ENT_ThreadClose(handle);
         return 1;

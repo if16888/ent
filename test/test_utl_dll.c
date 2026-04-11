@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "ient_comm.h"
+#include "ent_msg.h"
 
 typedef struct TEST_NODE
 {
@@ -119,7 +120,7 @@ static int test_dll_init_marks_head_empty(void)
         return 1;
     }
 
-    if(expect_true(UTL_DllNextLe(&head, &next) == -2, "UTL_DllNextLe should report no next node for an empty list") != 0)
+    if(expect_true(UTL_DllNextLe(&head, &next) == ENT_DLL_EMPTY_LIST, "UTL_DllNextLe should report no next node for an empty list") != 0)
     {
         return 1;
     }
@@ -129,7 +130,7 @@ static int test_dll_init_marks_head_empty(void)
         return 1;
     }
 
-    if(expect_true(UTL_DllPrevLe(&head, &prev) == -2, "UTL_DllPrevLe should report no previous node for an empty list") != 0)
+    if(expect_true(UTL_DllPrevLe(&head, &prev) == ENT_DLL_EMPTY_LIST, "UTL_DllPrevLe should report no previous node for an empty list") != 0)
     {
         return 1;
     }
@@ -241,7 +242,7 @@ static int test_dll_remove_head_reports_empty_list(void)
 
     UTL_DllInitHead(&head);
 
-    if(expect_true(UTL_DllRemHead(&head, &removed) == -2,
+    if(expect_true(UTL_DllRemHead(&head, &removed) == ENT_DLL_EMPTY_LIST,
                    "UTL_DllRemHead should report an empty list when only the sentinel remains") != 0)
     {
         return 1;
@@ -266,7 +267,7 @@ static int test_dll_remove_curr_rejects_head_without_mutating_list(void)
     UTL_DllInsHead(&head, &first.link);
     UTL_DllInsTail(&head, &second.link);
 
-    if(expect_true(UTL_DllRemCurr(&head, &removed) == -2,
+    if(expect_true(UTL_DllRemCurr(&head, &removed) == ENT_DLL_HEAD_NODE,
                    "UTL_DllRemCurr should reject attempts to remove the sentinel head") != 0)
     {
         return 1;

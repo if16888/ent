@@ -19,10 +19,57 @@ option(ENT_ENABLE_SQLITE "Enable SQLite backend" ON)
 option(ENT_ENABLE_MYSQL "Enable MySQL backend" ON)
 option(ENT_ALLOW_VENDORED_DB_LIBS "Allow vendored DB libraries as a fallback" ON)
 
+if(CMAKE_VERSION VERSION_LESS "3.12")
+  find_package(PythonInterp REQUIRED)
+  set(ENT_MSG_PYTHON_EXECUTABLE ${PYTHON_EXECUTABLE})
+else()
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  set(ENT_MSG_PYTHON_EXECUTABLE ${Python3_EXECUTABLE})
+endif()
+
 set(ENT_USING_VENDORED_SQLITE OFF CACHE INTERNAL "Using vendored SQLite library")
 set(ENT_USING_VENDORED_MYSQL OFF CACHE INTERNAL "Using vendored MySQL library")
 set(ENT_SQLITE_RUNTIME "" CACHE INTERNAL "SQLite runtime library")
 set(ENT_MYSQL_RUNTIME "" CACHE INTERNAL "MySQL runtime library")
+
+set(ENT_MSG_SPEC_FILE ${CMAKE_CURRENT_SOURCE_DIR}/../msg/ent.msg)
+set(ENT_MSG_GENERATOR ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/gen_ent_msg.py)
+set(ENT_MSG_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
+set(ENT_MSG_GENERATED_HEADER ${ENT_MSG_GENERATED_DIR}/ent_msg_gen.h)
+set(ENT_MSG_GENERATED_SOURCE ${ENT_MSG_GENERATED_DIR}/ent_msg_gen.c)
+
+add_custom_command(
+  OUTPUT
+    ${ENT_MSG_GENERATED_HEADER}
+    ${ENT_MSG_GENERATED_SOURCE}
+  COMMAND
+    ${ENT_MSG_PYTHON_EXECUTABLE}
+    ${ENT_MSG_GENERATOR}
+    --input ${ENT_MSG_SPEC_FILE}
+    --header ${ENT_MSG_GENERATED_HEADER}
+    --source ${ENT_MSG_GENERATED_SOURCE}
+  DEPENDS
+    ${ENT_MSG_SPEC_FILE}
+    ${ENT_MSG_GENERATOR}
+  COMMENT "Generating ent message tables"
+  VERBATIM
+)
+
+set_source_files_properties(
+  ${ENT_MSG_GENERATED_HEADER}
+  ${ENT_MSG_GENERATED_SOURCE}
+  PROPERTIES GENERATED TRUE
+)
+
+add_custom_target(
+  ent_msg_codegen
+  DEPENDS
+    ${ENT_MSG_GENERATED_HEADER}
+    ${ENT_MSG_GENERATED_SOURCE}
+)
+
+set(ENT_MSG_GENERATED_DIR ${ENT_MSG_GENERATED_DIR} PARENT_SCOPE)
+set(ENT_MSG_GENERATED_SOURCE ${ENT_MSG_GENERATED_SOURCE} PARENT_SCOPE)
 
 function(ent_export_dependency_settings)
 if(DEFINED ENT_SQLITE_INCLUDE_DIR)
@@ -206,6 +253,7 @@ link_directories(${CMAKE_PREFIX_PATH})
 endif()
 ent_export_dependency_settings()
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../inc)
+include_directories(${ENT_MSG_GENERATED_DIR})
 add_definitions(-DENT_ENABLE_SQLITE=$<BOOL:${ENT_ENABLE_SQLITE}>)
 add_definitions(-DENT_ENABLE_MYSQL=$<BOOL:${ENT_ENABLE_MYSQL}>)
 
@@ -218,8 +266,12 @@ endif()
 add_library(
   ${LIB_NAME_OBJS}
   OBJECT
-  ent_init.c ent_db.c ent_log.c ent_thread.c utl_socket.c utl_thread.c utl_timer.c utl_dll.c utl_tpool.c
+  ent_init.c ent_db.c ent_log.c ent_thread.c ent_msg.c
+  utl_socket.c utl_thread.c utl_timer.c utl_dll.c utl_tpool.c
+  ${ENT_MSG_GENERATED_SOURCE}
   )
+
+add_dependencies(${LIB_NAME_OBJS} ent_msg_codegen)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 #    find_package(PkgConfig REQUIRED QUIET)
@@ -247,6 +299,7 @@ target_include_directories(
   ${LIB_NAME_SHARE}
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../inc>
+    $<BUILD_INTERFACE:${ENT_MSG_GENERATED_DIR}>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
@@ -257,9 +310,9 @@ target_compile_definitions(
     ENT_ENABLE_MYSQL=$<BOOL:${ENT_ENABLE_MYSQL}>
 )
   
-  set_target_properties(${LIB_NAME_SHARE} 
-                         PROPERTIES 
-                          PUBLIC_HEADER "../inc/ent_comm.h;../inc/ent_init.h;../inc/ent_types.h;../inc/ent_db.h;../inc/ent_log.h;../inc/ent_thread.h;../inc/ent_utility.h"
+  set_target_properties(${LIB_NAME_SHARE}
+                         PROPERTIES
+                          PUBLIC_HEADER "../inc/ent_comm.h;../inc/ent_init.h;../inc/ent_types.h;../inc/ent_db.h;../inc/ent_log.h;../inc/ent_thread.h;../inc/ent_utility.h;../inc/ent_msg.h;${ENT_MSG_GENERATED_HEADER}"
                          )
   
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -293,6 +346,7 @@ target_include_directories(
   ${LIB_NAME_STATIC}
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../inc>
+    $<BUILD_INTERFACE:${ENT_MSG_GENERATED_DIR}>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 

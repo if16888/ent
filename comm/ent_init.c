@@ -33,6 +33,7 @@
 #include <stdio.h>
 #include "ient_comm.h"
 #include "ent_init.h"
+#include "ent_msg.h"
 #include "ent_utility.h"
 
 ENT_CTX gEntCtx;
@@ -123,7 +124,7 @@ static MSG_ID_T iENT_CTXApplyRtMode(ENT_CTX* ctx,
     iENT_CTXSetRtRequestedState(ctx, mode);
     if(mode != ENT_MODE_REALTIME_E)
     {
-        return 0;
+        return ENT_SYS_NORMAL;
     }
 
 #ifdef WIN32
@@ -142,7 +143,7 @@ static MSG_ID_T iENT_CTXApplyRtMode(ENT_CTX* ctx,
                       strerror(errno));
     }
 #endif
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
 static MSG_ID_T iENT_CTXApplyRtAttributes(ENT_CTX* ctx,
@@ -152,7 +153,7 @@ static MSG_ID_T iENT_CTXApplyRtAttributes(ENT_CTX* ctx,
 {
     if(ctx == NULL)
     {
-        return -1;
+        return ENT_RT_NOT_INITIALIZED;
     }
 
     if(rtPolicy != ENT_RT_POLICY_OTHER_E &&
@@ -160,7 +161,7 @@ static MSG_ID_T iENT_CTXApplyRtAttributes(ENT_CTX* ctx,
        rtPolicy != ENT_RT_POLICY_RR_E)
     {
         IENT_LOG_ERROR("invalid rt policy [%d]\n",(int)rtPolicy);
-        return -2;
+        return ENT_RT_BAD_POLICY;
     }
 
     ctx->rtCpu = rtCpu;
@@ -178,7 +179,7 @@ static MSG_ID_T iENT_CTXApplyRtAttributes(ENT_CTX* ctx,
         {
             ctx->rtLastError = EINVAL;
             IENT_LOG_WARN("rt affinity cpu [%d] invalid\n",rtCpu);
-            return -3;
+            return ENT_RT_BAD_CPU;
         }
         CPU_ZERO(&cpuSet);
         CPU_SET(rtCpu,&cpuSet);
@@ -187,7 +188,7 @@ static MSG_ID_T iENT_CTXApplyRtAttributes(ENT_CTX* ctx,
         {
             ctx->rtLastError = ret;
             IENT_LOG_WARN("pthread_setaffinity_np failed,error [%d]->[%s]\n",ret,strerror(ret));
-            return -3;
+            return ENT_RT_AFFINITY_FAILED;
         }
     }
 
@@ -204,7 +205,7 @@ static MSG_ID_T iENT_CTXApplyRtAttributes(ENT_CTX* ctx,
         {
             ctx->rtLastError = errno;
             IENT_LOG_WARN("sched priority range query failed,error [%d]->[%s]\n",errno,strerror(errno));
-            return -4;
+            return ENT_RT_SCHED_QUERYFAIL;
         }
         if(targetPrio < minPrio)
         {
@@ -221,18 +222,18 @@ static MSG_ID_T iENT_CTXApplyRtAttributes(ENT_CTX* ctx,
         {
             ctx->rtLastError = ret;
             IENT_LOG_WARN("pthread_setschedparam failed,error [%d]->[%s]\n",ret,strerror(ret));
-            return -4;
+            return ENT_RT_SCHED_SETFAIL;
         }
         ctx->rtPriority = targetPrio;
     }
-    return 0;
+    return ENT_SYS_NORMAL;
 #else
     if(rtCpu >= 0 || rtPolicy != ENT_RT_POLICY_OTHER_E)
     {
         IENT_LOG_WARN("rt cpu/policy attributes are unsupported on this platform\n");
-        return -5;
+        return ENT_RT_UNSUPPORTED_PLATFORM;
     }
-    return 0;
+    return ENT_SYS_NORMAL;
 #endif
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
@@ -260,18 +261,18 @@ ENT_PUBLIC MSG_ID_T  ENT_Init(const char* name,
     if(gEntCtx.isInit)
     {
         fprintf(stderr,"ENT_Init already init.\n");
-        return 1;
+        return ENT_SYS_ALREADY_INITIALIZED;
     }
     if(name==NULL||workPath==NULL||name[0]=='\0'||workPath[0]=='\0')
     {
         fprintf(stderr,"ENT_Init arguments invalid.\n");
-        return -1;
+        return ENT_INIT_INVALID_ARGUMENT;
     }
     /* Security: reject excessively long inputs to prevent buffer overflow */
     if(strlen(name) > _MAX_PATH - 8 || strlen(workPath) > _MAX_PATH - 8)
     {
         fprintf(stderr,"ENT_Init name or workPath too long.\n");
-        return -1;
+        return ENT_INIT_INVALID_ARGUMENT;
     }
 
     gEntCtx.workPath = strdup(workPath);
@@ -285,7 +286,7 @@ ENT_PUBLIC MSG_ID_T  ENT_Init(const char* name,
         fprintf(stderr,"malloc size [%zu] failed.\n",size);
         iENT_CTXFree(&gEntCtx);
         iENT_CTXResetRuntime(&gEntCtx);
-        return -2;
+        return ENT_INIT_LOGPATH_ALLOCFAIL;
     }
 #ifdef WIN32
     if(workPath[len-1]=='\\'||workPath[len-1]=='/')
@@ -309,7 +310,7 @@ ENT_PUBLIC MSG_ID_T  ENT_Init(const char* name,
         fprintf(stderr,"malloc size [%zu] failed.\n",size);
         iENT_CTXFree(&gEntCtx);
         iENT_CTXResetRuntime(&gEntCtx);
-        return -3;
+        return ENT_INIT_LOGNAME_ALLOCFAIL;
     }
     snprintf(tmpStr,size,"ent_%s",name);
     gEntCtx.logName = tmpStr;
@@ -320,7 +321,7 @@ ENT_PUBLIC MSG_ID_T  ENT_Init(const char* name,
         fprintf(stderr,"ENT_LogInit failed,sts [%d].\n",sts);
         iENT_CTXFree(&gEntCtx);
         iENT_CTXResetRuntime(&gEntCtx);
-        return -4;
+        return ENT_INIT_LOG_INITFAIL;
     }
 
     sts = ENT_LogInitHandle(NULL,name,gEntCtx.logPath);
@@ -330,7 +331,7 @@ ENT_PUBLIC MSG_ID_T  ENT_Init(const char* name,
         iENT_CTXCloseLog(&gEntCtx,false,false);
         iENT_CTXFree(&gEntCtx);
         iENT_CTXResetRuntime(&gEntCtx);
-        return -5;
+        return ENT_INIT_DEFAULT_HANDLEFAIL;
     }
     sts = ENT_LogSetOption(NULL,ENT_LOG_LEVEL_E,&logLevel);
     if(sts < 0)
@@ -339,7 +340,7 @@ ENT_PUBLIC MSG_ID_T  ENT_Init(const char* name,
         iENT_CTXCloseLog(&gEntCtx,false,true);
         iENT_CTXFree(&gEntCtx);
         iENT_CTXResetRuntime(&gEntCtx);
-        return -6;
+        return ENT_INIT_DEFAULT_LEVELFAIL;
     }
 
     sts = ENT_LogInitHandle(&gEntCtx.entLog,gEntCtx.logName,gEntCtx.logPath);
@@ -349,7 +350,7 @@ ENT_PUBLIC MSG_ID_T  ENT_Init(const char* name,
         iENT_CTXCloseLog(&gEntCtx,false,true);
         iENT_CTXFree(&gEntCtx);
         iENT_CTXResetRuntime(&gEntCtx);
-        return -7;
+        return ENT_INIT_ENTITY_HANDLEFAIL;
     }
     sts = ENT_LogSetOption(gEntCtx.entLog,ENT_LOG_LEVEL_E,&logLevel);
     if(sts < 0)
@@ -358,7 +359,7 @@ ENT_PUBLIC MSG_ID_T  ENT_Init(const char* name,
         iENT_CTXCloseLog(&gEntCtx,true,true);
         iENT_CTXFree(&gEntCtx);
         iENT_CTXResetRuntime(&gEntCtx);
-        return -8;
+        return ENT_INIT_ENTITY_LEVELFAIL;
     }
 
     sts = UTL_LockInit(&gEntCtx.entLock,"ent");
@@ -368,7 +369,7 @@ ENT_PUBLIC MSG_ID_T  ENT_Init(const char* name,
         iENT_CTXFree(&gEntCtx);
         iENT_CTXCloseLog(&gEntCtx,true,true);
         iENT_CTXResetRuntime(&gEntCtx);
-        return -9;
+        return ENT_INIT_LOCK_INITFAIL;
     }
 
     sts = UTL_CVInit(&gEntCtx.entCV,"ent");
@@ -379,13 +380,13 @@ ENT_PUBLIC MSG_ID_T  ENT_Init(const char* name,
         UTL_LockClose(gEntCtx.entLock);
         iENT_CTXCloseLog(&gEntCtx,true,true);
         iENT_CTXResetRuntime(&gEntCtx);
-        return -10;
+        return ENT_INIT_CV_INITFAIL;
     }
 
     iENT_CTXApplyRtMode(&gEntCtx,mode);
     gEntCtx.isInit = true;
 
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -408,7 +409,7 @@ ENT_PUBLIC MSG_ID_T  ENT_Close()
     MSG_ID_T  sts = 0;
     if(!gEntCtx.isInit)
     {
-        return -1;
+        return ENT_SYS_CLOSE_UNINITIALIZED;
     }
 
 #ifndef WIN32
@@ -436,7 +437,7 @@ ENT_PUBLIC MSG_ID_T  ENT_Close()
 
     iENT_CTXFree(&gEntCtx);
     iENT_CTXResetRuntime(&gEntCtx);
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
 ENT_PUBLIC MSG_ID_T  ENT_SetRtAttributes(int rtCpu,
@@ -445,7 +446,7 @@ ENT_PUBLIC MSG_ID_T  ENT_SetRtAttributes(int rtCpu,
 {
     if(!gEntCtx.isInit)
     {
-        return -1;
+        return ENT_RT_NOT_INITIALIZED;
     }
 
     if(!gEntCtx.rtRequested)
@@ -475,7 +476,7 @@ ENT_PUBLIC MSG_ID_T  ENT_Run()
 {
     if(!gEntCtx.isInit)
     {
-        return -1;
+        return ENT_SYS_RUN_UNINITIALIZED;
     }
     
     while(1)
@@ -485,7 +486,7 @@ ENT_PUBLIC MSG_ID_T  ENT_Run()
         UTL_LockLeave(gEntCtx.entLock);
         break;
     }
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -505,5 +506,5 @@ ENT_PUBLIC MSG_ID_T  ENT_Run()
  */
 ENT_PUBLIC MSG_ID_T  ENT_Helpers()
 {
-    return 0;
+    return ENT_SYS_NORMAL;
 }

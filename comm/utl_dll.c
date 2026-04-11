@@ -1,12 +1,12 @@
 /*-----------------------------------------------------------------------------
  *   Copyright 2019 Fei Li
- * 
+ *
  *   Licensed under the Apache License, Version 2.0 (the "License");
  *   you may not use this file except in compliance with the License.
  *   You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  *   Unless required by applicable law or agreed to in writing, software
  *   distributed under the License is distributed on an "AS IS" BASIS,
  *   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,374 +16,208 @@
  *-----------------------------------------------------------------------------
  */
 #include "ient_comm.h"
+#include "ent_msg.h"
 #include "ent_utility.h"
 
-
 #define DLL_NULL 0
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :  UTL_DllIsEmpty
- *
- * DESCRIPTION :  init the head of absolute linked list
- *
- * COMPLETION
- * STATUS      :  0
- *
- *-----------------------------------------------------------------------------
- */
-ENT_PUBLIC MSG_ID_T  UTL_DllIsEmpty(BOOL* isEmpty,const DLL_D_HDR *dll_hdr) 
+
+ENT_PUBLIC MSG_ID_T UTL_DllIsEmpty(BOOL* isEmpty,const DLL_D_HDR *dll_hdr)
 {
     if(dll_hdr==NULL || isEmpty==NULL)
     {
-        IENT_LOG_ERROR("arguments validations is NULL\n") ;
-        return -1;
+        IENT_LOG_ERROR("arguments validations is NULL\n");
+        return ENT_DLL_BAD_ARGUMENT;
     }
     *isEmpty = (dll_hdr->fw_ptr == dll_hdr) ? TRUE : FALSE;
-    return 0;
+    return ENT_SYS_NORMAL;
 }
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :  UTL_DllInitHead
- *
- * DESCRIPTION :  init the head of absolute linked list
- *
- * COMPLETION
- * STATUS      :  0
- *
- *-----------------------------------------------------------------------------
- */
-ENT_PUBLIC MSG_ID_T  UTL_DllInitHead(DLL_D_HDR *dll_hdr) 
-{
-    MSG_ID_T    sts = 0;
 
+ENT_PUBLIC MSG_ID_T UTL_DllInitHead(DLL_D_HDR *dll_hdr)
+{
     if(dll_hdr == NULL)
     {
-        sts = -1;
-        IENT_LOG_ERROR("arguments validations is NULL\n") ;
-        goto EXIT;
-    }
-    else
-    {
-        dll_hdr->fw_ptr = dll_hdr;
-        dll_hdr->bw_ptr = dll_hdr;
-        dll_hdr->is_head = 1;
+        IENT_LOG_ERROR("arguments validations is NULL\n");
+        return ENT_DLL_BAD_ARGUMENT;
     }
 
-EXIT:
-     return sts;
+    dll_hdr->fw_ptr = dll_hdr;
+    dll_hdr->bw_ptr = dll_hdr;
+    dll_hdr->is_head = 1;
+    return ENT_SYS_NORMAL;
 }
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :  UTL_DllInsHead
- *
- * DESCRIPTION :  insert element at head of absolute linked list
- *
- * COMPLETION
- * STATUS      :  0
- *
- *-----------------------------------------------------------------------------
- */
-ENT_PUBLIC MSG_ID_T  UTL_DllInsHead(DLL_D_HDR *dll_hdr, DLL_D_HDR *dll_elem) 
-{   
-     DLL_D_HDR  *next_dll_elem;
-     MSG_ID_T   sts = 0;
 
-     if(dll_hdr == DLL_NULL || dll_elem == DLL_NULL)
-     {
-        sts = -1;
-        IENT_LOG_ERROR("arguments validations is NULL\n") ;
-        goto EXIT;
-     }
-    else if (dll_elem == dll_hdr)
-    {
-        sts = -2;
-        IENT_LOG_ERROR("dll_elem == dll_hdr\n") ;
-        goto EXIT;
-    }
-    else
-    {
-		dll_elem->is_head = 0;
-		dll_elem->fw_ptr = dll_hdr->fw_ptr;
-		dll_elem->bw_ptr = dll_hdr;
-		
-		next_dll_elem   = dll_hdr->fw_ptr;
-		next_dll_elem->bw_ptr = dll_elem;
-		dll_hdr->fw_ptr = dll_elem;
-    }
-
-EXIT:
-     return sts;
- }
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :  UTL_DllInsCurr
- *
- * DESCRIPTION :  insert element from current of absolute linked list.
- *
- * COMPLETION
- * STATUS      :  0
- *
- *-----------------------------------------------------------------------------
- */
-ENT_PUBLIC MSG_ID_T  UTL_DllInsCurr(DLL_D_HDR *dll_hdr,DLL_D_HDR *dll_elem)   
+ENT_PUBLIC MSG_ID_T UTL_DllInsHead(DLL_D_HDR *dll_hdr, DLL_D_HDR *dll_elem)
 {
-     MSG_ID_T   sts = 0;
-
-     if(dll_hdr == DLL_NULL || dll_elem == DLL_NULL)
-     {
-        sts = -1;
-        IENT_LOG_ERROR("arguments validations is NULL\n") ;
-        goto EXIT;
-     }
-     else
-     {
-        sts = UTL_DllInsHead(dll_hdr->bw_ptr,dll_elem);
-     }
-
-EXIT:
-     return sts;
- }
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :  UTL_DllInsTail
- *
- * DESCRIPTION :  insert element at tail of absolute linked list.
- *
- * COMPLETION
- * STATUS      :  0
- *
- *-----------------------------------------------------------------------------
- */
-ENT_PUBLIC MSG_ID_T  UTL_DllInsTail(DLL_D_HDR *dll_hdr,DLL_D_HDR *dll_elem )
-{
-     DLL_D_HDR   *prev_dll_elem;
-     MSG_ID_T    sts = 0;
+    DLL_D_HDR* next_dll_elem = NULL;
 
     if(dll_hdr == DLL_NULL || dll_elem == DLL_NULL)
     {
-        sts = -1;
-        IENT_LOG_ERROR("arguments validations is NULL\n") ;
-        goto EXIT;
+        IENT_LOG_ERROR("arguments validations is NULL\n");
+        return ENT_DLL_BAD_ARGUMENT;
     }
-    else if (dll_elem == dll_hdr)
+    if(dll_elem == dll_hdr)
     {
-        sts = -2;
-        IENT_LOG_ERROR("dll_elem == dll_hdr\n") ;
-        goto EXIT;
-    }
-     else
-     {
-        dll_elem->is_head = 0;
-        dll_elem->fw_ptr = dll_hdr;
-        dll_elem->bw_ptr = dll_hdr->bw_ptr;
-
-        prev_dll_elem  = dll_hdr->bw_ptr;
-        prev_dll_elem->fw_ptr = dll_elem;
-        dll_hdr->bw_ptr = dll_elem;
+        IENT_LOG_ERROR("dll_elem == dll_hdr\n");
+        return ENT_DLL_SAME_NODE;
     }
 
-EXIT:
-     return sts;
- }
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :  UTL_DllRemHead
- *
- * DESCRIPTION :  remove element from head of absolute linked list.
- *
- * COMPLETION
- * STATUS      :  0
- *
- *-----------------------------------------------------------------------------
- */
-ENT_PUBLIC MSG_ID_T  UTL_DllRemHead(DLL_D_HDR *dll_hdr,DLL_D_HDR **dll_elem )   
-{
-     DLL_D_HDR  *removed_elem;
-     DLL_D_HDR  *next_dll_elem;
-     MSG_ID_T   sts = 0;
+    dll_elem->is_head = 0;
+    dll_elem->fw_ptr = dll_hdr->fw_ptr;
+    dll_elem->bw_ptr = dll_hdr;
 
-     if(dll_hdr == DLL_NULL || dll_elem == DLL_NULL)
-     {
-        sts = -1;
-        IENT_LOG_ERROR("arguments validations is NULL\n") ;
-        goto EXIT;
-     }
-     else
-     {
-        if(dll_hdr->fw_ptr == dll_hdr)
-        {
-            *dll_elem = NULL;
-            sts = -2;
-            goto EXIT;
-        }
-        removed_elem = dll_hdr->fw_ptr;
-        dll_hdr->fw_ptr = removed_elem->fw_ptr;
-        next_dll_elem = removed_elem->fw_ptr;
-        next_dll_elem->bw_ptr = dll_hdr;
-
-        *dll_elem = removed_elem;
-     }
-
-EXIT:
-     return sts;
- }
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :  UTL_DllRemCurr
- *
- * DESCRIPTION :  remove current element from  absolute linked list.
- *
- * COMPLETION
- * STATUS      :  0
- *
- *-----------------------------------------------------------------------------
- */
-ENT_PUBLIC MSG_ID_T  UTL_DllRemCurr(DLL_D_HDR *dll_hdr,DLL_D_HDR **dll_elem)   
-{
-     MSG_ID_T   sts = 0;
-
-     if(dll_hdr == DLL_NULL || dll_elem == DLL_NULL)
-     {
-        sts = -1;
-        IENT_LOG_ERROR("arguments validations is NULL\n") ;
-        goto EXIT;
-     }
-     *dll_elem = NULL;
-     if(dll_hdr->is_head)
-     {
-        sts = -2;
-        IENT_LOG_ERROR("cannot remove list head with UTL_DllRemCurr\n");
-        goto EXIT;
-     }
-     else
-     {
-        DLL_D_HDR* prev = dll_hdr->bw_ptr;
-        DLL_D_HDR* next = dll_hdr->fw_ptr;
-        prev->fw_ptr = next;
-        next->bw_ptr = prev;
-        *dll_elem = dll_hdr;
-     }
-
-EXIT:
-     return sts;
- }
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :  UTL_DllRemTail
- *
- * DESCRIPTION :  remove element from tail of absolute linked list
- *
- * COMPLETION
- * STATUS      :  0
- *
- *-----------------------------------------------------------------------------
- */
-ENT_PUBLIC MSG_ID_T  UTL_DllRemTail(DLL_D_HDR   *dll_hdr,DLL_D_HDR   **dll_elem )
-{
-     DLL_D_HDR   *removed_elem;
-     DLL_D_HDR   *prev_dll_elem;
-     MSG_ID_T    sts = 0;
-
-     if (dll_hdr == DLL_NULL || dll_elem == DLL_NULL)
-     {
-        sts = -1;
-        IENT_LOG_ERROR("arguments validations is NULL\n") ;
-        goto EXIT;
-     }
-     else
-     {
-        if(dll_hdr->bw_ptr == dll_hdr)
-        {
-            *dll_elem = NULL;
-            sts = -2;
-            goto EXIT;
-        }
-        removed_elem = dll_hdr->bw_ptr;
-        dll_hdr->bw_ptr = removed_elem->bw_ptr;
-        prev_dll_elem = removed_elem->bw_ptr;
-        prev_dll_elem->fw_ptr = dll_hdr;
-
-        *dll_elem = removed_elem;
-     }
-
-EXIT:
-     return sts;
-
+    next_dll_elem = dll_hdr->fw_ptr;
+    next_dll_elem->bw_ptr = dll_elem;
+    dll_hdr->fw_ptr = dll_elem;
+    return ENT_SYS_NORMAL;
 }
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :  UTL_DllNextLe
- *
- * DESCRIPTION :  return the next element in the absolute linked list.
- *
- * COMPLETION
- * STATUS      :  0
 
- *
- *-----------------------------------------------------------------------------
- */
-ENT_PUBLIC MSG_ID_T  UTL_DllNextLe(DLL_D_HDR   *dll_elem,DLL_D_HDR   **next_elem )
+ENT_PUBLIC MSG_ID_T UTL_DllInsCurr(DLL_D_HDR *dll_hdr,DLL_D_HDR *dll_elem)
 {
-     DLL_D_HDR   *le_ptr;
-     MSG_ID_T    sts = 0;
+    if(dll_hdr == DLL_NULL || dll_elem == DLL_NULL)
+    {
+        IENT_LOG_ERROR("arguments validations is NULL\n");
+        return ENT_DLL_BAD_ARGUMENT;
+    }
+    return UTL_DllInsHead(dll_hdr->bw_ptr,dll_elem);
+}
 
-     if (dll_elem == DLL_NULL || next_elem==DLL_NULL)
-     {
-        sts = -1;
-        IENT_LOG_ERROR("arguments validations is NULL\n") ;
-        goto EXIT;
-     }
-     else
-     {
-        le_ptr = dll_elem->fw_ptr;
-        if (le_ptr == dll_elem)
-        {
-            *next_elem = NULL;
-            sts = -2;
-        }
-        else
-            *next_elem = le_ptr;
-     }
-
-EXIT:
-      return sts;
-
- }
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :  UTL_DllPrevLe
- *
- * DESCRIPTION :  return the previous element in absolute linked list.
- *
- * COMPLETION
- * STATUS      :  0
- *
- *
- *-----------------------------------------------------------------------------
- */
-ENT_PUBLIC MSG_ID_T  UTL_DllPrevLe(DLL_D_HDR   *dll_elem,DLL_D_HDR   **prev_elem)
+ENT_PUBLIC MSG_ID_T UTL_DllInsTail(DLL_D_HDR *dll_hdr,DLL_D_HDR *dll_elem)
 {
-     DLL_D_HDR  *le_ptr;
-     MSG_ID_T   sts = 0;
+    DLL_D_HDR* prev_dll_elem = NULL;
 
-     if (dll_elem == DLL_NULL || prev_elem == DLL_NULL)
-     {
-        sts = -1;
-        IENT_LOG_ERROR("arguments validations is NULL\n") ;
-        goto EXIT;
-     }
-     else
-     {
-        le_ptr = dll_elem->bw_ptr;
-        if( le_ptr == dll_elem )
-        {
-            *prev_elem = NULL;
-            sts = -2;
-        }
-        else
-            *prev_elem = le_ptr;
-     }
+    if(dll_hdr == DLL_NULL || dll_elem == DLL_NULL)
+    {
+        IENT_LOG_ERROR("arguments validations is NULL\n");
+        return ENT_DLL_BAD_ARGUMENT;
+    }
+    if(dll_elem == dll_hdr)
+    {
+        IENT_LOG_ERROR("dll_elem == dll_hdr\n");
+        return ENT_DLL_SAME_NODE;
+    }
 
-EXIT:
-     return sts;
- }
+    dll_elem->is_head = 0;
+    dll_elem->fw_ptr = dll_hdr;
+    dll_elem->bw_ptr = dll_hdr->bw_ptr;
+
+    prev_dll_elem = dll_hdr->bw_ptr;
+    prev_dll_elem->fw_ptr = dll_elem;
+    dll_hdr->bw_ptr = dll_elem;
+    return ENT_SYS_NORMAL;
+}
+
+ENT_PUBLIC MSG_ID_T UTL_DllRemHead(DLL_D_HDR *dll_hdr,DLL_D_HDR **dll_elem)
+{
+    DLL_D_HDR* removed_elem = NULL;
+    DLL_D_HDR* next_dll_elem = NULL;
+
+    if(dll_hdr == DLL_NULL || dll_elem == DLL_NULL)
+    {
+        IENT_LOG_ERROR("arguments validations is NULL\n");
+        return ENT_DLL_BAD_ARGUMENT;
+    }
+    if(dll_hdr->fw_ptr == dll_hdr)
+    {
+        *dll_elem = NULL;
+        return ENT_DLL_EMPTY_LIST;
+    }
+
+    removed_elem = dll_hdr->fw_ptr;
+    dll_hdr->fw_ptr = removed_elem->fw_ptr;
+    next_dll_elem = removed_elem->fw_ptr;
+    next_dll_elem->bw_ptr = dll_hdr;
+    *dll_elem = removed_elem;
+    return ENT_SYS_NORMAL;
+}
+
+ENT_PUBLIC MSG_ID_T UTL_DllRemCurr(DLL_D_HDR *dll_hdr,DLL_D_HDR **dll_elem)
+{
+    DLL_D_HDR* prev = NULL;
+    DLL_D_HDR* next = NULL;
+
+    if(dll_hdr == DLL_NULL || dll_elem == DLL_NULL)
+    {
+        IENT_LOG_ERROR("arguments validations is NULL\n");
+        return ENT_DLL_BAD_ARGUMENT;
+    }
+
+    *dll_elem = NULL;
+    if(dll_hdr->is_head)
+    {
+        IENT_LOG_ERROR("cannot remove list head with UTL_DllRemCurr\n");
+        return ENT_DLL_HEAD_NODE;
+    }
+
+    prev = dll_hdr->bw_ptr;
+    next = dll_hdr->fw_ptr;
+    prev->fw_ptr = next;
+    next->bw_ptr = prev;
+    *dll_elem = dll_hdr;
+    return ENT_SYS_NORMAL;
+}
+
+ENT_PUBLIC MSG_ID_T UTL_DllRemTail(DLL_D_HDR *dll_hdr,DLL_D_HDR **dll_elem)
+{
+    DLL_D_HDR* removed_elem = NULL;
+    DLL_D_HDR* prev_dll_elem = NULL;
+
+    if(dll_hdr == DLL_NULL || dll_elem == DLL_NULL)
+    {
+        IENT_LOG_ERROR("arguments validations is NULL\n");
+        return ENT_DLL_BAD_ARGUMENT;
+    }
+    if(dll_hdr->bw_ptr == dll_hdr)
+    {
+        *dll_elem = NULL;
+        return ENT_DLL_EMPTY_LIST;
+    }
+
+    removed_elem = dll_hdr->bw_ptr;
+    dll_hdr->bw_ptr = removed_elem->bw_ptr;
+    prev_dll_elem = removed_elem->bw_ptr;
+    prev_dll_elem->fw_ptr = dll_hdr;
+    *dll_elem = removed_elem;
+    return ENT_SYS_NORMAL;
+}
+
+ENT_PUBLIC MSG_ID_T UTL_DllNextLe(DLL_D_HDR *dll_elem,DLL_D_HDR **next_elem)
+{
+    DLL_D_HDR* le_ptr = NULL;
+
+    if(dll_elem == DLL_NULL || next_elem==DLL_NULL)
+    {
+        IENT_LOG_ERROR("arguments validations is NULL\n");
+        return ENT_DLL_BAD_ARGUMENT;
+    }
+
+    le_ptr = dll_elem->fw_ptr;
+    if(le_ptr == dll_elem)
+    {
+        *next_elem = NULL;
+        return ENT_DLL_EMPTY_LIST;
+    }
+
+    *next_elem = le_ptr;
+    return ENT_SYS_NORMAL;
+}
+
+ENT_PUBLIC MSG_ID_T UTL_DllPrevLe(DLL_D_HDR *dll_elem,DLL_D_HDR **prev_elem)
+{
+    DLL_D_HDR* le_ptr = NULL;
+
+    if(dll_elem == DLL_NULL || prev_elem == DLL_NULL)
+    {
+        IENT_LOG_ERROR("arguments validations is NULL\n");
+        return ENT_DLL_BAD_ARGUMENT;
+    }
+
+    le_ptr = dll_elem->bw_ptr;
+    if(le_ptr == dll_elem)
+    {
+        *prev_elem = NULL;
+        return ENT_DLL_EMPTY_LIST;
+    }
+
+    *prev_elem = le_ptr;
+    return ENT_SYS_NORMAL;
+}

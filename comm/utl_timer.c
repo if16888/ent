@@ -29,20 +29,21 @@
 #include <stdlib.h>
 #include <string.h>
 #include "ient_comm.h"
+#include "ent_msg.h"
 #include "ent_utility.h"
 
 #ifdef WIN32
-#define ENT_TIMER_IMPL_WINDOWS 1
-#define ENT_TIMER_IMPL_LINUX 0
-#define ENT_TIMER_IMPL_POSIX_FALLBACK 0
+#define ENT_TMR_IMPL_WINDOWS 1
+#define ENT_TMR_IMPL_LINUX 0
+#define ENT_TMR_IMPL_POSIX_FALLBACK 0
 #elif defined(__linux__)
-#define ENT_TIMER_IMPL_WINDOWS 0
-#define ENT_TIMER_IMPL_LINUX 1
-#define ENT_TIMER_IMPL_POSIX_FALLBACK 0
+#define ENT_TMR_IMPL_WINDOWS 0
+#define ENT_TMR_IMPL_LINUX 1
+#define ENT_TMR_IMPL_POSIX_FALLBACK 0
 #else
-#define ENT_TIMER_IMPL_WINDOWS 0
-#define ENT_TIMER_IMPL_LINUX 0
-#define ENT_TIMER_IMPL_POSIX_FALLBACK 1
+#define ENT_TMR_IMPL_WINDOWS 0
+#define ENT_TMR_IMPL_LINUX 0
+#define ENT_TMR_IMPL_POSIX_FALLBACK 1
 #endif
 
 typedef struct
@@ -54,9 +55,9 @@ typedef struct
     bool              isEnable;
     int               ms;
     unsigned int      timerType;
-#if ENT_TIMER_IMPL_WINDOWS
+#if ENT_TMR_IMPL_WINDOWS
     UINT              timerId;
-#elif ENT_TIMER_IMPL_LINUX
+#elif ENT_TMR_IMPL_LINUX
     timer_t           timerId;
     pthread_t         timerThread;
     long long         period_ns;
@@ -87,7 +88,7 @@ typedef struct ENT_TH_CTX
 static bool          sUtilTimerInit;
 static TIMER_TH_CTX  sTimerCtx;
 
-#if ENT_TIMER_IMPL_LINUX
+#if ENT_TMR_IMPL_LINUX
 static long long iUTL_TimerMonotonicNs(void);
 static void* iUTL_TimerRtWorker(void* data);
 static void* iUTL_TimerCallbackWorker(void* data);
@@ -95,7 +96,7 @@ static MSG_ID_T iUTL_TimerCreateRt(UTL_TIMER_T* pTimer,unsigned int type,int per
 static MSG_ID_T iUTL_TimerDeleteRt(PTIMER_CTX_T timerCtx);
 #endif
 
-#if ENT_TIMER_IMPL_LINUX || ENT_TIMER_IMPL_POSIX_FALLBACK
+#if ENT_TMR_IMPL_LINUX || ENT_TMR_IMPL_POSIX_FALLBACK
 static void* iUTL_TimerThread(void* data);
 #endif
 
@@ -111,7 +112,7 @@ static void iUTL_TimerSleepMs(int ms)
 }
 #endif
 
-#if ENT_TIMER_IMPL_LINUX || ENT_TIMER_IMPL_POSIX_FALLBACK
+#if ENT_TMR_IMPL_LINUX || ENT_TMR_IMPL_POSIX_FALLBACK
 static void* iUTL_TimerThread(void* data)
 {
     PTIMER_CTX_T timerCtx = (PTIMER_CTX_T)data;
@@ -162,15 +163,15 @@ static void* iUTL_TimerThread(void* data)
  */
 ENT_PUBLIC MSG_ID_T  UTL_TimerClose()
 {
-    MSG_ID_T     sts = 0;
+    MSG_ID_T     sts = ENT_SYS_NORMAL;
     DLL_D_HDR*   tmpDll = NULL;
     if(!sUtilTimerInit)
     {
         IENT_LOG_ERROR("uninitialized\n");
-        return -1;
+        return ENT_TMR_NOT_INITIALIZED;
     }
 
-    while((sts = UTL_DllNextLe(&sTimerCtx.dllHeader,&tmpDll))==0)
+    while((sts = UTL_DllNextLe(&sTimerCtx.dllHeader,&tmpDll)) == ENT_SYS_NORMAL)
     {
         sts = UTL_TimerDelete((UTL_TIMER_T*)&tmpDll);
         if(sts < 0)
@@ -180,10 +181,10 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerClose()
     }
     UTL_LockClose(sTimerCtx.dllLock);
     sUtilTimerInit = false;
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
-#if ENT_TIMER_IMPL_WINDOWS
+#if ENT_TMR_IMPL_WINDOWS
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :iUTL_TimerWinCb
@@ -284,14 +285,14 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int m
     if(!sUtilTimerInit)
     {
         IENT_LOG_ERROR("uninitialized\n");
-        return -1;
+        return ENT_TMR_NOT_INITIALIZED;
     }
 
     timerCtx = (PTIMER_CTX_T)malloc(sizeof(TIMER_CTX_T));
     if(timerCtx == NULL)
     {
         IENT_LOG_ERROR("malloc failed,error [%d]\n",errno);
-        return -2;
+        return ENT_TMR_ALLOC_FAILED;
     }
     memset(timerCtx,0,sizeof(TIMER_CTX_T));
 
@@ -308,18 +309,26 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int m
     {
         IENT_LOG_ERROR("timeSetEvent failed,error [%d]\n",errno);
         free(timerCtx);
-        return -2;
+        return ENT_TMR_CREATE_FAILED;
     }
 
     UTL_LockEnter(sTimerCtx.dllLock);
     sts = UTL_DllInsHead(&sTimerCtx.dllHeader,(DLL_D_HDR*)timerCtx);
     UTL_LockLeave(sTimerCtx.dllLock);
 
+    if(sts < 0)
+    {
+        timeKillEvent(timerCtx->timerId);
+        memset(timerCtx,0,sizeof(TIMER_CTX_T));
+        free(timerCtx);
+        return ENT_TMR_LIST_FAILED;
+    }
+
     if(pTimer)
     {
         *pTimer = timerCtx;
     }
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
@@ -346,25 +355,25 @@ ENT_PUBLIC MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
     if(pTimer == NULL)
     {
         IENT_LOG_ERROR("unvalid arg\n");
-        return -1;
+        return ENT_TMR_BAD_ARGUMENT;
     }
 
     if(!sUtilTimerInit)
     {
         IENT_LOG_ERROR("uninitialized\n");
-        return -2;
+        return ENT_TMR_NOT_INITIALIZED;
     }
     timerCtx = (PTIMER_CTX_T)*pTimer;
     if(timerCtx == NULL )
     {
         IENT_LOG_WARN("unvalid timer\n");
-        return -3;
+        return ENT_TMR_BAD_ARGUMENT;
     }
 
     if(timeKillEvent(timerCtx->timerId)== MMSYSERR_INVALPARAM )
     {
         IENT_LOG_ERROR("timeKillEvent failed,error [%d]\n",errno);
-        return -4;
+        return ENT_TMR_DELETE_FAILED;
     }
     UTL_LockEnter(sTimerCtx.dllLock);
     sts = UTL_DllRemCurr((DLL_D_HDR*)timerCtx,&tmpDll);
@@ -373,10 +382,14 @@ ENT_PUBLIC MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
     memset(timerCtx,0,sizeof(TIMER_CTX_T));
     free(timerCtx);
     *pTimer = NULL;
-    return 0;
+    if(sts < 0)
+    {
+        return ENT_TMR_LIST_FAILED;
+    }
+    return ENT_SYS_NORMAL;
 }
 
-#elif ENT_TIMER_IMPL_LINUX
+#elif ENT_TMR_IMPL_LINUX
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :timer_handler
@@ -600,19 +613,19 @@ static MSG_ID_T iUTL_TimerCreateRt(UTL_TIMER_T* pTimer,unsigned int type,int per
     if(!sUtilTimerInit)
     {
         IENT_LOG_ERROR("uninitialized\n");
-        return -1;
+        return ENT_TMR_NOT_INITIALIZED;
     }
     if(period_us <= 0)
     {
         IENT_LOG_ERROR("invalid period_us [%d]\n",period_us);
-        return -2;
+        return ENT_TMR_BAD_ARGUMENT;
     }
 
     timerCtx = (PTIMER_CTX_T)malloc(sizeof(TIMER_CTX_T));
     if(timerCtx == NULL)
     {
         IENT_LOG_ERROR("malloc failed,error [%d]->[%s]\n",errno,strerror(errno));
-        return -3;
+        return ENT_TMR_ALLOC_FAILED;
     }
     memset(timerCtx,0,sizeof(TIMER_CTX_T));
     timerCtx->tag         = UTL_TIMER_TAG;
@@ -627,14 +640,14 @@ static MSG_ID_T iUTL_TimerCreateRt(UTL_TIMER_T* pTimer,unsigned int type,int per
     if(sts < 0)
     {
         free(timerCtx);
-        return sts;
+        return ENT_TMR_THREAD_FAILED;
     }
     sts = UTL_CVInit(&timerCtx->cbCv,"timer_rt_cb");
     if(sts < 0)
     {
         UTL_LockClose(timerCtx->cbLock);
         free(timerCtx);
-        return sts;
+        return ENT_TMR_THREAD_FAILED;
     }
 
     if(pthread_create(&timerCtx->cbWorker, NULL, iUTL_TimerCallbackWorker, timerCtx) != 0)
@@ -643,7 +656,7 @@ static MSG_ID_T iUTL_TimerCreateRt(UTL_TIMER_T* pTimer,unsigned int type,int per
         UTL_CVClose(timerCtx->cbCv);
         UTL_LockClose(timerCtx->cbLock);
         free(timerCtx);
-        return -4;
+        return ENT_TMR_THREAD_FAILED;
     }
     if(pthread_create(&timerCtx->rtWorker, NULL, iUTL_TimerRtWorker, timerCtx) != 0)
     {
@@ -654,7 +667,7 @@ static MSG_ID_T iUTL_TimerCreateRt(UTL_TIMER_T* pTimer,unsigned int type,int per
         UTL_CVClose(timerCtx->cbCv);
         UTL_LockClose(timerCtx->cbLock);
         free(timerCtx);
-        return -5;
+        return ENT_TMR_THREAD_FAILED;
     }
 
     UTL_LockEnter(sTimerCtx.dllLock);
@@ -670,14 +683,14 @@ static MSG_ID_T iUTL_TimerCreateRt(UTL_TIMER_T* pTimer,unsigned int type,int per
         UTL_CVClose(timerCtx->cbCv);
         UTL_LockClose(timerCtx->cbLock);
         free(timerCtx);
-        return sts;
+        return ENT_TMR_LIST_FAILED;
     }
 
     if(pTimer)
     {
         *pTimer = timerCtx;
     }
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
 static MSG_ID_T iUTL_TimerDeleteRt(PTIMER_CTX_T timerCtx)
@@ -688,7 +701,7 @@ static MSG_ID_T iUTL_TimerDeleteRt(PTIMER_CTX_T timerCtx)
     if(timerCtx == NULL || timerCtx->tag != UTL_TIMER_TAG)
     {
         IENT_LOG_WARN("unvalid timer\n");
-        return -1;
+        return ENT_TMR_BAD_ARGUMENT;
     }
 
     timerCtx->isEnable = false;
@@ -707,7 +720,11 @@ static MSG_ID_T iUTL_TimerDeleteRt(PTIMER_CTX_T timerCtx)
     UTL_LockClose(timerCtx->cbLock);
     memset(timerCtx,0,sizeof(TIMER_CTX_T));
     free(timerCtx);
-    return sts;
+    if(sts < 0)
+    {
+        return ENT_TMR_LIST_FAILED;
+    }
+    return ENT_SYS_NORMAL;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -732,7 +749,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerInit()
     if(sUtilTimerInit)
     {
         IENT_LOG_WARN("initialized already\n");
-        return 0;
+        return ENT_SYS_NORMAL;
     }
 
     sts = UTL_LockInit(&sTimerCtx.dllLock,"UTL_TimerInit");
@@ -756,11 +773,15 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerInit()
     {
         UTL_LockClose(sTimerCtx.dllLock);
         IENT_LOG_ERROR("sigaction failed,error [%d]->[%s]\n",errno,strerror(errno));
-        return -1;
+        return ENT_TMR_CREATE_FAILED;
     }
     sUtilTimerInit = true;
 END_OF_ROUTINE:
-    return sts;
+    if(sts < 0)
+    {
+        return ENT_TMR_THREAD_FAILED;
+    }
+    return ENT_SYS_NORMAL;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -793,14 +814,14 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int m
     if(!sUtilTimerInit)
     {
         IENT_LOG_ERROR("uninitialized\n");
-        return -1;
+        return ENT_TMR_NOT_INITIALIZED;
     }
 
     timerCtx = (PTIMER_CTX_T)malloc(sizeof(TIMER_CTX_T));
     if(timerCtx == NULL)
     {
         IENT_LOG_ERROR("malloc failed,error [%d]->[%s]\n",errno,strerror(errno));
-        return -2;
+        return ENT_TMR_ALLOC_FAILED;
     }
     memset(timerCtx,0,sizeof(TIMER_CTX_T));
     timerCtx->tag         = UTL_TIMER_TAG;
@@ -816,7 +837,7 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int m
         {
             IENT_LOG_ERROR("pthread_create failed,error [%d]->[%s]\n",errno,strerror(errno));
             free(timerCtx);
-            return -3;
+            return ENT_TMR_THREAD_FAILED;
         }
 
         UTL_LockEnter(sTimerCtx.dllLock);
@@ -827,14 +848,14 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int m
             timerCtx->isEnable = false;
             pthread_join(timerCtx->timerThread, NULL);
             free(timerCtx);
-            return sts;
+            return ENT_TMR_LIST_FAILED;
         }
 
         if(pTimer)
         {
             *pTimer = timerCtx;
         }
-        return 0;
+        return ENT_SYS_NORMAL;
     }
 
     /* Create the timer */
@@ -846,7 +867,7 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int m
     {
         IENT_LOG_ERROR("timer_create failed,error [%d]->[%s]\n",errno,strerror(errno));
         free(timerCtx);
-        return -1;
+        return ENT_TMR_CREATE_FAILED;
     }
     
     IENT_LOG_DEBUG("timer ID is 0x%lx\n", (long) timerCtx->timerId);
@@ -869,17 +890,25 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int m
     {
         IENT_LOG_ERROR("timer_settime failed,error [%d]->[%s]\n",errno,strerror(errno));
         timer_delete(timerCtx->timerId);
-        return -2;
+        free(timerCtx);
+        return ENT_TMR_START_FAILED;
     }
     UTL_LockEnter(sTimerCtx.dllLock);
     sts = UTL_DllInsHead(&sTimerCtx.dllHeader,(DLL_D_HDR*)timerCtx);
     UTL_LockLeave(sTimerCtx.dllLock);
 
+    if(sts < 0)
+    {
+        timer_delete(timerCtx->timerId);
+        free(timerCtx);
+        return ENT_TMR_LIST_FAILED;
+    }
+
     if(pTimer)
     {
         *pTimer = timerCtx;
     }
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
 ENT_PUBLIC MSG_ID_T UTL_TimerCreateUs(UTL_TIMER_T* pTimer,unsigned int type, int period_us,UTL_TIMER_EV_F evCb,void* data)
@@ -911,19 +940,19 @@ ENT_PUBLIC MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
     if(pTimer == NULL)
     {
         IENT_LOG_ERROR("unvalid arg\n");
-        return -1;
+        return ENT_TMR_BAD_ARGUMENT;
     }
 
     if(!sUtilTimerInit)
     {
         IENT_LOG_ERROR("uninitialized\n");
-        return -2;
+        return ENT_TMR_NOT_INITIALIZED;
     }
     timerCtx = (PTIMER_CTX_T)*pTimer;
     if(timerCtx == NULL || timerCtx->tag != UTL_TIMER_TAG)
     {
         IENT_LOG_WARN("unvalid timer\n");
-        return -3;
+        return ENT_TMR_BAD_ARGUMENT;
     }
 
     if(timerCtx->rtMode)
@@ -934,7 +963,7 @@ ENT_PUBLIC MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
             return sts;
         }
         *pTimer = NULL;
-        return 0;
+        return ENT_SYS_NORMAL;
     }
 
     if(!(timerCtx->timerType&UTL_TIMER_E_SIGNAL))
@@ -952,13 +981,17 @@ ENT_PUBLIC MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
 
         free(timerCtx);
         *pTimer = NULL;
-        return 0;
+        if(sts < 0)
+        {
+            return ENT_TMR_LIST_FAILED;
+        }
+        return ENT_SYS_NORMAL;
     }
 
     if(timer_delete(timerCtx->timerId)==-1)
     {
         IENT_LOG_ERROR("timer_delete failed,error [%d]->[%s]\n",errno,strerror(errno));
-        return -4;
+        return ENT_TMR_DELETE_FAILED;
     }
 
     UTL_LockEnter(sTimerCtx.dllLock);
@@ -968,12 +1001,16 @@ ENT_PUBLIC MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
 
     free(timerCtx);
     *pTimer = NULL;
-    return 0;
+    if(sts < 0)
+    {
+        return ENT_TMR_LIST_FAILED;
+    }
+    return ENT_SYS_NORMAL;
 }
 
 #endif
 
-#if !ENT_TIMER_IMPL_LINUX
+#if !ENT_TMR_IMPL_LINUX
 ENT_PUBLIC MSG_ID_T UTL_TimerCreateUs(UTL_TIMER_T* pTimer,unsigned int type, int period_us,UTL_TIMER_EV_F evCb,void* data)
 {
     if(pTimer)
@@ -985,35 +1022,35 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreateUs(UTL_TIMER_T* pTimer,unsigned int type, int
     (void)period_us;
     (void)evCb;
     (void)data;
-    return -1;
+    return ENT_TMR_UNSUPPORTED;
 }
 #endif
 
-#if ENT_TIMER_IMPL_POSIX_FALLBACK
+#if ENT_TMR_IMPL_POSIX_FALLBACK
 ENT_PUBLIC MSG_ID_T  UTL_TimerInit()
 {
     MSG_ID_T  sts = 0;
     if(sUtilTimerInit)
     {
         IENT_LOG_WARN("initialized already\n");
-        return 0;
+        return ENT_SYS_NORMAL;
     }
 
     sts = UTL_LockInit(&sTimerCtx.dllLock,"UTL_TimerInit");
     if(sts<0)
     {
         IENT_LOG_ERROR("UTL_LockInit failed,sts [%d].\n",sts);
-        return sts;
+        return ENT_TMR_THREAD_FAILED;
     }
     sts = UTL_DllInitHead(&sTimerCtx.dllHeader);
     if(sts<0)
     {
         UTL_LockClose(sTimerCtx.dllLock);
         IENT_LOG_ERROR("UTL_DllInitHead failed,sts [%d].\n",sts);
-        return sts;
+        return ENT_TMR_LIST_FAILED;
     }
     sUtilTimerInit = true;
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
 ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int ms,UTL_TIMER_EV_F evCb,void* data)
@@ -1029,14 +1066,14 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int m
     if(!sUtilTimerInit)
     {
         IENT_LOG_ERROR("uninitialized\n");
-        return -1;
+        return ENT_TMR_NOT_INITIALIZED;
     }
 
     timerCtx = (PTIMER_CTX_T)malloc(sizeof(TIMER_CTX_T));
     if(timerCtx == NULL)
     {
         IENT_LOG_ERROR("malloc failed,error [%d]->[%s]\n",errno,strerror(errno));
-        return -2;
+        return ENT_TMR_ALLOC_FAILED;
     }
     memset(timerCtx,0,sizeof(TIMER_CTX_T));
     timerCtx->tag         = UTL_TIMER_TAG;
@@ -1050,7 +1087,7 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int m
     {
         IENT_LOG_ERROR("pthread_create failed,error [%d]->[%s]\n",errno,strerror(errno));
         free(timerCtx);
-        return -3;
+        return ENT_TMR_THREAD_FAILED;
     }
 
     UTL_LockEnter(sTimerCtx.dllLock);
@@ -1061,7 +1098,14 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int m
     {
         *pTimer = timerCtx;
     }
-    return sts;
+    if(sts < 0)
+    {
+        timerCtx->isEnable = false;
+        pthread_join(timerCtx->timerThread, NULL);
+        free(timerCtx);
+        return ENT_TMR_LIST_FAILED;
+    }
+    return ENT_SYS_NORMAL;
 }
 
 ENT_PUBLIC MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
@@ -1073,19 +1117,19 @@ ENT_PUBLIC MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
     if(pTimer == NULL)
     {
         IENT_LOG_ERROR("unvalid arg\n");
-        return -1;
+        return ENT_TMR_BAD_ARGUMENT;
     }
 
     if(!sUtilTimerInit)
     {
         IENT_LOG_ERROR("uninitialized\n");
-        return -2;
+        return ENT_TMR_NOT_INITIALIZED;
     }
     timerCtx = (PTIMER_CTX_T)*pTimer;
     if(timerCtx == NULL || timerCtx->tag != UTL_TIMER_TAG)
     {
         IENT_LOG_WARN("unvalid timer\n");
-        return -3;
+        return ENT_TMR_BAD_ARGUMENT;
     }
 
     timerCtx->isEnable = false;
@@ -1101,7 +1145,11 @@ ENT_PUBLIC MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
 
     free(timerCtx);
     *pTimer = NULL;
-    return sts;
+    if(sts < 0)
+    {
+        return ENT_TMR_LIST_FAILED;
+    }
+    return ENT_SYS_NORMAL;
 }
 #endif
 
@@ -1128,5 +1176,5 @@ ENT_PUBLIC MSG_ID_T  UTL_Sleep(int ms)
 #else
     iUTL_TimerSleepMs(ms);
 #endif
-    return 0;
+    return ENT_SYS_NORMAL;
 }

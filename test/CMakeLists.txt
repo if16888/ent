@@ -1,5 +1,9 @@
 add_compile_definitions(LINKING_LIBENT)
 
+if(DEFINED ENT_MSG_GENERATED_DIR)
+  include_directories(${ENT_MSG_GENERATED_DIR})
+endif()
+
 add_executable(
   test_ent_init
   test_ent_init.c
@@ -13,7 +17,33 @@ target_include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/../comm
 )
 
+if(TARGET ent_msg_codegen)
+  add_dependencies(test_ent_init ent_msg_codegen)
+endif()
+
 add_test(NAME test_ent_init COMMAND test_ent_init)
+
+if(TARGET ent_s)
+  add_executable(
+    test_ent_msg
+    test_ent_msg.c
+  )
+
+  target_include_directories(
+    test_ent_msg
+    PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+      ${CMAKE_CURRENT_SOURCE_DIR}/../comm
+  )
+
+  if(TARGET ent_msg_codegen)
+    add_dependencies(test_ent_msg ent_msg_codegen)
+  endif()
+
+  target_link_libraries(test_ent_msg PRIVATE ent_s)
+
+  add_test(NAME test_ent_msg COMMAND test_ent_msg)
+endif()
 
 add_executable(
   test_utl_dll
@@ -229,6 +259,10 @@ if(ENT_ENABLE_SQLITE AND (NOT WIN32 OR ENT_SQLITE_LIBRARY))
       ${CMAKE_CURRENT_SOURCE_DIR}/../comm
   )
 
+  if(TARGET ent_msg_codegen)
+    add_dependencies(test_security ent_msg_codegen)
+  endif()
+
   target_compile_definitions(
     test_security
     PRIVATE
@@ -367,4 +401,16 @@ target_include_directories(
 
 if(APPLE OR UNIX)
   target_link_libraries(perf_ent_log PRIVATE pthread)
+endif()
+
+if(TARGET ent_msg_codegen)
+  get_property(_ent_test_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+  foreach(_ent_target IN LISTS _ent_test_targets)
+    if(NOT _ent_target STREQUAL "ent_msg_codegen")
+      get_target_property(_ent_target_type ${_ent_target} TYPE)
+      if(_ent_target_type STREQUAL "EXECUTABLE")
+        add_dependencies(${_ent_target} ent_msg_codegen)
+      endif()
+    endif()
+  endforeach()
 endif()

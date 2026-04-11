@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "ient_comm.h"
+#include "ent_msg.h"
 #include "ent_utility.h"
 
 #if !defined(WIN32) && defined(__linux__)
@@ -33,7 +34,7 @@
 #define ENT_HAS_PTHREAD_SPINLOCK 0
 #endif
 
-typedef struct 
+typedef struct
 {
     UTL_LOCK_TYPE_T  lockType;
     union
@@ -65,6 +66,56 @@ typedef struct
     char*  cvName;
 }UTL_TH_CV;
 
+static MSG_ID_T iUTL_MapLockSts(MSG_ID_T sts)
+{
+    if(sts >= 0)
+    {
+        return ENT_SYS_NORMAL;
+    }
+    if(sts == -1)
+    {
+        return ENT_UTHD_INVALID_ARGUMENT;
+    }
+    if(sts == -2)
+    {
+        return ENT_UTHD_ALLOC_FAILED;
+    }
+    if(sts == -3)
+    {
+        return ENT_UTHD_INIT_FAILED;
+    }
+    if(sts == -4)
+    {
+        return ENT_UTHD_INVALID_TYPE;
+    }
+    if(sts == -5)
+    {
+        return ENT_UTHD_RWMODE_REQUIRED;
+    }
+    return ENT_UTHD_INIT_FAILED;
+}
+
+static MSG_ID_T iUTL_MapCvSts(MSG_ID_T sts)
+{
+    if(sts >= 0)
+    {
+        return ENT_SYS_NORMAL;
+    }
+    if(sts == -1)
+    {
+        return ENT_UTHD_INVALID_ARGUMENT;
+    }
+    if(sts == -2 || sts == -3)
+    {
+        return ENT_UTHD_UNSUPPORTED_LOCK;
+    }
+    if(sts == -4)
+    {
+        return ENT_UTHD_CLOCK_FAILED;
+    }
+    return ENT_UTHD_WAIT_FAILED;
+}
+
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :UTL_LockInit
@@ -86,7 +137,7 @@ ENT_PUBLIC MSG_ID_T  UTL_LockInit(UTL_LOCK* lock,const char* name)
     if(lock==NULL)
     {
         IENT_LOG_ERROR("lock handle is null\n");
-        return -1;
+        return ENT_UTHD_INVALID_ARGUMENT;
     }
     *lock = NULL;
 
@@ -94,7 +145,7 @@ ENT_PUBLIC MSG_ID_T  UTL_LockInit(UTL_LOCK* lock,const char* name)
     if(tmp==NULL)
     {
         IENT_LOG_ERROR("lock malloc is null\n");
-        return -2;
+        return ENT_UTHD_ALLOC_FAILED;
     }
     
     tmp->lockType = LOCK_MUTEX_E;
@@ -116,11 +167,11 @@ ENT_PUBLIC MSG_ID_T  UTL_LockInit(UTL_LOCK* lock,const char* name)
         IENT_LOG_ERROR("pthread_mutex_init failed,error [%d]->[%s]\n",s,strerror(s));
         if(tmp->lockName) free(tmp->lockName);
         free(tmp);
-        return -3;
+        return ENT_UTHD_INIT_FAILED;
     }
 #endif
     *lock = tmp;
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -255,7 +306,7 @@ ENT_PUBLIC MSG_ID_T  UTL_LockInitEx(UTL_LOCK* lock,const char* name,UTL_LOCK_TYP
     if(lock==NULL)
     {
         IENT_LOG_ERROR("lock handle is null\n");
-        return -1;
+        return ENT_UTHD_INVALID_ARGUMENT;
     }
     switch(type)
     {
@@ -274,11 +325,11 @@ ENT_PUBLIC MSG_ID_T  UTL_LockInitEx(UTL_LOCK* lock,const char* name,UTL_LOCK_TYP
         default:
             IENT_LOG_ERROR("unknow lock type [%d]\n",type);
             *lock = NULL;
-            sts =-2;
+            sts = -4;
             break;
     }
 
-    return sts;
+    return iUTL_MapLockSts(sts);
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -406,7 +457,7 @@ ENT_PUBLIC MSG_ID_T  UTL_LockEnter(UTL_LOCK lock)
     if(lock==NULL)
     {
         IENT_LOG_ERROR("lock is null\n");
-        return -1;
+        return ENT_UTHD_INVALID_ARGUMENT;
     }
     UTL_TH_LOCK* tmp = (UTL_TH_LOCK*)lock;
 
@@ -422,16 +473,16 @@ ENT_PUBLIC MSG_ID_T  UTL_LockEnter(UTL_LOCK lock)
 
         case LOCK_RW_E:
             IENT_LOG_ERROR("rw lock requires explicit enter mode\n");
-            sts = -2;
+            sts = -5;
             break;
 
         default:
             IENT_LOG_ERROR("unknow lock type [%d]\n",tmp->lockType);
-            sts =-2;
+            sts = -4;
             break;
     }
     
-    return sts;
+    return iUTL_MapLockSts(sts);
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -455,7 +506,7 @@ ENT_PUBLIC MSG_ID_T  UTL_LockEnterEx(UTL_LOCK lock,UTL_LOCK_RW_TYPE_T rwType)
     if(lock==NULL)
     {
         IENT_LOG_ERROR("lock is null\n");
-        return -1;
+        return ENT_UTHD_INVALID_ARGUMENT;
     }
     UTL_TH_LOCK* tmp = (UTL_TH_LOCK*)lock;
     
@@ -475,10 +526,10 @@ ENT_PUBLIC MSG_ID_T  UTL_LockEnterEx(UTL_LOCK lock,UTL_LOCK_RW_TYPE_T rwType)
 
         default:
             IENT_LOG_ERROR("unknow lock type [%d]\n",tmp->lockType);
-            sts =-2;
+            sts = -4;
             break;
     }
-    return sts;
+    return iUTL_MapLockSts(sts);
 }
 
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
@@ -607,7 +658,7 @@ ENT_PUBLIC MSG_ID_T  UTL_LockLeave(UTL_LOCK lock)
     if(lock==NULL)
     {
         IENT_LOG_ERROR("lock is null\n");
-        return -1;
+        return ENT_UTHD_INVALID_ARGUMENT;
     }
     UTL_TH_LOCK* tmp = (UTL_TH_LOCK*)lock;
     
@@ -623,15 +674,15 @@ ENT_PUBLIC MSG_ID_T  UTL_LockLeave(UTL_LOCK lock)
 
         case LOCK_RW_E:
             IENT_LOG_ERROR("rw lock requires explicit leave mode\n");
-            sts = -2;
+            sts = -5;
             break;
 
         default:
             IENT_LOG_ERROR("unknow lock type [%d]\n",tmp->lockType);
-            sts =-2;
+            sts = -4;
             break;
     }
-    return sts;
+    return iUTL_MapLockSts(sts);
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -655,7 +706,7 @@ ENT_PUBLIC MSG_ID_T  UTL_LockLeaveEx(UTL_LOCK lock,UTL_LOCK_RW_TYPE_T rwType)
     if(lock==NULL)
     {
         IENT_LOG_ERROR("lock is null\n");
-        return -1;
+        return ENT_UTHD_INVALID_ARGUMENT;
     }
     UTL_TH_LOCK* tmp = (UTL_TH_LOCK*)lock;
     
@@ -675,10 +726,10 @@ ENT_PUBLIC MSG_ID_T  UTL_LockLeaveEx(UTL_LOCK lock,UTL_LOCK_RW_TYPE_T rwType)
 
         default:
             IENT_LOG_ERROR("unknow lock type [%d]\n",tmp->lockType);
-            sts =-2;
+            sts = -4;
             break;
     }
-    return sts;
+    return iUTL_MapLockSts(sts);
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -798,7 +849,7 @@ ENT_PUBLIC MSG_ID_T  UTL_LockClose(UTL_LOCK lock)
     if(lock==NULL)
     {
         IENT_LOG_ERROR("lock handle is null\n");
-        return -1;
+        return ENT_UTHD_INVALID_ARGUMENT;
     }
 
     UTL_TH_LOCK* tmp = (UTL_TH_LOCK*)lock;
@@ -819,11 +870,11 @@ ENT_PUBLIC MSG_ID_T  UTL_LockClose(UTL_LOCK lock)
 
         default:
             IENT_LOG_ERROR("unknow lock type [%d]\n",tmp->lockType);
-            sts =-2;
+            sts = -4;
             break;
     }
 
-    return sts;
+    return iUTL_MapLockSts(sts);
 }
 
 
@@ -848,14 +899,14 @@ ENT_PUBLIC MSG_ID_T  UTL_CVInit(UTL_CV* cv,const char* name)
     if(cv==NULL)
     {
         IENT_LOG_ERROR("cv handle is null\n");
-        return -1;
+        return ENT_UTHD_INVALID_ARGUMENT;
     }
 
     UTL_TH_CV* tmp = (UTL_TH_CV*)malloc(sizeof(UTL_TH_CV));
     if(tmp==NULL)
     {
         IENT_LOG_ERROR("cv malloc is null\n");
-        return -2;
+        return ENT_UTHD_ALLOC_FAILED;
     }
     
 #ifdef WIN32
@@ -877,7 +928,7 @@ ENT_PUBLIC MSG_ID_T  UTL_CVInit(UTL_CV* cv,const char* name)
         IENT_LOG_ERROR("pthread_condattr_init failed,error [%d]->[%s]\n",s,strerror(s));
         if(tmp->cvName) free(tmp->cvName);
         free(tmp);
-        return -3;
+        return ENT_UTHD_INIT_FAILED;
     }
 #if defined(__linux__)
     s = pthread_condattr_setclock(&cvAttr,CLOCK_MONOTONIC);
@@ -887,7 +938,7 @@ ENT_PUBLIC MSG_ID_T  UTL_CVInit(UTL_CV* cv,const char* name)
         pthread_condattr_destroy(&cvAttr);
         if(tmp->cvName) free(tmp->cvName);
         free(tmp);
-        return -3;
+        return ENT_UTHD_INIT_FAILED;
     }
 #endif
     s = pthread_cond_init(&tmp->cv,&cvAttr);
@@ -897,11 +948,11 @@ ENT_PUBLIC MSG_ID_T  UTL_CVInit(UTL_CV* cv,const char* name)
         IENT_LOG_ERROR("pthread_cond_init failed,error [%d]->[%s]\n",s,strerror(s));
         if(tmp->cvName) free(tmp->cvName);
         free(tmp);
-        return -3;
+        return ENT_UTHD_INIT_FAILED;
     }
 #endif
     *cv = tmp;
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -924,7 +975,7 @@ ENT_PUBLIC MSG_ID_T  UTL_CVClose(UTL_CV cv)
     if(cv==NULL)
     {
         IENT_LOG_ERROR("cv handle is null\n");
-        return -1;
+        return ENT_UTHD_INVALID_ARGUMENT;
     }
 
     UTL_TH_CV* tmp = (UTL_TH_CV*)cv;
@@ -939,7 +990,7 @@ ENT_PUBLIC MSG_ID_T  UTL_CVClose(UTL_CV cv)
         free(tmp->cvName);
     }
     free(tmp);
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
 static MSG_ID_T iUTL_CVWaitMutex(UTL_TH_CV* cvCtx,UTL_TH_LOCK* lockCtx,int ms)
@@ -1010,7 +1061,7 @@ ENT_PUBLIC MSG_ID_T  UTL_CVWait(UTL_CV cv,UTL_LOCK lock,int ms,UTL_LOCK_RW_TYPE_
     if(cv==NULL || lock==NULL)
     {
         IENT_LOG_ERROR("cv handle is null\n");
-        return -1;
+        return ENT_UTHD_INVALID_ARGUMENT;
     }
 
     UTL_TH_CV* cvCtx = (UTL_TH_CV*)cv;
@@ -1029,10 +1080,10 @@ ENT_PUBLIC MSG_ID_T  UTL_CVWait(UTL_CV cv,UTL_LOCK lock,int ms,UTL_LOCK_RW_TYPE_
 
         default:
             IENT_LOG_ERROR("unsupported lock type\n");
-            return -3;
+            return ENT_UTHD_UNSUPPORTED_LOCK;
             break;
     }
-    return sts;
+    return iUTL_MapCvSts(sts);
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -1056,7 +1107,7 @@ ENT_PUBLIC MSG_ID_T  UTL_CVWake(UTL_CV cv)
     if(cv==NULL)
     {
         IENT_LOG_ERROR("cv handle is null\n");
-        return -1;
+        return ENT_UTHD_INVALID_ARGUMENT;
     }
 
     UTL_TH_CV* cvCtx = (UTL_TH_CV*)cv;
@@ -1067,7 +1118,7 @@ ENT_PUBLIC MSG_ID_T  UTL_CVWake(UTL_CV cv)
     pthread_cond_signal(&cvCtx->cv);
 #endif
     
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -1091,7 +1142,7 @@ ENT_PUBLIC MSG_ID_T  UTL_CVWakeAll(UTL_CV cv)
     if(cv==NULL)
     {
         IENT_LOG_ERROR("cv handle is null\n");
-        return -1;
+        return ENT_UTHD_INVALID_ARGUMENT;
     }
 
     UTL_TH_CV* cvCtx = (UTL_TH_CV*)cv;
@@ -1102,5 +1153,5 @@ ENT_PUBLIC MSG_ID_T  UTL_CVWakeAll(UTL_CV cv)
     pthread_cond_broadcast(&cvCtx->cv);
 #endif
     
-    return 0;
+    return ENT_SYS_NORMAL;
 }

@@ -4,6 +4,7 @@
 #include <time.h>
 
 #include "ient_comm.h"
+#include "ent_msg.h"
 #include "ent_utility.h"
 
 ENT_CTX gEntCtx;
@@ -195,18 +196,18 @@ static int test_timer_rejects_uninitialized_use(void)
 {
     UTL_TIMER_T timer = NULL;
 
-    if(expect_true(UTL_TimerClose() == -1, "UTL_TimerClose should reject use before initialization") != 0)
+    if(expect_true(UTL_TimerClose() == ENT_TMR_NOT_INITIALIZED, "UTL_TimerClose should reject use before initialization") != 0)
     {
         return 1;
     }
 
-    if(expect_true(UTL_TimerCreate(&timer, UTL_TIMER_E_ONESHOT, 10, timer_cb, NULL) == -1,
+    if(expect_true(UTL_TimerCreate(&timer, UTL_TIMER_E_ONESHOT, 10, timer_cb, NULL) == ENT_TMR_NOT_INITIALIZED,
                    "UTL_TimerCreate should reject use before initialization") != 0)
     {
         return 1;
     }
 
-    return expect_true(UTL_TimerDelete(&timer) == -2,
+    return expect_true(UTL_TimerDelete(&timer) == ENT_TMR_NOT_INITIALIZED,
                        "UTL_TimerDelete should reject use before initialization");
 }
 
@@ -333,7 +334,7 @@ static int test_timer_create_us_has_consistent_failure_contract(void)
         return 1;
     }
 #else
-    if(expect_true(UTL_TimerCreateUs(&timer, UTL_TIMER_E_ONESHOT, 1000, timer_cb, &hits) == -1,
+    if(expect_true(UTL_TimerCreateUs(&timer, UTL_TIMER_E_ONESHOT, 1000, timer_cb, &hits) == ENT_TMR_UNSUPPORTED,
                    "UTL_TimerCreateUs should report unsupported platforms") != 0)
     {
         UTL_TimerClose();
