@@ -35,6 +35,10 @@
 #define ENT_ENABLE_MYSQL 1
 #endif
 
+#ifndef ENT_ENABLE_PGSQL
+#define ENT_ENABLE_PGSQL 0
+#endif
+
 #if ENT_ENABLE_SQLITE
 #include "sqlite3.h"
 #endif
@@ -42,6 +46,11 @@
 #if ENT_ENABLE_MYSQL
 #include "mysql.h"
 #endif
+
+#if ENT_ENABLE_PGSQL
+#include <libpq-fe.h>
+#endif
+
 #include "ent_types.h"
 #include "ent_db.h"
 #include "ient_comm.h"
@@ -72,6 +81,9 @@ typedef  struct DB_CFG {
 #if ENT_ENABLE_MYSQL
       MYSQL*   mysql;
 #endif
+#if ENT_ENABLE_PGSQL
+      PGconn*  pgsql;
+#endif
       void*    raw;
     }      dbInstance;
   unsigned int eTag;
@@ -95,6 +107,13 @@ MSG_ID_T  ENT_DbMySQLInit(DB_HANDLE dbHandle);
 MSG_ID_T  ENT_DbMySQLClose(DB_HANDLE dbHandle);
 MSG_ID_T  ENT_DbMySQLRead(MYSQL* dbHandle,const char* query,SqlResultCB userCb,void* userData);
 MSG_ID_T  ENT_DbMySQLWrite(MYSQL* dbHandle,const char* query,SqlResultCB userCb,void* userData);
+#endif
+
+#if ENT_ENABLE_PGSQL
+MSG_ID_T  ENT_DbPgSQLInit(DB_HANDLE dbHandle);
+MSG_ID_T  ENT_DbPgSQLClose(DB_HANDLE dbHandle);
+MSG_ID_T  ENT_DbPgSQLRead(void* dbHandle,const char* query,SqlResultCB userCb,void* userData);
+MSG_ID_T  ENT_DbPgSQLWrite(void* dbHandle,const char* query,SqlResultCB userCb,void* userData);
 #endif
 
 #ifdef WIN32
@@ -348,6 +367,7 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
     {
         case SQLITE_TYPE:
         case MYSQL_TYPE:
+        case PGSQL_TYPE:
             dbCfg = (DB_CFG*)malloc(sizeof(DB_CFG));
             if(dbCfg==NULL)
             {
@@ -451,7 +471,14 @@ ENT_PUBLIC MSG_ID_T ENT_DbOpen(DB_HANDLE dbHandle)
 #else
             sts = iENT_DbBackendUnsupported(MYSQL_TYPE);
 #endif
-            break;   
+            break;
+        case PGSQL_TYPE:
+#if ENT_ENABLE_PGSQL
+            sts = ENT_DbPgSQLInit(dbCfg);
+#else
+            sts = iENT_DbBackendUnsupported(PGSQL_TYPE);
+#endif
+            break;
         default:
             sts = -1;
             break;
@@ -520,7 +547,14 @@ ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE dbHandle)
 #else
             sts = iENT_DbBackendUnsupported(MYSQL_TYPE);
 #endif
-            break;   
+            break;
+        case PGSQL_TYPE:
+#if ENT_ENABLE_PGSQL
+            sts = ENT_DbPgSQLClose(dbCfg);
+#else
+            sts = iENT_DbBackendUnsupported(PGSQL_TYPE);
+#endif
+            break;
         default:
             sts = -1;
             break;
@@ -601,7 +635,14 @@ ENT_PUBLIC MSG_ID_T ENT_DbRead(DB_HANDLE dbHandle,const char* sql,SqlResultCB sq
 #else
             sts = iENT_DbBackendUnsupported(SQLITE_TYPE);
 #endif
-            break;   
+            break;
+        case PGSQL_TYPE:
+#if ENT_ENABLE_PGSQL
+            sts = ENT_DbPgSQLRead(dbCfg->dbInstance.pgsql,sql,sqlCb,userData);
+#else
+            sts = iENT_DbBackendUnsupported(PGSQL_TYPE);
+#endif
+            break;
         default:
             sts = -1;
             break;
@@ -676,7 +717,14 @@ ENT_PUBLIC MSG_ID_T ENT_DbWrite(DB_HANDLE dbHandle,const char* sql,SqlResultCB s
 #else
             sts = iENT_DbBackendUnsupported(SQLITE_TYPE);
 #endif
-            break;   
+            break;
+        case PGSQL_TYPE:
+#if ENT_ENABLE_PGSQL
+            sts = ENT_DbPgSQLWrite(dbCfg->dbInstance.pgsql,sql,sqlCb,userData);
+#else
+            sts = iENT_DbBackendUnsupported(PGSQL_TYPE);
+#endif
+            break;
         default:
             sts = -1;
             break;
@@ -1199,3 +1247,193 @@ MSG_ID_T  ENT_DbMySQLClose(DB_HANDLE dbHandle)
 #endif
 }
 
+
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :ENT_DbPgSQLInit
+ *
+ * DESCRIPTION :   
+ *                 
+ *                   
+ *
+ * COMPLETION
+ * STATUS      :  0
+ *                Success; Service has completed successfully.           
+ *
+ *                            
+ *
+ *-----------------------------------------------------------------------------
+ */
+MSG_ID_T ENT_DbPgSQLInit(DB_HANDLE dbHandle)
+{
+#if ENT_ENABLE_PGSQL
+    DB_CFG* dbCfg = (DB_CFG*)dbHandle;
+    char conninfo[1024];
+    snprintf(conninfo, sizeof(conninfo), "host=%s port=%d dbname=%s user=%s password=%s",
+             dbCfg->host ? dbCfg->host : "",
+             dbCfg->portNo ? dbCfg->portNo : 5432,
+             dbCfg->database ? dbCfg->database : "",
+             dbCfg->userName ? dbCfg->userName : "",
+             dbCfg->passwd ? dbCfg->passwd : "");
+
+    dbCfg->dbInstance.pgsql = PQconnectdb(conninfo);
+    if (PQstatus(dbCfg->dbInstance.pgsql) != CONNECTION_OK) {
+        IENT_LOG_ERROR("PgSQL Connection failed: %s\n", PQerrorMessage(dbCfg->dbInstance.pgsql));
+        PQfinish(dbCfg->dbInstance.pgsql);
+        dbCfg->dbInstance.pgsql = NULL;
+        return -3;
+    }
+    dbCfg->isOpen = true;
+    return 0;
+#else
+    (void)dbHandle;
+    return iENT_DbBackendUnsupported(PGSQL_TYPE);
+#endif
+}
+
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :ENT_DbPgSQLClose
+ *
+ * DESCRIPTION :   
+ *                 
+ *                   
+ *
+ * COMPLETION
+ * STATUS      :  0
+ *                Success; Service has completed successfully.           
+ *
+ *                            
+ *
+ *-----------------------------------------------------------------------------
+ */
+MSG_ID_T ENT_DbPgSQLClose(DB_HANDLE dbHandle)
+{
+#if ENT_ENABLE_PGSQL
+    DB_CFG* dbCfg = (DB_CFG*)dbHandle;
+    if (dbCfg->dbInstance.pgsql) {
+        PQfinish(dbCfg->dbInstance.pgsql);
+        dbCfg->dbInstance.pgsql = NULL;
+    }
+    dbCfg->isOpen = false;
+    
+    if(dbCfg->host) free(dbCfg->host);
+    if(dbCfg->database) free(dbCfg->database); 
+    if(dbCfg->userName) free(dbCfg->userName);
+    if(dbCfg->passwd) free(dbCfg->passwd);
+
+#ifdef WIN32
+    DeleteCriticalSection(&dbCfg->cs);
+#else
+    pthread_mutex_destroy(&dbCfg->cs);
+#endif    
+    sDbNum--;
+    return 0;
+#else
+    (void)dbHandle;
+    return iENT_DbBackendUnsupported(PGSQL_TYPE);
+#endif
+}
+
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :ENT_DbPgSQLRead
+ *
+ * DESCRIPTION :   
+ *                 
+ *                   
+ *
+ * COMPLETION
+ * STATUS      :  0
+ *                Success; Service has completed successfully.           
+ *
+ *                            
+ *
+ *-----------------------------------------------------------------------------
+ */
+MSG_ID_T ENT_DbPgSQLRead(void* dbHandle, const char* query, SqlResultCB userCb, void* userData)
+{
+#if ENT_ENABLE_PGSQL
+    PGconn* pgConn = (PGconn*)dbHandle;
+    PGresult *res = PQexec(pgConn, query);
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        IENT_LOG_ERROR("PgSQL Read failed: %s\n", PQerrorMessage(pgConn));
+        PQclear(res);
+        return -4;
+    }
+
+    int rows = PQntuples(res);
+    int cols = PQnfields(res);
+    
+    char** fields = (char**)malloc(cols * sizeof(char*));
+    char** rowRes = (char**)malloc(rows * cols * sizeof(char*));
+
+    for (int i = 0; i < cols; i++) {
+        fields[i] = PQfname(res, i);
+    }
+
+    for (int r = 0; r < rows; r++) {
+        for (int c = 0; c < cols; c++) {
+            rowRes[r * cols + c] = PQgetvalue(res, r, c);
+        }
+    }
+
+    if (userCb) {
+        userCb(fields, rowRes, rows, cols, userData);
+    } else {
+        defSqlResultCb(fields, rowRes, rows, cols, userData);
+    }
+
+    free(fields);
+    free(rowRes);
+    PQclear(res);
+    return 0;
+#else
+    (void)dbHandle; (void)query; (void)userCb; (void)userData;
+    return iENT_DbBackendUnsupported(PGSQL_TYPE);
+#endif
+}
+
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :ENT_DbPgSQLWrite
+ *
+ * DESCRIPTION :   
+ *                 
+ *                   
+ *
+ * COMPLETION
+ * STATUS      :  0
+ *                Success; Service has completed successfully.           
+ *
+ *                            
+ *
+ *-----------------------------------------------------------------------------
+ */
+MSG_ID_T ENT_DbPgSQLWrite(void* dbHandle, const char* query, SqlResultCB userCb, void* userData)
+{
+#if ENT_ENABLE_PGSQL
+    PGconn* pgConn = (PGconn*)dbHandle;
+    PGresult *res = PQexec(pgConn, query);
+    ExecStatusType status = PQresultStatus(res);
+    if (status != PGRES_COMMAND_OK && status != PGRES_TUPLES_OK) {
+        IENT_LOG_ERROR("PgSQL Write failed: %s\n", PQerrorMessage(pgConn));
+        PQclear(res);
+        return -4;
+    }
+
+    long long affectedRows = atoll(PQcmdTuples(res));
+    
+    if (userCb) {
+        userCb(NULL, NULL, affectedRows, 0, userData);
+    } else {
+        defSqlResultCb(NULL, NULL, affectedRows, 0, userData);
+    }
+
+    PQclear(res);
+    return 0;
+#else
+    (void)dbHandle; (void)query; (void)userCb; (void)userData;
+    return iENT_DbBackendUnsupported(PGSQL_TYPE);
+#endif
+}

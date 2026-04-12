@@ -471,6 +471,47 @@ static int test_sqlite_read_rejects_callback_without_user_data(void)
                        "ENT_DbClose should close the DB service after the callback validation test");
 }
 
+static int test_pgsql_init(void)
+{
+    DB_HANDLE db_handle = NULL;
+    MSG_ID_T sts = 0;
+
+    sts = reset_db_service();
+    if(expect_true(sts == 0 || sts == 1,
+                   "ENT_DbInit should initialize the DB service") != 0)
+    {
+        return 1;
+    }
+
+    /* Test structural init */
+    sts = ENT_DbInitHandle(&db_handle, PGSQL_TYPE, "127.0.0.1", "test", "root", "123456", 5432);
+    if(expect_true(sts == 0 && db_handle != NULL,
+                   "ENT_DbInitHandle should create a PgSQL handle structure") != 0)
+    {
+        ENT_DbClose();
+        return 1;
+    }
+
+    /* Test open (expected to fail if no local PG server or if disabled) */
+    sts = ENT_DbOpen(db_handle);
+    if (sts != 0) {
+        printf("PgSQL open failed as expected (sts=%d)\n", sts);
+    } else {
+        printf("PgSQL open success (unlikely without local db)\n");
+    }
+
+    sts = ENT_DbCloseHandle(db_handle);
+    if(expect_true(sts == 0 || sts == -2,
+                   "ENT_DbCloseHandle should clean up PgSQL handle or return unsupported") != 0)
+    {
+        ENT_DbClose();
+        return 1;
+    }
+
+    return expect_true(ENT_DbClose() == 0,
+                       "ENT_DbClose should close the DB service after PgSQL test");
+}
+
 int main(void)
 {
     if(test_db_init_handle_rejects_uninitialized_service() != 0)
@@ -494,6 +535,11 @@ int main(void)
     }
 
     if(test_sqlite_read_rejects_callback_without_user_data() != 0)
+    {
+        return 1;
+    }
+
+    if(test_pgsql_init() != 0)
     {
         return 1;
     }

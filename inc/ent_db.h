@@ -25,7 +25,8 @@ typedef enum DB_TYPE
   SQLITE_TYPE = 1,
   MYSQL_TYPE  = 2,
   MSSQL_TYPE  = 3,
-  ORACLE_TYPE = 4
+  ORACLE_TYPE = 4,
+  PGSQL_TYPE  = 5
 } DB_TYPE;
 
 typedef struct DB_READ_HEADER

@@ -217,6 +217,7 @@ if(ENT_ENABLE_SQLITE AND (NOT WIN32 OR ENT_SQLITE_LIBRARY))
     PRIVATE
       ENT_ENABLE_SQLITE=1
       ENT_ENABLE_MYSQL=0
+      ENT_ENABLE_PGSQL=$<BOOL:${PostgreSQL_FOUND}>
   )
 
   if(WIN32)
@@ -239,6 +240,7 @@ if(ENT_ENABLE_SQLITE AND (NOT WIN32 OR ENT_SQLITE_LIBRARY))
 
   
   if(PostgreSQL_FOUND)
+      target_include_directories(test_ent_db PRIVATE ${PostgreSQL_INCLUDE_DIRS})
       target_link_libraries(test_ent_db PRIVATE ${PostgreSQL_LIBRARIES})
   endif()
   add_test(NAME test_ent_db COMMAND test_ent_db)
@@ -292,6 +294,7 @@ if(ENT_ENABLE_SQLITE AND (NOT WIN32 OR ENT_SQLITE_LIBRARY))
     PRIVATE
       ENT_ENABLE_SQLITE=1
       ENT_ENABLE_MYSQL=0
+      ENT_ENABLE_PGSQL=$<BOOL:${PostgreSQL_FOUND}>
   )
 
   if(WIN32)
@@ -314,6 +317,7 @@ if(ENT_ENABLE_SQLITE AND (NOT WIN32 OR ENT_SQLITE_LIBRARY))
 
   
   if(PostgreSQL_FOUND)
+      target_include_directories(test_security PRIVATE ${PostgreSQL_INCLUDE_DIRS})
       target_link_libraries(test_security PRIVATE ${PostgreSQL_LIBRARIES})
   endif()
   add_test(NAME test_security COMMAND test_security)
