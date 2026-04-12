@@ -237,6 +237,10 @@ if(ENT_ENABLE_SQLITE AND (NOT WIN32 OR ENT_SQLITE_LIBRARY))
     target_link_libraries(test_ent_db PRIVATE pthread sqlite3)
   endif()
 
+  
+  if(PostgreSQL_FOUND)
+      target_link_libraries(test_ent_db PRIVATE ${PostgreSQL_LIBRARIES})
+  endif()
   add_test(NAME test_ent_db COMMAND test_ent_db)
 endif()
 
@@ -308,6 +312,10 @@ if(ENT_ENABLE_SQLITE AND (NOT WIN32 OR ENT_SQLITE_LIBRARY))
     target_link_libraries(test_security PRIVATE pthread sqlite3)
   endif()
 
+  
+  if(PostgreSQL_FOUND)
+      target_link_libraries(test_security PRIVATE ${PostgreSQL_LIBRARIES})
+  endif()
   add_test(NAME test_security COMMAND test_security)
 endif()
 

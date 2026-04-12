@@ -45,6 +45,15 @@ endforeach()
 message(STATUS "Binary  Dir : ${CMAKE_BINARY_DIR}")
 message(STATUS "Install type: ${CMAKE_INSTALL_LIBDIR}")
 message(ATATUS "Path :${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}")
+
+find_package(PostgreSQL)
+if(PostgreSQL_FOUND)
+    add_compile_definitions(ENT_ENABLE_PGSQL=1)
+    include_directories(${PostgreSQL_INCLUDE_DIRS})
+else()
+    add_compile_definitions(ENT_ENABLE_PGSQL=0)
+endif()
+
 # defines targets and sources
 add_subdirectory(comm)
 add_subdirectory(example)
