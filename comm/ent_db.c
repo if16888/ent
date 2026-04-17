@@ -18,103 +18,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <memory.h>
+#include <time.h>
 
 #ifdef WIN32
 #include <windows.h>
-#endif
-
-#ifndef WIN32
-#include <pthread.h>
-#endif
-
-#ifndef ENT_ENABLE_SQLITE
-#define ENT_ENABLE_SQLITE 1
-#endif
-
-#ifndef ENT_ENABLE_MYSQL
-#define ENT_ENABLE_MYSQL 1
-#endif
-
-#ifndef ENT_ENABLE_PGSQL
-#define ENT_ENABLE_PGSQL 0
-#endif
-
-#if ENT_ENABLE_SQLITE
-#include "sqlite3.h"
-#endif
-
-#if ENT_ENABLE_MYSQL
-#include "mysql.h"
-#endif
-
-#if ENT_ENABLE_PGSQL
-#include <libpq-fe.h>
-#endif
-
-#include "ent_types.h"
-#include "ent_db.h"
-#include "ient_comm.h"
-
-#define ENTDB_S_TAG (0xEADBEB90)
-#define ENTDB_E_TAG (0xEB90EADB)
-
-typedef  struct DB_CFG {
-  unsigned int     sTag;
-  DB_TYPE          dbType;
-  char*            userName;
-  char*            passwd;
-  char*            host;
-  char*            database;
-  int              portNo;
-  bool             isInit;
-#ifdef WIN32
-  CRITICAL_SECTION cs;
 #else
-  pthread_mutex_t  cs;
-#endif
-  bool             isOpen;
-  union 
-    {
-#if ENT_ENABLE_SQLITE
-      sqlite3* sqlite;
-#endif
-#if ENT_ENABLE_MYSQL
-      MYSQL*   mysql;
-#endif
-#if ENT_ENABLE_PGSQL
-      PGconn*  pgsql;
-#endif
-      void*    raw;
-    }      dbInstance;
-  unsigned int eTag;
-} DB_CFG;
-
-typedef struct USER_SQLITE_DATA
-{
-    SqlResultCB  userCb;
-    void*        userData;
-}USER_SQLITE_READ,USER_SQLITE_WRITE;
-
-MSG_ID_T  ENT_DbSqliteInit(DB_HANDLE dbHandle);
-MSG_ID_T  ENT_DbSqliteClose(DB_HANDLE dbHandle);
-#if ENT_ENABLE_SQLITE
-MSG_ID_T  ENT_DbSqliteRead(sqlite3* dbHandle,const char* query,SqlResultCB userCb,void* userData);
-MSG_ID_T  ENT_DbSqliteWrite(sqlite3* dbHandle,const char* query,SqlResultCB userCb,void* userData);
+#include <pthread.h>
+#include <errno.h>
 #endif
 
-#if ENT_ENABLE_MYSQL
-MSG_ID_T  ENT_DbMySQLInit(DB_HANDLE dbHandle);
-MSG_ID_T  ENT_DbMySQLClose(DB_HANDLE dbHandle);
-MSG_ID_T  ENT_DbMySQLRead(MYSQL* dbHandle,const char* query,SqlResultCB userCb,void* userData);
-MSG_ID_T  ENT_DbMySQLWrite(MYSQL* dbHandle,const char* query,SqlResultCB userCb,void* userData);
-#endif
-
-#if ENT_ENABLE_PGSQL
-MSG_ID_T  ENT_DbPgSQLInit(DB_HANDLE dbHandle);
-MSG_ID_T  ENT_DbPgSQLClose(DB_HANDLE dbHandle);
-MSG_ID_T  ENT_DbPgSQLRead(void* dbHandle,const char* query,SqlResultCB userCb,void* userData);
-MSG_ID_T  ENT_DbPgSQLWrite(void* dbHandle,const char* query,SqlResultCB userCb,void* userData);
-#endif
+#include "ient_db.h"
+#include "ient_comm.h"
 
 #ifdef WIN32
 static CRITICAL_SECTION sDbMutex;
