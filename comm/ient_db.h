@@ -133,4 +133,6 @@ MSG_ID_T ENT_DbPgSQLWrite(void* dbHandle,
                           void* userData);
 #endif
 
+extern long sDbNum;
+
 #endif

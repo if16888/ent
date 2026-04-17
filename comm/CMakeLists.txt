@@ -371,7 +371,7 @@ endif()
 add_library(
   ${LIB_NAME_OBJS}
   OBJECT
-  ent_init.c ent_db.c ent_log.c ent_thread.c ent_msg.c ent_script.c
+  ent_init.c ent_db.c ent_db_sqlite.c ent_log.c ent_thread.c ent_msg.c ent_script.c
   utl_socket.c utl_thread.c utl_timer.c utl_dll.c utl_tpool.c
   ${ENT_MSG_GENERATED_SOURCE}
   )
@@ -413,6 +413,7 @@ target_compile_definitions(
   PUBLIC
     ENT_ENABLE_SQLITE=$<BOOL:${ENT_ENABLE_SQLITE}>
     ENT_ENABLE_MYSQL=$<BOOL:${ENT_ENABLE_MYSQL}>
+    ENT_ENABLE_PGSQL=$<BOOL:${PostgreSQL_FOUND}>
     ENT_ENABLE_LUA=$<BOOL:${ENT_ENABLE_LUA}>
 )
   
@@ -429,6 +430,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     if(ENT_ENABLE_MYSQL AND ENT_MYSQL_LIBRARY)
         target_link_libraries(${LIB_NAME_SHARE} PRIVATE ${ENT_MYSQL_LIBRARY})
     endif()
+    if(PostgreSQL_FOUND)
+        target_link_libraries(${LIB_NAME_SHARE} PRIVATE ${PostgreSQL_LIBRARIES})
+    endif()
     if(ENT_ENABLE_LUA)
         if(ENT_LUA_TARGET)
             target_link_libraries(${LIB_NAME_SHARE} PRIVATE ${ENT_LUA_TARGET})
@@ -443,6 +447,9 @@ else()
     endif()
     if(ENT_ENABLE_SQLITE)
         target_link_libraries(${LIB_NAME_SHARE} PRIVATE ${ENT_SQLITE_LIBRARY})
+    endif()
+    if(PostgreSQL_FOUND)
+        target_link_libraries(${LIB_NAME_SHARE} PRIVATE ${PostgreSQL_LIBRARIES})
     endif()
     if(ENT_ENABLE_LUA)
         if(ENT_LUA_TARGET)
@@ -475,8 +482,13 @@ target_compile_definitions(
   PUBLIC
     ENT_ENABLE_SQLITE=$<BOOL:${ENT_ENABLE_SQLITE}>
     ENT_ENABLE_MYSQL=$<BOOL:${ENT_ENABLE_MYSQL}>
+    ENT_ENABLE_PGSQL=$<BOOL:${PostgreSQL_FOUND}>
     ENT_ENABLE_LUA=$<BOOL:${ENT_ENABLE_LUA}>
 )
+
+if(PostgreSQL_FOUND)
+  target_link_libraries(${LIB_NAME_STATIC} PUBLIC ${PostgreSQL_LIBRARIES})
+endif()
 
 if(ENT_ENABLE_LUA)
   if(ENT_LUA_TARGET)

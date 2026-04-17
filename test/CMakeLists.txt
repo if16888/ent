@@ -203,6 +203,7 @@ if(ENT_ENABLE_SQLITE AND (NOT WIN32 OR ENT_SQLITE_LIBRARY))
     test_ent_db
     test_ent_db.c
     ../comm/ent_db.c
+    ../comm/ent_db_sqlite.c
   )
 
   target_include_directories(
@@ -274,6 +275,7 @@ if(ENT_ENABLE_SQLITE AND (NOT WIN32 OR ENT_SQLITE_LIBRARY))
     ../comm/ent_init.c
     ../comm/ent_log.c
     ../comm/ent_db.c
+    ../comm/ent_db_sqlite.c
     ../comm/utl_thread.c
     ../comm/utl_dll.c
   )
