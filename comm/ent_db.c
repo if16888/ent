@@ -172,6 +172,43 @@ static MSG_ID_T iENT_DbBackendUnsupported(DB_TYPE dbType)
     IENT_LOG_ERROR("Database backend [%d] is not enabled in this build.\n",dbType);
     return -2;
 }
+
+static MSG_ID_T iENT_DbValidateHandle(DB_HANDLE dbHandle,
+                                      DB_CFG** dbCfgOut,
+                                      bool requireInit)
+{
+    DB_CFG* dbCfg = (DB_CFG*)dbHandle;
+
+    if(dbCfgOut != NULL)
+    {
+        *dbCfgOut = NULL;
+    }
+
+    if(dbHandle == NULL)
+    {
+        IENT_LOG_ERROR("Database handle is null.\n");
+        return -1;
+    }
+
+    if(dbCfg->sTag != ENTDB_S_TAG || dbCfg->eTag != ENTDB_E_TAG)
+    {
+        IENT_LOG_ERROR("Database handle is invalid.\n");
+        return -1;
+    }
+
+    if(requireInit && dbCfg->isInit == false)
+    {
+        IENT_LOG_ERROR("Database handle is not initialized.\n");
+        return -1;
+    }
+
+    if(dbCfgOut != NULL)
+    {
+        *dbCfgOut = dbCfg;
+    }
+
+    return 0;
+}
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :iENT_DbReInit
@@ -433,28 +470,31 @@ END_OF_ROUTINE:
 ENT_PUBLIC MSG_ID_T ENT_DbOpen(DB_HANDLE dbHandle)
 {
     MSG_ID_T sts=0;
-    DB_CFG*  dbCfg=(DB_CFG*)dbHandle;
+    DB_CFG*  dbCfg=NULL;
     if(sDbMutexInit==false)
     {
         IENT_LOG_ERROR("Uninitialized,please call ENT_DbInit.\n");
         return -1;
     }
-    
-    if(dbHandle==NULL || 
-    dbCfg->sTag!=ENTDB_S_TAG||
-    dbCfg->eTag!=ENTDB_E_TAG||
-    dbCfg->isInit == false||
-    dbCfg->isOpen == true)
+
+    sts = iENT_DbValidateHandle(dbHandle, &dbCfg, true);
+    if(sts < 0)
     {
-        IENT_LOG_ERROR("Arguments are invalid.\n");
-        return -1;
+        return sts;
     }
-    
+
 #ifdef WIN32
     EnterCriticalSection(&dbCfg->cs);   
 #else
     pthread_mutex_lock(&dbCfg->cs);
-#endif 
+#endif
+
+    if(dbCfg->isOpen == true)
+    {
+        sts = 0;
+        goto END_OF_ROUTINE;
+    }
+
     switch(dbCfg->dbType)
     {
         case SQLITE_TYPE:
@@ -483,6 +523,8 @@ ENT_PUBLIC MSG_ID_T ENT_DbOpen(DB_HANDLE dbHandle)
             sts = -1;
             break;
     }
+
+END_OF_ROUTINE:
 #ifdef WIN32
     LeaveCriticalSection(&dbCfg->cs); 
 #else
@@ -510,19 +552,17 @@ ENT_PUBLIC MSG_ID_T ENT_DbOpen(DB_HANDLE dbHandle)
 ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE dbHandle)
 {
     MSG_ID_T sts=0;   
-    DB_CFG*  dbCfg=(DB_CFG*)dbHandle;
+    DB_CFG*  dbCfg=NULL;
     if(sDbMutexInit==false)
     {
         IENT_LOG_ERROR("Uninitialized,please call ENT_DbInit.\n");
         return -1;
     }
-    
-    if(dbHandle==NULL||
-       dbCfg->sTag!=ENTDB_S_TAG||
-       dbCfg->eTag!=ENTDB_E_TAG)
+
+    sts = iENT_DbValidateHandle(dbHandle, &dbCfg, false);
+    if(sts < 0)
     {
-        IENT_LOG_ERROR("Arguments are invalid.\n");
-        return -1;
+        return sts;
     }
 
 #ifdef WIN32
@@ -592,17 +632,20 @@ ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE dbHandle)
 ENT_PUBLIC MSG_ID_T ENT_DbRead(DB_HANDLE dbHandle,const char* sql,SqlResultCB sqlCb,void* userData)
 {
     MSG_ID_T sts=0;
-    DB_CFG*  dbCfg=(DB_CFG*)dbHandle;
-    if(dbHandle==NULL || 
-        dbCfg->sTag!=ENTDB_S_TAG||
-        dbCfg->eTag!=ENTDB_E_TAG ||
-        dbCfg->isInit == false ||
-        sql==NULL)
+    DB_CFG*  dbCfg=NULL;
+
+    if(sql==NULL)
     {
         IENT_LOG_ERROR("Arguments are invalid.\n");
         return -1;
     }
-    
+
+    sts = iENT_DbValidateHandle(dbHandle, &dbCfg, true);
+    if(sts < 0)
+    {
+        return sts;
+    }
+
     if(dbCfg->isOpen==false)
     {
         sts = ENT_DbOpen(dbCfg);
@@ -674,17 +717,20 @@ ENT_PUBLIC MSG_ID_T ENT_DbRead(DB_HANDLE dbHandle,const char* sql,SqlResultCB sq
 ENT_PUBLIC MSG_ID_T ENT_DbWrite(DB_HANDLE dbHandle,const char* sql,SqlResultCB sqlCb,void* userData)
 {
     MSG_ID_T sts=0;
-    DB_CFG*  dbCfg=(DB_CFG*)dbHandle;
-    if(dbHandle==NULL|| 
-        dbCfg->sTag!=ENTDB_S_TAG||
-        dbCfg->eTag!=ENTDB_E_TAG ||
-        dbCfg->isInit == false ||
-        sql==NULL)
+    DB_CFG*  dbCfg=NULL;
+
+    if(sql==NULL)
     {
         IENT_LOG_ERROR("Arguments are invalid.\n");
         return -1;
     }
-    
+
+    sts = iENT_DbValidateHandle(dbHandle, &dbCfg, true);
+    if(sts < 0)
+    {
+        return sts;
+    }
+
     if(dbCfg->isOpen==false)
     {
         sts = ENT_DbOpen(dbCfg);
@@ -1268,7 +1314,23 @@ MSG_ID_T ENT_DbPgSQLInit(DB_HANDLE dbHandle)
 {
 #if ENT_ENABLE_PGSQL
     DB_CFG* dbCfg = (DB_CFG*)dbHandle;
+    PGconn* pgConn;
     char conninfo[1024];
+
+    if(dbHandle == NULL)
+    {
+        IENT_LOG_ERROR("Arguments are invalid.\n");
+        return -1;
+    }
+
+    if(dbCfg->sTag != ENTDB_S_TAG ||
+       dbCfg->eTag != ENTDB_E_TAG ||
+       dbCfg->dbType != PGSQL_TYPE)
+    {
+        IENT_LOG_ERROR("Arguments are invalid.\n");
+        return -1;
+    }
+
     snprintf(conninfo, sizeof(conninfo), "host=%s port=%d dbname=%s user=%s password=%s",
              dbCfg->host ? dbCfg->host : "",
              dbCfg->portNo ? dbCfg->portNo : 5432,
@@ -1276,13 +1338,20 @@ MSG_ID_T ENT_DbPgSQLInit(DB_HANDLE dbHandle)
              dbCfg->userName ? dbCfg->userName : "",
              dbCfg->passwd ? dbCfg->passwd : "");
 
-    dbCfg->dbInstance.pgsql = PQconnectdb(conninfo);
-    if (PQstatus(dbCfg->dbInstance.pgsql) != CONNECTION_OK) {
-        IENT_LOG_ERROR("PgSQL Connection failed: %s\n", PQerrorMessage(dbCfg->dbInstance.pgsql));
-        PQfinish(dbCfg->dbInstance.pgsql);
+    pgConn = PQconnectdb(conninfo);
+    if (pgConn == NULL) {
+        IENT_LOG_ERROR("PgSQL Connection failed: connection handle is null.\n");
+        return -3;
+    }
+
+    if (PQstatus(pgConn) != CONNECTION_OK) {
+        IENT_LOG_ERROR("PgSQL Connection failed: %s\n", PQerrorMessage(pgConn));
+        PQfinish(pgConn);
         dbCfg->dbInstance.pgsql = NULL;
         return -3;
     }
+
+    dbCfg->dbInstance.pgsql = pgConn;
     dbCfg->isOpen = true;
     return 0;
 #else
@@ -1311,6 +1380,20 @@ MSG_ID_T ENT_DbPgSQLClose(DB_HANDLE dbHandle)
 {
 #if ENT_ENABLE_PGSQL
     DB_CFG* dbCfg = (DB_CFG*)dbHandle;
+    if(dbHandle == NULL)
+    {
+        IENT_LOG_ERROR("Arguments are invalid.\n");
+        return -1;
+    }
+
+    if(dbCfg->sTag != ENTDB_S_TAG ||
+       dbCfg->eTag != ENTDB_E_TAG ||
+       dbCfg->dbType != PGSQL_TYPE)
+    {
+        IENT_LOG_ERROR("Arguments are invalid.\n");
+        return -1;
+    }
+
     if (dbCfg->dbInstance.pgsql) {
         PQfinish(dbCfg->dbInstance.pgsql);
         dbCfg->dbInstance.pgsql = NULL;
@@ -1355,26 +1438,58 @@ MSG_ID_T ENT_DbPgSQLRead(void* dbHandle, const char* query, SqlResultCB userCb, 
 {
 #if ENT_ENABLE_PGSQL
     PGconn* pgConn = (PGconn*)dbHandle;
-    PGresult *res = PQexec(pgConn, query);
+    PGresult* res;
+    int rows;
+    int cols;
+    size_t fieldsCount;
+    size_t rowCount;
+    char** fields;
+    char** rowRes;
+
+    if(dbHandle == NULL || query == NULL)
+    {
+        IENT_LOG_ERROR("Arguments are invalid.\n");
+        return -1;
+    }
+
+    res = PQexec(pgConn, query);
+    if (res == NULL) {
+        IENT_LOG_ERROR("PgSQL Read failed: execution returned no result.\n");
+        return -4;
+    }
+
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
         IENT_LOG_ERROR("PgSQL Read failed: %s\n", PQerrorMessage(pgConn));
         PQclear(res);
         return -4;
     }
 
-    int rows = PQntuples(res);
-    int cols = PQnfields(res);
-    
-    char** fields = (char**)malloc(cols * sizeof(char*));
-    char** rowRes = (char**)malloc(rows * cols * sizeof(char*));
+    rows = PQntuples(res);
+    cols = PQnfields(res);
+    fieldsCount = (size_t)(cols > 0 ? cols : 1);
+    rowCount = (size_t)((rows > 0 && cols > 0) ? rows * cols : 1);
+    fields = (char**)malloc(fieldsCount * sizeof(char*));
+    rowRes = (char**)malloc(rowCount * sizeof(char*));
+
+    if(fields == NULL || rowRes == NULL)
+    {
+        IENT_LOG_ERROR("PgSQL Read failed: out of memory.\n");
+        if(fields) free(fields);
+        if(rowRes) free(rowRes);
+        PQclear(res);
+        return -3;
+    }
+
+    memset(fields, 0, fieldsCount * sizeof(char*));
+    memset(rowRes, 0, rowCount * sizeof(char*));
 
     for (int i = 0; i < cols; i++) {
-        fields[i] = PQfname(res, i);
+        fields[i] = (char*)PQfname(res, i);
     }
 
     for (int r = 0; r < rows; r++) {
         for (int c = 0; c < cols; c++) {
-            rowRes[r * cols + c] = PQgetvalue(res, r, c);
+            rowRes[r * cols + c] = (char*)PQgetvalue(res, r, c);
         }
     }
 
@@ -1414,15 +1529,42 @@ MSG_ID_T ENT_DbPgSQLWrite(void* dbHandle, const char* query, SqlResultCB userCb,
 {
 #if ENT_ENABLE_PGSQL
     PGconn* pgConn = (PGconn*)dbHandle;
-    PGresult *res = PQexec(pgConn, query);
-    ExecStatusType status = PQresultStatus(res);
+    PGresult* res;
+    ExecStatusType status;
+    long long affectedRows;
+
+    if(dbHandle == NULL || query == NULL)
+    {
+        IENT_LOG_ERROR("Arguments are invalid.\n");
+        return -1;
+    }
+
+    res = PQexec(pgConn, query);
+    if(res == NULL)
+    {
+        IENT_LOG_ERROR("PgSQL Write failed: execution returned no result.\n");
+        return -4;
+    }
+
+    status = PQresultStatus(res);
     if (status != PGRES_COMMAND_OK && status != PGRES_TUPLES_OK) {
         IENT_LOG_ERROR("PgSQL Write failed: %s\n", PQerrorMessage(pgConn));
         PQclear(res);
         return -4;
     }
 
-    long long affectedRows = atoll(PQcmdTuples(res));
+    affectedRows = 0;
+    {
+        const char* cmdTuples = PQcmdTuples(res);
+        if(cmdTuples != NULL && cmdTuples[0] != '\0')
+        {
+            affectedRows = atoll(cmdTuples);
+        }
+        else if(status == PGRES_TUPLES_OK)
+        {
+            affectedRows = PQntuples(res);
+        }
+    }
     
     if (userCb) {
         userCb(NULL, NULL, affectedRows, 0, userData);

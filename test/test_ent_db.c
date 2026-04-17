@@ -194,6 +194,28 @@ static int reset_db_service(void)
     return ENT_DbInit();
 }
 
+static const char* read_env_or_null(const char* name)
+{
+    const char* value = getenv(name);
+    if(value == NULL || value[0] == '\0')
+    {
+        return NULL;
+    }
+
+    return value;
+}
+
+static int read_env_or_default_int(const char* name, int fallback)
+{
+    const char* value = getenv(name);
+    if(value == NULL || value[0] == '\0')
+    {
+        return fallback;
+    }
+
+    return atoi(value);
+}
+
 static int test_db_init_handle_rejects_uninitialized_service(void)
 {
     DB_HANDLE db_handle = NULL;
@@ -202,6 +224,42 @@ static int test_db_init_handle_rejects_uninitialized_service(void)
 
     return expect_true(ENT_DbInitHandle(&db_handle, SQLITE_TYPE, NULL, "ignored.db", NULL, NULL, 0) == -1,
                        "ENT_DbInitHandle should reject calls before ENT_DbInit");
+}
+
+static int test_db_api_rejects_null_handles(void)
+{
+    MSG_ID_T init_sts = 0;
+
+    init_sts = reset_db_service();
+    if(expect_true(init_sts == 0 || init_sts == 1,
+                   "ENT_DbInit should initialize the DB service before NULL-handle validation") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(ENT_DbOpen(NULL) == -1,
+                   "ENT_DbOpen should reject NULL handles") != 0)
+    {
+        ENT_DbClose();
+        return 1;
+    }
+
+    if(expect_true(ENT_DbRead(NULL, "SELECT 1;", NULL, NULL) == -1,
+                   "ENT_DbRead should reject NULL handles") != 0)
+    {
+        ENT_DbClose();
+        return 1;
+    }
+
+    if(expect_true(ENT_DbWrite(NULL, "SELECT 1;", NULL, NULL) == -1,
+                   "ENT_DbWrite should reject NULL handles") != 0)
+    {
+        ENT_DbClose();
+        return 1;
+    }
+
+    return expect_true(ENT_DbClose() == 0,
+                       "ENT_DbClose should close the DB service after NULL-handle validation");
 }
 
 static int test_sqlite_open_rejects_missing_database_path(void)
@@ -240,6 +298,69 @@ static int test_sqlite_open_rejects_missing_database_path(void)
 
     return expect_true(ENT_DbClose() == 0,
                        "ENT_DbClose should close the DB service after the missing-path test");
+}
+
+static int test_sqlite_open_is_idempotent(void)
+{
+    char db_path[512];
+    DB_HANDLE db_handle = NULL;
+    MSG_ID_T init_sts = 0;
+
+    memset(db_path, 0, sizeof(db_path));
+
+    if(prepare_temp_db_path(db_path, sizeof(db_path)) != 0)
+    {
+        return 1;
+    }
+
+    init_sts = reset_db_service();
+    if(expect_true(init_sts == 0 || init_sts == 1,
+                   "ENT_DbInit should initialize the DB service before idempotent open testing") != 0)
+    {
+        cleanup_temp_db_path(db_path);
+        return 1;
+    }
+
+    if(expect_true(ENT_DbInitHandle(&db_handle, SQLITE_TYPE, NULL, db_path, NULL, NULL, 0) == 0,
+                   "ENT_DbInitHandle should create a SQLite handle for idempotent open testing") != 0)
+    {
+        ENT_DbClose();
+        cleanup_temp_db_path(db_path);
+        return 1;
+    }
+
+    if(expect_true(ENT_DbOpen(db_handle) == 0,
+                   "ENT_DbOpen should open a valid SQLite handle") != 0)
+    {
+        ENT_DbCloseHandle(db_handle);
+        ENT_DbClose();
+        cleanup_temp_db_path(db_path);
+        return 1;
+    }
+
+    {
+        MSG_ID_T reopen_sts = ENT_DbOpen(db_handle);
+        if(expect_true(reopen_sts == 0,
+                   "ENT_DbOpen should treat an already-open SQLite handle as success") != 0)
+        {
+            ENT_DbCloseHandle(db_handle);
+            ENT_DbClose();
+            cleanup_temp_db_path(db_path);
+            return 1;
+        }
+    }
+
+    if(expect_true(ENT_DbCloseHandle(db_handle) == 0,
+                   "ENT_DbCloseHandle should close the SQLite handle after idempotent open testing") != 0)
+    {
+        ENT_DbClose();
+        cleanup_temp_db_path(db_path);
+        return 1;
+    }
+
+    cleanup_temp_db_path(db_path);
+    return expect_true(ENT_DbClose() == 0,
+                       "ENT_DbClose should close the DB service after idempotent open testing");
 }
 
 static int test_sqlite_write_and_read_roundtrip(void)
@@ -471,7 +592,7 @@ static int test_sqlite_read_rejects_callback_without_user_data(void)
                        "ENT_DbClose should close the DB service after the callback validation test");
 }
 
-static int test_pgsql_init(void)
+static int test_pgsql_handle_lifecycle(void)
 {
     DB_HANDLE db_handle = NULL;
     MSG_ID_T sts = 0;
@@ -483,7 +604,6 @@ static int test_pgsql_init(void)
         return 1;
     }
 
-    /* Test structural init */
     sts = ENT_DbInitHandle(&db_handle, PGSQL_TYPE, "127.0.0.1", "test", "root", "123456", 5432);
     if(expect_true(sts == 0 && db_handle != NULL,
                    "ENT_DbInitHandle should create a PgSQL handle structure") != 0)
@@ -492,25 +612,145 @@ static int test_pgsql_init(void)
         return 1;
     }
 
-    /* Test open (expected to fail if no local PG server or if disabled) */
-    sts = ENT_DbOpen(db_handle);
-    if (sts != 0) {
-        printf("PgSQL open failed as expected (sts=%d)\n", sts);
-    } else {
-        printf("PgSQL open success (unlikely without local db)\n");
-    }
-
     sts = ENT_DbCloseHandle(db_handle);
-    if(expect_true(sts == 0 || sts == -2,
-                   "ENT_DbCloseHandle should clean up PgSQL handle or return unsupported") != 0)
+#if ENT_ENABLE_PGSQL
+    if(expect_true(sts == 0,
+                   "ENT_DbCloseHandle should clean up the PgSQL handle") != 0)
+#else
+    if(expect_true(sts == -2,
+                   "ENT_DbCloseHandle should report PgSQL as unsupported when it is disabled") != 0)
+#endif
     {
         ENT_DbClose();
         return 1;
     }
 
     return expect_true(ENT_DbClose() == 0,
-                       "ENT_DbClose should close the DB service after PgSQL test");
+                       "ENT_DbClose should close the DB service after the PgSQL lifecycle test");
 }
+
+#if ENT_ENABLE_PGSQL
+static int test_pgsql_roundtrip_if_configured(void)
+{
+    DB_HANDLE db_handle = NULL;
+    DB_READ_CAPTURE capture;
+    MSG_ID_T sts = 0;
+    const char* host;
+    const char* database;
+    const char* user;
+    const char* passwd;
+    int port;
+
+    host = read_env_or_null("ENT_PGSQL_HOST");
+    database = read_env_or_null("ENT_PGSQL_DB");
+    user = read_env_or_null("ENT_PGSQL_USER");
+    passwd = getenv("ENT_PGSQL_PASSWORD");
+    if(passwd == NULL)
+    {
+        passwd = "";
+    }
+    port = read_env_or_default_int("ENT_PGSQL_PORT", 5432);
+
+    if(host == NULL || database == NULL || user == NULL)
+    {
+        printf("PgSQL integration test skipped: set ENT_PGSQL_HOST, ENT_PGSQL_DB, and ENT_PGSQL_USER to run it.\n");
+        return 0;
+    }
+
+    memset(&capture, 0, sizeof(capture));
+
+    sts = reset_db_service();
+    if(expect_true(sts == 0 || sts == 1,
+                   "ENT_DbInit should initialize the DB service") != 0)
+    {
+        return 1;
+    }
+
+    sts = ENT_DbInitHandle(&db_handle, PGSQL_TYPE, host, database, user, passwd, port);
+    if(expect_true(sts == 0 && db_handle != NULL,
+                   "ENT_DbInitHandle should create a PgSQL handle for the integration test") != 0)
+    {
+        ENT_DbClose();
+        return 1;
+    }
+
+    sts = ENT_DbOpen(db_handle);
+    if(expect_true(sts == 0,
+                   "ENT_DbOpen should connect to PostgreSQL when the integration environment is configured") != 0)
+    {
+        ENT_DbCloseHandle(db_handle);
+        ENT_DbClose();
+        return 1;
+    }
+
+    if(expect_true(ENT_DbWrite(db_handle,
+                               "CREATE TEMP TABLE ent_pgsql_test_user(id SERIAL PRIMARY KEY, name TEXT NOT NULL);",
+                               NULL,
+                               NULL) == 0,
+                   "ENT_DbWrite should create a PostgreSQL temp table") != 0)
+    {
+        ENT_DbCloseHandle(db_handle);
+        ENT_DbClose();
+        return 1;
+    }
+
+    if(expect_true(ENT_DbWrite(db_handle,
+                               "INSERT INTO ent_pgsql_test_user(name) VALUES('carol');",
+                               NULL,
+                               NULL) == 0,
+                   "ENT_DbWrite should insert a PostgreSQL row") != 0)
+    {
+        ENT_DbCloseHandle(db_handle);
+        ENT_DbClose();
+        return 1;
+    }
+
+    if(expect_true(ENT_DbRead(db_handle,
+                              "SELECT name FROM ent_pgsql_test_user WHERE id = 1;",
+                              capture_single_name_row,
+                              &capture) == 0,
+                   "ENT_DbRead should fetch the inserted PostgreSQL row") != 0)
+    {
+        ENT_DbCloseHandle(db_handle);
+        ENT_DbClose();
+        return 1;
+    }
+
+    if(expect_true(capture.called == 1,
+                   "ENT_DbRead should invoke the PostgreSQL callback once") != 0)
+    {
+        ENT_DbCloseHandle(db_handle);
+        ENT_DbClose();
+        return 1;
+    }
+
+    if(expect_true(capture.column_num == 1,
+                   "ENT_DbRead should return a single PostgreSQL column") != 0)
+    {
+        ENT_DbCloseHandle(db_handle);
+        ENT_DbClose();
+        return 1;
+    }
+
+    if(expect_true(strcmp(capture.name, "carol") == 0,
+                   "ENT_DbRead should return the inserted PostgreSQL row contents") != 0)
+    {
+        ENT_DbCloseHandle(db_handle);
+        ENT_DbClose();
+        return 1;
+    }
+
+    if(expect_true(ENT_DbCloseHandle(db_handle) == 0,
+                   "ENT_DbCloseHandle should close the PostgreSQL handle after the roundtrip") != 0)
+    {
+        ENT_DbClose();
+        return 1;
+    }
+
+    return expect_true(ENT_DbClose() == 0,
+                       "ENT_DbClose should close the DB service after the PostgreSQL roundtrip");
+}
+#endif
 
 int main(void)
 {
@@ -519,7 +759,17 @@ int main(void)
         return 1;
     }
 
+    if(test_db_api_rejects_null_handles() != 0)
+    {
+        return 1;
+    }
+
     if(test_sqlite_open_rejects_missing_database_path() != 0)
+    {
+        return 1;
+    }
+
+    if(test_sqlite_open_is_idempotent() != 0)
     {
         return 1;
     }
@@ -539,10 +789,17 @@ int main(void)
         return 1;
     }
 
-    if(test_pgsql_init() != 0)
+    if(test_pgsql_handle_lifecycle() != 0)
     {
         return 1;
     }
+
+#if ENT_ENABLE_PGSQL
+    if(test_pgsql_roundtrip_if_configured() != 0)
+    {
+        return 1;
+    }
+#endif
 
     return 0;
 }

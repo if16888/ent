@@ -567,6 +567,32 @@ static void test_db_null_sql_rejected(void)
 }
 
 /* ══════════════════════════════════════════════════════════
+ * TEST 9: ent_db — NULL handle 被正确拒绝
+ * 风险：dbHandle==NULL 时先解引用 dbCfg 会触发未定义行为
+ * ══════════════════════════════════════════════════════════ */
+static void test_db_null_handle_rejected(void)
+{
+    TEST_BEGIN("test_db_null_handle_rejected");
+
+    MSG_ID_T ret;
+    ret = ENT_DbInit();
+    ASSERT_TRUE(ret == 0 || ret == 1, "ENT_DbInit should succeed");
+
+    ret = ENT_DbOpen(NULL);
+    ASSERT_EQ(-1, ret, "ENT_DbOpen(NULL handle) should return -1");
+
+    ret = ENT_DbRead(NULL, "SELECT 1;", NULL, NULL);
+    ASSERT_EQ(-1, ret, "ENT_DbRead(NULL handle) should return -1");
+
+    ret = ENT_DbWrite(NULL, "SELECT 1;", NULL, NULL);
+    ASSERT_EQ(-1, ret, "ENT_DbWrite(NULL handle) should return -1");
+
+    ENT_DbClose();
+
+    TEST_END();
+}
+
+/* ══════════════════════════════════════════════════════════
  * main
  * ══════════════════════════════════════════════════════════ */
 int main(void)
@@ -589,6 +615,7 @@ int main(void)
     test_db_sql_injection_drop_table();
     test_db_sql_injection_union_select();
     test_db_null_sql_rejected();
+    test_db_null_handle_rejected();
 
     /* 汇总 */
     fprintf(stdout, "\n=== Audit Summary ===\n");
