@@ -29,6 +29,7 @@
 
 #include "ient_db.h"
 #include "ient_comm.h"
+#include "ent_msg.h"
 
 #ifdef WIN32
 static CRITICAL_SECTION sDbMutex;
@@ -84,7 +85,7 @@ static void defSqlResultCb(char** fields,char** rowRes,long long rowNum,int colu
 static MSG_ID_T iENT_DbBackendUnsupported(DB_TYPE dbType)
 {
     IENT_LOG_ERROR("Database backend [%d] is not enabled in this build.\n",dbType);
-    return -2;
+    return ENT_DBS_UNSUPPORTED;
 }
 
 static MSG_ID_T iENT_DbValidateHandle(DB_HANDLE dbHandle,
@@ -101,19 +102,19 @@ static MSG_ID_T iENT_DbValidateHandle(DB_HANDLE dbHandle,
     if(dbHandle == NULL)
     {
         IENT_LOG_ERROR("Database handle is null.\n");
-        return -1;
+        return ENT_DBS_BAD_ARGUMENT;
     }
 
     if(dbCfg->sTag != ENTDB_S_TAG || dbCfg->eTag != ENTDB_E_TAG)
     {
         IENT_LOG_ERROR("Database handle is invalid.\n");
-        return -1;
+        return ENT_DBS_BAD_HANDLE;
     }
 
     if(requireInit && dbCfg->isInit == false)
     {
         IENT_LOG_ERROR("Database handle is not initialized.\n");
-        return -1;
+        return ENT_DBS_NOT_INITIALIZED;
     }
 
     if(dbCfgOut != NULL)
@@ -121,7 +122,7 @@ static MSG_ID_T iENT_DbValidateHandle(DB_HANDLE dbHandle,
         *dbCfgOut = dbCfg;
     }
 
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -147,18 +148,18 @@ MSG_ID_T  iENT_DbReInit(DB_HANDLE dbHandle,
                      const char* passwd,
                      int  port)
 {
-    MSG_ID_T sts=0;
+    MSG_ID_T sts=ENT_SYS_NORMAL;
     DB_CFG* dbCfg = (DB_CFG*)dbHandle;
     if(dbCfg==NULL || dbCfg->sTag!=ENTDB_S_TAG || dbCfg->eTag != ENTDB_E_TAG)
     {
         IENT_LOG_ERROR("Database handle is invalid.\n");
-        return -1;
+        return ENT_DBS_BAD_HANDLE;
     }
 
     if(dbType != dbCfg->dbType)
     {
         IENT_LOG_ERROR("Database handle reinit dbType failed.\n");
-        return -2;
+        return ENT_DBS_BAD_ARGUMENT;
     }
     
     if(host)
@@ -224,7 +225,7 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInit()
 {
     if(sDbMutexInit)
     {
-        return 1;
+        return ENT_SYS_ALREADY_INITIALIZED;
     }
 #ifdef WIN32
     InitializeCriticalSection(&sDbMutex);
@@ -233,7 +234,7 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInit()
 #endif
     IENT_LOG_PRINT("InitializeCriticalSection.\n");
     sDbMutexInit = true;
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -253,6 +254,10 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInit()
  */
 ENT_PUBLIC MSG_ID_T  ENT_DbClose()
 {
+    if(sDbMutexInit == false)
+    {
+        return ENT_SYS_CLOSE_UNINITIALIZED;
+    }
 #ifdef WIN32
     DeleteCriticalSection(&sDbMutex);
 #else
@@ -260,7 +265,7 @@ ENT_PUBLIC MSG_ID_T  ENT_DbClose()
 #endif
     IENT_LOG_PRINT("DeleteCriticalSection.\n");
     sDbMutexInit = false;
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -286,18 +291,18 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
                      const char* passwd,
                      int  port)
 {
-    MSG_ID_T sts=0;
+    MSG_ID_T sts=ENT_SYS_NORMAL;
     DB_CFG*  dbCfg=NULL;
     if(sDbMutexInit==false)
     {
         IENT_LOG_ERROR("Uninitialized,please call ENT_DbInit.\n");
-        return -1;
+        return ENT_DBS_NOT_INITIALIZED;
     }
     
     if(pdbHandle==NULL)
     {
         IENT_LOG_ERROR("Database handle is null\n");
-        return -1;
+        return ENT_DBS_BAD_ARGUMENT;
     }    
     
     
@@ -323,7 +328,7 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
             if(dbCfg==NULL)
             {
                 IENT_LOG_ERROR("Database malloc db config failed\n");
-                sts = -1;
+                sts = ENT_DBS_ALLOC_FAILED;
                 goto END_OF_ROUTINE;
             }
             memset(dbCfg,0,sizeof(DB_CFG));
@@ -342,7 +347,7 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
         default:
             *pdbHandle = NULL;
             IENT_LOG_WARN("Database Type is not supported,[%d]\n",dbType);
-            sts = -1;
+            sts = ENT_DBS_UNSUPPORTED;
             goto END_OF_ROUTINE;
             break; 
     }
@@ -383,12 +388,12 @@ END_OF_ROUTINE:
  */
 ENT_PUBLIC MSG_ID_T ENT_DbOpen(DB_HANDLE dbHandle)
 {
-    MSG_ID_T sts=0;
+    MSG_ID_T sts=ENT_SYS_NORMAL;
     DB_CFG*  dbCfg=NULL;
     if(sDbMutexInit==false)
     {
         IENT_LOG_ERROR("Uninitialized,please call ENT_DbInit.\n");
-        return -1;
+        return ENT_DBS_NOT_INITIALIZED;
     }
 
     sts = iENT_DbValidateHandle(dbHandle, &dbCfg, true);
@@ -405,7 +410,7 @@ ENT_PUBLIC MSG_ID_T ENT_DbOpen(DB_HANDLE dbHandle)
 
     if(dbCfg->isOpen == true)
     {
-        sts = 0;
+        sts = ENT_SYS_NORMAL;
         goto END_OF_ROUTINE;
     }
 
@@ -434,7 +439,7 @@ ENT_PUBLIC MSG_ID_T ENT_DbOpen(DB_HANDLE dbHandle)
 #endif
             break;
         default:
-            sts = -1;
+            sts = ENT_DBS_BAD_HANDLE;
             break;
     }
 
@@ -465,12 +470,12 @@ END_OF_ROUTINE:
  */
 ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE dbHandle)
 {
-    MSG_ID_T sts=0;   
+    MSG_ID_T sts=ENT_SYS_NORMAL;   
     DB_CFG*  dbCfg=NULL;
     if(sDbMutexInit==false)
     {
         IENT_LOG_ERROR("Uninitialized,please call ENT_DbInit.\n");
-        return -1;
+        return ENT_DBS_NOT_INITIALIZED;
     }
 
     sts = iENT_DbValidateHandle(dbHandle, &dbCfg, false);
@@ -510,7 +515,7 @@ ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE dbHandle)
 #endif
             break;
         default:
-            sts = -1;
+            sts = ENT_DBS_BAD_HANDLE;
             break;
     }
     memset(dbCfg,0,sizeof(DB_CFG));
@@ -545,13 +550,13 @@ ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE dbHandle)
  */
 ENT_PUBLIC MSG_ID_T ENT_DbRead(DB_HANDLE dbHandle,const char* sql,SqlResultCB sqlCb,void* userData)
 {
-    MSG_ID_T sts=0;
+    MSG_ID_T sts=ENT_SYS_NORMAL;
     DB_CFG*  dbCfg=NULL;
 
     if(sql==NULL)
     {
         IENT_LOG_ERROR("Arguments are invalid.\n");
-        return -1;
+        return ENT_DBS_BAD_ARGUMENT;
     }
 
     sts = iENT_DbValidateHandle(dbHandle, &dbCfg, true);
@@ -566,7 +571,7 @@ ENT_PUBLIC MSG_ID_T ENT_DbRead(DB_HANDLE dbHandle,const char* sql,SqlResultCB sq
         if(sts<0)
         {
             IENT_LOG_ERROR("ENT_DbOpen failed.\n");
-            return -2;
+            return sts;
         }
     } 
     
@@ -601,7 +606,7 @@ ENT_PUBLIC MSG_ID_T ENT_DbRead(DB_HANDLE dbHandle,const char* sql,SqlResultCB sq
 #endif
             break;
         default:
-            sts = -1;
+            sts = ENT_DBS_BAD_HANDLE;
             break;
     }
 #ifdef WIN32
@@ -630,13 +635,13 @@ ENT_PUBLIC MSG_ID_T ENT_DbRead(DB_HANDLE dbHandle,const char* sql,SqlResultCB sq
  */
 ENT_PUBLIC MSG_ID_T ENT_DbWrite(DB_HANDLE dbHandle,const char* sql,SqlResultCB sqlCb,void* userData)
 {
-    MSG_ID_T sts=0;
+    MSG_ID_T sts=ENT_SYS_NORMAL;
     DB_CFG*  dbCfg=NULL;
 
     if(sql==NULL)
     {
         IENT_LOG_ERROR("Arguments are invalid.\n");
-        return -1;
+        return ENT_DBS_BAD_ARGUMENT;
     }
 
     sts = iENT_DbValidateHandle(dbHandle, &dbCfg, true);
@@ -651,7 +656,7 @@ ENT_PUBLIC MSG_ID_T ENT_DbWrite(DB_HANDLE dbHandle,const char* sql,SqlResultCB s
         if(sts<0)
         {
             IENT_LOG_ERROR("ENT_DbOpen failed.\n");
-            return -2;
+            return sts;
         }
     } 
     
@@ -686,7 +691,7 @@ ENT_PUBLIC MSG_ID_T ENT_DbWrite(DB_HANDLE dbHandle,const char* sql,SqlResultCB s
 #endif
             break;
         default:
-            sts = -1;
+            sts = ENT_DBS_BAD_HANDLE;
             break;
     }
 #ifdef WIN32

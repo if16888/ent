@@ -21,11 +21,12 @@
 
 #include "ient_db.h"
 #include "ient_comm.h"
+#include "ent_msg.h"
 
 static MSG_ID_T iENT_DbBackendUnsupported(DB_TYPE dbType)
 {
     IENT_LOG_ERROR("Database backend [%d] is not enabled in this build.\n",dbType);
-    return -2;
+    return ENT_DBS_UNSUPPORTED;
 }
 
 static void defSqlResultCb(char** fields,char** rowRes,long long rowNum,int columnNum,void* data)
@@ -60,20 +61,25 @@ MSG_ID_T ENT_DbMySQLInit(DB_HANDLE dbHandle)
     MYSQL* db;
 
     DB_CFG* dbCfg = (DB_CFG*)dbHandle;
-    if(dbHandle == NULL ||
-      dbCfg->sTag!=ENTDB_S_TAG ||
+    if(dbHandle == NULL)
+    {
+        IENT_LOG_ERROR("Arguments are invalid.\n");
+        return ENT_DBS_BAD_ARGUMENT;
+    }
+
+    if(dbCfg->sTag!=ENTDB_S_TAG ||
       dbCfg->eTag!=ENTDB_E_TAG ||
       dbCfg->dbType != MYSQL_TYPE)
     {
         IENT_LOG_ERROR("Arguments are invalid.\n");
-        return -1;
+        return ENT_DBS_BAD_HANDLE;
     }
 
     db = mysql_init(NULL);
     if(db==NULL)
     {
         IENT_LOG_ERROR("mysql_init failed.\n");
-        return -2;
+        return ENT_DBS_OPEN_FAILED;
     }
     if (mysql_options(db, MYSQL_SET_CHARSET_NAME, "utf8"))
     {
@@ -93,12 +99,12 @@ MSG_ID_T ENT_DbMySQLInit(DB_HANDLE dbHandle)
     {
         IENT_LOG_ERROR("connect failed,message:[%s]\n",mysql_error(db));
         mysql_close(db);
-        return -3;
+        return ENT_DBS_OPEN_FAILED;
     }
 
     dbCfg->dbInstance.mysql = db;
     dbCfg->isOpen = true;
-    return 0;
+    return ENT_SYS_NORMAL;
 #else
     (void)dbHandle;
     return iENT_DbBackendUnsupported(MYSQL_TYPE);
@@ -108,17 +114,17 @@ MSG_ID_T ENT_DbMySQLInit(DB_HANDLE dbHandle)
 #if ENT_ENABLE_MYSQL
 MSG_ID_T ENT_DbMySQLRead(MYSQL* dbHandle,const char* query,SqlResultCB userCb,void* userData)
 {
-    MSG_ID_T sts = 0;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
     if(query==NULL || dbHandle==NULL)
     {
         IENT_LOG_ERROR("arguments is invalid\n");
-        return -1;
+        return ENT_DBS_BAD_ARGUMENT;
     }
 
     if (mysql_query(dbHandle, query))
     {
         IENT_LOG_ERROR("mysql_query [%s],message:[%s]\n",query,mysql_error(dbHandle));
-        return -1;
+        return ENT_DBS_QUERY_FAILED;
     }
 
     MYSQL_RES *result = mysql_store_result(dbHandle);
@@ -126,7 +132,7 @@ MSG_ID_T ENT_DbMySQLRead(MYSQL* dbHandle,const char* query,SqlResultCB userCb,vo
     if (result == NULL)
     {
         IENT_LOG_ERROR("mysql_store_result failed,message:[%s]\n",mysql_error(dbHandle));
-        return -1;
+        return ENT_DBS_RESULT_FAILED;
     }
 
     int       num_fields = mysql_num_fields(result);
@@ -136,7 +142,7 @@ MSG_ID_T ENT_DbMySQLRead(MYSQL* dbHandle,const char* query,SqlResultCB userCb,vo
     if (fields == NULL)
     {
         IENT_LOG_ERROR("malloc size [%d] failed\n",num_fields*(int)sizeof(char*));
-        return -2;
+        return ENT_DBS_ALLOC_FAILED;
     }
     memset(fields,0,num_fields*sizeof(char*));
     char** rows = (char**)malloc(num_fields*(size_t)num_rows*sizeof(char*));
@@ -145,7 +151,7 @@ MSG_ID_T ENT_DbMySQLRead(MYSQL* dbHandle,const char* query,SqlResultCB userCb,vo
         free(fields);
         fields = NULL;
         IENT_LOG_ERROR("malloc size [%d] failed\n",num_fields*(int)num_rows*(int)sizeof(char*));
-        return -3;
+        return ENT_DBS_ALLOC_FAILED;
     }
     memset(rows,0,num_fields*(size_t)num_rows*sizeof(char*));
 
@@ -187,30 +193,30 @@ MSG_ID_T ENT_DbMySQLRead(MYSQL* dbHandle,const char* query,SqlResultCB userCb,vo
     }
 
     mysql_free_result(result);
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
 MSG_ID_T ENT_DbMySQLWrite(MYSQL* dbHandle,const char* query,SqlResultCB userCb,void* userData)
 {
-    MSG_ID_T  sts  = 0;
+    MSG_ID_T  sts  = ENT_SYS_NORMAL;
     long long rows = 0;
     if(query==NULL || dbHandle==NULL)
     {
         IENT_LOG_ERROR("arguments is invalid\n");
-        return -1;
+        return ENT_DBS_BAD_ARGUMENT;
     }
 
     if (mysql_query(dbHandle, query))
     {
         IENT_LOG_ERROR("mysql_query failed [%s],message:[%s]\n",query,mysql_error(dbHandle));
-        return -1;
+        return ENT_DBS_QUERY_FAILED;
     }
 
     rows = mysql_affected_rows(dbHandle);
     if(rows==-1)
     {
         IENT_LOG_ERROR("rows failed [%s],message:[%s]\n",query,mysql_error(dbHandle));
-        return -2;
+        return ENT_DBS_RESULT_FAILED;
     }
 
     if(userCb!=NULL)
@@ -218,7 +224,7 @@ MSG_ID_T ENT_DbMySQLWrite(MYSQL* dbHandle,const char* query,SqlResultCB userCb,v
     else
         defSqlResultCb(NULL,NULL,rows,0,userData);
 
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 #endif
 
@@ -226,13 +232,18 @@ MSG_ID_T ENT_DbMySQLClose(DB_HANDLE dbHandle)
 {
 #if ENT_ENABLE_MYSQL
     DB_CFG* dbCfg = (DB_CFG*)dbHandle;
-    if(dbHandle == NULL ||
-      dbCfg->sTag!=ENTDB_S_TAG ||
+    if(dbHandle == NULL)
+    {
+        IENT_LOG_ERROR("Arguments are invalid.\n");
+        return ENT_DBS_BAD_ARGUMENT;
+    }
+
+    if(dbCfg->sTag!=ENTDB_S_TAG ||
       dbCfg->eTag!=ENTDB_E_TAG ||
       dbCfg->dbType != MYSQL_TYPE)
     {
         IENT_LOG_ERROR("Arguments are invalid.\n");
-        return -1;
+        return ENT_DBS_BAD_HANDLE;
     }
 
     if(dbCfg->dbInstance.mysql)
@@ -257,7 +268,7 @@ MSG_ID_T ENT_DbMySQLClose(DB_HANDLE dbHandle)
 #endif
 
     sDbNum--;
-    return 0;
+    return ENT_SYS_NORMAL;
 #else
     (void)dbHandle;
     return iENT_DbBackendUnsupported(MYSQL_TYPE);

@@ -21,11 +21,12 @@
 
 #include "ient_db.h"
 #include "ient_comm.h"
+#include "ent_msg.h"
 
 static MSG_ID_T iENT_DbBackendUnsupported(DB_TYPE dbType)
 {
     IENT_LOG_ERROR("Database backend [%d] is not enabled in this build.\n",dbType);
-    return -2;
+    return ENT_DBS_UNSUPPORTED;
 }
 
 static void defSqlResultCb(char** fields,char** rowRes,long long rowNum,int columnNum,void* data)
@@ -64,7 +65,7 @@ MSG_ID_T ENT_DbPgSQLInit(DB_HANDLE dbHandle)
     if(dbHandle == NULL)
     {
         IENT_LOG_ERROR("Arguments are invalid.\n");
-        return -1;
+        return ENT_DBS_BAD_ARGUMENT;
     }
 
     if(dbCfg->sTag != ENTDB_S_TAG ||
@@ -72,7 +73,7 @@ MSG_ID_T ENT_DbPgSQLInit(DB_HANDLE dbHandle)
        dbCfg->dbType != PGSQL_TYPE)
     {
         IENT_LOG_ERROR("Arguments are invalid.\n");
-        return -1;
+        return ENT_DBS_BAD_HANDLE;
     }
 
     snprintf(conninfo, sizeof(conninfo), "host=%s port=%d dbname=%s user=%s password=%s",
@@ -86,7 +87,7 @@ MSG_ID_T ENT_DbPgSQLInit(DB_HANDLE dbHandle)
     if(pgConn == NULL)
     {
         IENT_LOG_ERROR("PgSQL Connection failed: connection handle is null.\n");
-        return -3;
+        return ENT_DBS_OPEN_FAILED;
     }
 
     if(PQstatus(pgConn) != CONNECTION_OK)
@@ -94,12 +95,12 @@ MSG_ID_T ENT_DbPgSQLInit(DB_HANDLE dbHandle)
         IENT_LOG_ERROR("PgSQL Connection failed: %s\n", PQerrorMessage(pgConn));
         PQfinish(pgConn);
         dbCfg->dbInstance.pgsql = NULL;
-        return -3;
+        return ENT_DBS_OPEN_FAILED;
     }
 
     dbCfg->dbInstance.pgsql = pgConn;
     dbCfg->isOpen = true;
-    return 0;
+    return ENT_SYS_NORMAL;
 #else
     (void)dbHandle;
     return iENT_DbBackendUnsupported(PGSQL_TYPE);
@@ -113,7 +114,7 @@ MSG_ID_T ENT_DbPgSQLClose(DB_HANDLE dbHandle)
     if(dbHandle == NULL)
     {
         IENT_LOG_ERROR("Arguments are invalid.\n");
-        return -1;
+        return ENT_DBS_BAD_ARGUMENT;
     }
 
     if(dbCfg->sTag != ENTDB_S_TAG ||
@@ -121,7 +122,7 @@ MSG_ID_T ENT_DbPgSQLClose(DB_HANDLE dbHandle)
        dbCfg->dbType != PGSQL_TYPE)
     {
         IENT_LOG_ERROR("Arguments are invalid.\n");
-        return -1;
+        return ENT_DBS_BAD_HANDLE;
     }
 
     if(dbCfg->dbInstance.pgsql)
@@ -142,7 +143,7 @@ MSG_ID_T ENT_DbPgSQLClose(DB_HANDLE dbHandle)
     pthread_mutex_destroy(&dbCfg->cs);
 #endif
     sDbNum--;
-    return 0;
+    return ENT_SYS_NORMAL;
 #else
     (void)dbHandle;
     return iENT_DbBackendUnsupported(PGSQL_TYPE);
@@ -164,21 +165,21 @@ MSG_ID_T ENT_DbPgSQLRead(void* dbHandle, const char* query, SqlResultCB userCb, 
     if(dbHandle == NULL || query == NULL)
     {
         IENT_LOG_ERROR("Arguments are invalid.\n");
-        return -1;
+        return ENT_DBS_BAD_ARGUMENT;
     }
 
     res = PQexec(pgConn, query);
     if(res == NULL)
     {
         IENT_LOG_ERROR("PgSQL Read failed: execution returned no result.\n");
-        return -4;
+        return ENT_DBS_QUERY_FAILED;
     }
 
     if(PQresultStatus(res) != PGRES_TUPLES_OK)
     {
         IENT_LOG_ERROR("PgSQL Read failed: %s\n", PQerrorMessage(pgConn));
         PQclear(res);
-        return -4;
+        return ENT_DBS_RESULT_FAILED;
     }
 
     rows = PQntuples(res);
@@ -194,7 +195,7 @@ MSG_ID_T ENT_DbPgSQLRead(void* dbHandle, const char* query, SqlResultCB userCb, 
         if(fields) free(fields);
         if(rowRes) free(rowRes);
         PQclear(res);
-        return -3;
+        return ENT_DBS_ALLOC_FAILED;
     }
 
     memset(fields, 0, fieldsCount * sizeof(char*));
@@ -225,7 +226,7 @@ MSG_ID_T ENT_DbPgSQLRead(void* dbHandle, const char* query, SqlResultCB userCb, 
     free(fields);
     free(rowRes);
     PQclear(res);
-    return 0;
+    return ENT_SYS_NORMAL;
 #else
     (void)dbHandle;
     (void)query;
@@ -246,14 +247,14 @@ MSG_ID_T ENT_DbPgSQLWrite(void* dbHandle, const char* query, SqlResultCB userCb,
     if(dbHandle == NULL || query == NULL)
     {
         IENT_LOG_ERROR("Arguments are invalid.\n");
-        return -1;
+        return ENT_DBS_BAD_ARGUMENT;
     }
 
     res = PQexec(pgConn, query);
     if(res == NULL)
     {
         IENT_LOG_ERROR("PgSQL Write failed: execution returned no result.\n");
-        return -4;
+        return ENT_DBS_QUERY_FAILED;
     }
 
     status = PQresultStatus(res);
@@ -261,7 +262,7 @@ MSG_ID_T ENT_DbPgSQLWrite(void* dbHandle, const char* query, SqlResultCB userCb,
     {
         IENT_LOG_ERROR("PgSQL Write failed: %s\n", PQerrorMessage(pgConn));
         PQclear(res);
-        return -4;
+        return ENT_DBS_RESULT_FAILED;
     }
 
     affectedRows = 0;
@@ -287,7 +288,7 @@ MSG_ID_T ENT_DbPgSQLWrite(void* dbHandle, const char* query, SqlResultCB userCb,
     }
 
     PQclear(res);
-    return 0;
+    return ENT_SYS_NORMAL;
 #else
     (void)dbHandle;
     (void)query;

@@ -20,6 +20,7 @@
 #include "ient_comm.h"
 #include "ent_init.h"
 #include "ent_db.h"
+#include "ent_msg.h"
 
 /* ── 测试宏 ────────────────────────────────────────────── */
 static int s_assert_failures = 0;
@@ -554,10 +555,10 @@ static void test_db_null_sql_rejected(void)
 
     /* 传 NULL sql —— 应当被拒绝，返回 -1 */
     ret = ENT_DbRead(db, NULL, NULL, NULL);
-    ASSERT_EQ(-1, ret, "ENT_DbRead(NULL sql) should return -1");
+    ASSERT_EQ(ENT_DBS_BAD_ARGUMENT, ret, "ENT_DbRead(NULL sql) should return BAD_ARGUMENT");
 
     ret = ENT_DbWrite(db, NULL, NULL, NULL);
-    ASSERT_EQ(-1, ret, "ENT_DbWrite(NULL sql) should return -1");
+    ASSERT_EQ(ENT_DBS_BAD_ARGUMENT, ret, "ENT_DbWrite(NULL sql) should return BAD_ARGUMENT");
 
     ENT_DbCloseHandle(db);
     ENT_DbClose();
@@ -579,13 +580,13 @@ static void test_db_null_handle_rejected(void)
     ASSERT_TRUE(ret == 0 || ret == 1, "ENT_DbInit should succeed");
 
     ret = ENT_DbOpen(NULL);
-    ASSERT_EQ(-1, ret, "ENT_DbOpen(NULL handle) should return -1");
+    ASSERT_EQ(ENT_DBS_BAD_ARGUMENT, ret, "ENT_DbOpen(NULL handle) should return BAD_ARGUMENT");
 
     ret = ENT_DbRead(NULL, "SELECT 1;", NULL, NULL);
-    ASSERT_EQ(-1, ret, "ENT_DbRead(NULL handle) should return -1");
+    ASSERT_EQ(ENT_DBS_BAD_ARGUMENT, ret, "ENT_DbRead(NULL handle) should return BAD_ARGUMENT");
 
     ret = ENT_DbWrite(NULL, "SELECT 1;", NULL, NULL);
-    ASSERT_EQ(-1, ret, "ENT_DbWrite(NULL handle) should return -1");
+    ASSERT_EQ(ENT_DBS_BAD_ARGUMENT, ret, "ENT_DbWrite(NULL handle) should return BAD_ARGUMENT");
 
     ENT_DbClose();
 

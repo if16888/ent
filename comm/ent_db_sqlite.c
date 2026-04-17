@@ -21,11 +21,12 @@
 
 #include "ient_db.h"
 #include "ient_comm.h"
+#include "ent_msg.h"
 
 static MSG_ID_T iENT_DbBackendUnsupported(DB_TYPE dbType)
 {
     IENT_LOG_ERROR("Database backend [%d] is not enabled in this build.\n",dbType);
-    return -2;
+    return ENT_DBS_UNSUPPORTED;
 }
 
 MSG_ID_T ENT_DbSqliteInit(DB_HANDLE dbHandle)
@@ -40,12 +41,17 @@ MSG_ID_T ENT_DbSqliteInit(DB_HANDLE dbHandle)
     if(dbHandle == NULL)
     {
         IENT_LOG_ERROR("Arguments are invalid.\n");
-        return -1;
+        return ENT_DBS_BAD_ARGUMENT;
+    }
+    if(dbCfg->dbType != SQLITE_TYPE)
+    {
+        IENT_LOG_ERROR("Arguments are invalid.\n");
+        return ENT_DBS_BAD_HANDLE;
     }
     if(dbCfg->database == NULL)
     {
         IENT_LOG_ERROR("database name is invalid.\n");
-        return -2;
+        return ENT_DBS_BAD_ARGUMENT;
     }
 
     rc = sqlite3_open(dbCfg->database, &dbCfg->dbInstance.sqlite);
@@ -53,10 +59,10 @@ MSG_ID_T ENT_DbSqliteInit(DB_HANDLE dbHandle)
     {
         IENT_LOG_ERROR("Can't open database:[%s]\n", sqlite3_errmsg(dbCfg->dbInstance.sqlite));
         sqlite3_close(dbCfg->dbInstance.sqlite);
-        return -3;
+        return ENT_DBS_OPEN_FAILED;
     }
     dbCfg->isOpen = true;
-    return 0;
+    return ENT_SYS_NORMAL;
 #endif
 }
 
@@ -67,11 +73,16 @@ MSG_ID_T ENT_DbSqliteClose(DB_HANDLE dbHandle)
     return iENT_DbBackendUnsupported(SQLITE_TYPE);
 #else
     DB_CFG* dbCfg = (DB_CFG*)dbHandle;
-    if(dbHandle == NULL ||
-       dbCfg->dbType != SQLITE_TYPE)
+    if(dbHandle == NULL)
     {
         IENT_LOG_ERROR("Arguments are invalid.\n");
-        return -1;
+        return ENT_DBS_BAD_ARGUMENT;
+    }
+
+    if(dbCfg->dbType != SQLITE_TYPE)
+    {
+        IENT_LOG_ERROR("Arguments are invalid.\n");
+        return ENT_DBS_BAD_HANDLE;
     }
 
     if(dbCfg->dbInstance.sqlite)
@@ -97,7 +108,7 @@ MSG_ID_T ENT_DbSqliteClose(DB_HANDLE dbHandle)
 #endif
 
     sDbNum--;
-    return 0;
+    return ENT_SYS_NORMAL;
 #endif
 }
 
@@ -108,10 +119,10 @@ static MSG_ID_T iENT_DbSqliteReadCb(void *data, int argc, char **argv, char **az
     if(data == NULL || userCtx->userCb == NULL || userCtx->userData == NULL)
     {
         IENT_LOG_ERROR("Arguments are invalid.\n");
-        return -1;
+        return ENT_DBS_BAD_ARGUMENT;
     }
     userCtx->userCb(azColName, argv, 1, argc, userCtx->userData);
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
 static MSG_ID_T iENT_DbSqliteWriteCb(void *data, int argc, char **argv, char **azColName)
@@ -120,11 +131,11 @@ static MSG_ID_T iENT_DbSqliteWriteCb(void *data, int argc, char **argv, char **a
     if(data == NULL || userCtx->userCb == NULL)
     {
         IENT_LOG_ERROR("Arguments are invalid.\n");
-        return -1;
+        return ENT_DBS_BAD_ARGUMENT;
     }
 
     userCtx->userCb(azColName, argv, 1, argc, userCtx->userData);
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
 MSG_ID_T ENT_DbSqliteRead(sqlite3* dbHandle,const char* query,SqlResultCB userCb,void* userData)
@@ -133,10 +144,10 @@ MSG_ID_T ENT_DbSqliteRead(sqlite3* dbHandle,const char* query,SqlResultCB userCb
     char* errMsg = NULL;
     USER_SQLITE_READ sqliteUser;
 
-    if(dbHandle == NULL || query == NULL)
+    if(dbHandle == NULL || query == NULL || (userCb != NULL && userData == NULL))
     {
         IENT_LOG_ERROR("Arguments are invalid.\n");
-        return -1;
+        return ENT_DBS_BAD_ARGUMENT;
     }
     sqliteUser.userCb = userCb;
     sqliteUser.userData = userData;
@@ -145,23 +156,23 @@ MSG_ID_T ENT_DbSqliteRead(sqlite3* dbHandle,const char* query,SqlResultCB userCb
     {
         IENT_LOG_ERROR("Can't read table :[%d]->[%s]\n", rc, errMsg);
         sqlite3_free(errMsg);
-        return -2;
+        return ENT_DBS_QUERY_FAILED;
     }
 
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
 MSG_ID_T ENT_DbSqliteWrite(sqlite3* dbHandle,const char* query,SqlResultCB userCb,void* userData)
 {
-    MSG_ID_T sts = 0;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
     int rc;
     char* errMsg = NULL;
     USER_SQLITE_WRITE sqliteUser;
 
-    if(dbHandle == NULL || query == NULL)
+    if(dbHandle == NULL || query == NULL || (userCb != NULL && userData == NULL))
     {
         IENT_LOG_ERROR("Arguments are invalid.\n");
-        return -1;
+        return ENT_DBS_BAD_ARGUMENT;
     }
 
     sqliteUser.userCb = userCb;
@@ -172,7 +183,7 @@ MSG_ID_T ENT_DbSqliteWrite(sqlite3* dbHandle,const char* query,SqlResultCB userC
     {
         IENT_LOG_ERROR("Can't exec sql [%s] :[%d]->[%s]\n", query, rc, errMsg);
         sqlite3_free(errMsg);
-        sts = -2;
+        sts = ENT_DBS_QUERY_FAILED;
     }
     return sts;
 }

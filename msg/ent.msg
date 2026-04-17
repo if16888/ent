@@ -166,3 +166,16 @@ COMPILE_FAILED  err 5  load script chunk failed, file[%s]
 RUNTIME_FAILED  err 6  execute script chunk failed, file[%s]
 FUNC_NOTFOUND   err 7  script function not found, fn[%s]
 UNSUPPORTED     err 8  script runtime is not enabled in current build
+
+# ----------------------------------------------------------------------------
+# DBS: database service and backend lifecycle
+# ----------------------------------------------------------------------------
+submodule DBS 10
+BAD_ARGUMENT  err 1  invalid database argument
+BAD_HANDLE    err 2  invalid database handle
+NOT_INITIALIZED err 3  database service is not initialized
+UNSUPPORTED   err 4  database backend is not enabled in this build
+ALLOC_FAILED  err 5  allocate database resource failed
+OPEN_FAILED   err 6  open database connection failed
+QUERY_FAILED  err 7  execute database query failed
+RESULT_FAILED err 8  fetch database query result failed

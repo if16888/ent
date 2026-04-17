@@ -9,6 +9,7 @@
 
 #include "ient_comm.h"
 #include "ent_db.h"
+#include "ent_msg.h"
 
 ENT_CTX gEntCtx;
 
@@ -222,7 +223,7 @@ static int test_db_init_handle_rejects_uninitialized_service(void)
 
     ENT_DbClose();
 
-    return expect_true(ENT_DbInitHandle(&db_handle, SQLITE_TYPE, NULL, "ignored.db", NULL, NULL, 0) == -1,
+    return expect_true(ENT_DbInitHandle(&db_handle, SQLITE_TYPE, NULL, "ignored.db", NULL, NULL, 0) == ENT_DBS_NOT_INITIALIZED,
                        "ENT_DbInitHandle should reject calls before ENT_DbInit");
 }
 
@@ -231,27 +232,27 @@ static int test_db_api_rejects_null_handles(void)
     MSG_ID_T init_sts = 0;
 
     init_sts = reset_db_service();
-    if(expect_true(init_sts == 0 || init_sts == 1,
+    if(expect_true(init_sts == ENT_SYS_NORMAL || init_sts == ENT_SYS_ALREADY_INITIALIZED,
                    "ENT_DbInit should initialize the DB service before NULL-handle validation") != 0)
     {
         return 1;
     }
 
-    if(expect_true(ENT_DbOpen(NULL) == -1,
+    if(expect_true(ENT_DbOpen(NULL) == ENT_DBS_BAD_ARGUMENT,
                    "ENT_DbOpen should reject NULL handles") != 0)
     {
         ENT_DbClose();
         return 1;
     }
 
-    if(expect_true(ENT_DbRead(NULL, "SELECT 1;", NULL, NULL) == -1,
+    if(expect_true(ENT_DbRead(NULL, "SELECT 1;", NULL, NULL) == ENT_DBS_BAD_ARGUMENT,
                    "ENT_DbRead should reject NULL handles") != 0)
     {
         ENT_DbClose();
         return 1;
     }
 
-    if(expect_true(ENT_DbWrite(NULL, "SELECT 1;", NULL, NULL) == -1,
+    if(expect_true(ENT_DbWrite(NULL, "SELECT 1;", NULL, NULL) == ENT_DBS_BAD_ARGUMENT,
                    "ENT_DbWrite should reject NULL handles") != 0)
     {
         ENT_DbClose();
@@ -268,7 +269,7 @@ static int test_sqlite_open_rejects_missing_database_path(void)
     MSG_ID_T init_sts = 0;
 
     init_sts = reset_db_service();
-    if(expect_true(init_sts == 0 || init_sts == 1,
+    if(expect_true(init_sts == ENT_SYS_NORMAL || init_sts == ENT_SYS_ALREADY_INITIALIZED,
                    "ENT_DbInit should initialize the DB service") != 0)
     {
         return 1;
@@ -281,7 +282,7 @@ static int test_sqlite_open_rejects_missing_database_path(void)
         return 1;
     }
 
-    if(expect_true(ENT_DbOpen(db_handle) == -2,
+    if(expect_true(ENT_DbOpen(db_handle) == ENT_DBS_BAD_ARGUMENT,
                    "ENT_DbOpen should reject a SQLite handle without a database path") != 0)
     {
         ENT_DbCloseHandle(db_handle);
@@ -314,7 +315,7 @@ static int test_sqlite_open_is_idempotent(void)
     }
 
     init_sts = reset_db_service();
-    if(expect_true(init_sts == 0 || init_sts == 1,
+    if(expect_true(init_sts == ENT_SYS_NORMAL || init_sts == ENT_SYS_ALREADY_INITIALIZED,
                    "ENT_DbInit should initialize the DB service before idempotent open testing") != 0)
     {
         cleanup_temp_db_path(db_path);
@@ -379,7 +380,7 @@ static int test_sqlite_write_and_read_roundtrip(void)
     }
 
     init_sts = reset_db_service();
-    if(expect_true(init_sts == 0 || init_sts == 1,
+    if(expect_true(init_sts == ENT_SYS_NORMAL || init_sts == ENT_SYS_ALREADY_INITIALIZED,
                    "ENT_DbInit should initialize the DB service") != 0)
     {
         return 1;
@@ -474,7 +475,7 @@ static int test_sqlite_write_rejects_invalid_sql(void)
     }
 
     init_sts = reset_db_service();
-    if(expect_true(init_sts == 0 || init_sts == 1,
+    if(expect_true(init_sts == ENT_SYS_NORMAL || init_sts == ENT_SYS_ALREADY_INITIALIZED,
                    "ENT_DbInit should initialize the DB service") != 0)
     {
         return 1;
@@ -488,8 +489,8 @@ static int test_sqlite_write_rejects_invalid_sql(void)
         return 1;
     }
 
-    if(expect_true(ENT_DbWrite(db_handle, "THIS IS NOT SQL", NULL, NULL) == -2,
-                   "ENT_DbWrite should return -2 when SQLite rejects invalid SQL") != 0)
+    if(expect_true(ENT_DbWrite(db_handle, "THIS IS NOT SQL", NULL, NULL) == ENT_DBS_QUERY_FAILED,
+                   "ENT_DbWrite should return a query failure when SQLite rejects invalid SQL") != 0)
     {
         ENT_DbCloseHandle(db_handle);
         ENT_DbClose();
@@ -526,7 +527,7 @@ static int test_sqlite_read_rejects_callback_without_user_data(void)
     }
 
     init_sts = reset_db_service();
-    if(expect_true(init_sts == 0 || init_sts == 1,
+    if(expect_true(init_sts == ENT_SYS_NORMAL || init_sts == ENT_SYS_ALREADY_INITIALIZED,
                    "ENT_DbInit should initialize the DB service") != 0)
     {
         return 1;
@@ -561,7 +562,7 @@ static int test_sqlite_read_rejects_callback_without_user_data(void)
     if(expect_true(ENT_DbRead(db_handle,
                               "SELECT name FROM test_user WHERE id = 1;",
                               capture_single_name_row,
-                              NULL) == -2,
+                              NULL) == ENT_DBS_BAD_ARGUMENT,
                    "ENT_DbRead should fail when a callback is provided without user data") != 0)
     {
         ENT_DbCloseHandle(db_handle);
@@ -614,10 +615,10 @@ static int test_pgsql_handle_lifecycle(void)
 
     sts = ENT_DbCloseHandle(db_handle);
 #if ENT_ENABLE_PGSQL
-    if(expect_true(sts == 0,
+    if(expect_true(sts == ENT_SYS_NORMAL,
                    "ENT_DbCloseHandle should clean up the PgSQL handle") != 0)
 #else
-    if(expect_true(sts == -2,
+    if(expect_true(sts == ENT_DBS_UNSUPPORTED,
                    "ENT_DbCloseHandle should report PgSQL as unsupported when it is disabled") != 0)
 #endif
     {

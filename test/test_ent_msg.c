@@ -53,6 +53,30 @@ int main(void)
         return EXIT_FAILURE;
     }
 
+    if(expect_true(ENT_MsgGetSubmodule(ENT_DBS_BAD_ARGUMENT) == 10u,
+                   "DBS submodule id decode mismatch") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
+    if(expect_true(ENT_MsgGetModule(ENT_DBS_BAD_ARGUMENT) == ENT_MSG_MODULE_ENT,
+                   "DBS module id decode mismatch") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
+    if(expect_true(strcmp(ENT_MsgSubmoduleName(ENT_DBS_BAD_ARGUMENT), "DBS") == 0,
+                   "DBS submodule name lookup mismatch") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
+    if(expect_true(strcmp(ENT_MsgText(ENT_DBS_BAD_ARGUMENT), "invalid database argument") == 0,
+                   "DBS message text lookup mismatch") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
     if(expect_true(strcmp(ENT_MsgText(ENT_INIT_INVALID_ARGUMENT), "invalid init argument: name[%s] workPath[%s]") == 0,
                    "ENT message text lookup mismatch") != 0)
     {
