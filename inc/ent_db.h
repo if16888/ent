@@ -18,6 +18,8 @@
 #ifndef _ENT_DB_H_
 #define _ENT_DB_H_
 
+#include <stddef.h>
+
 #include "ent_comm.h"
 
 typedef enum DB_TYPE
@@ -35,6 +37,33 @@ typedef struct DB_READ_HEADER
 }DB_READ_HEADER;
 
 typedef void(* SqlResultCB)(char** fields,char** rowRes,long long rowNum,int columnNum,void* userData);
+
+typedef enum ENT_DB_PARAM_TYPE_TAG
+{
+    ENT_DB_PARAM_TEXT_E   = 1,
+    ENT_DB_PARAM_INT_E    = 2,
+    ENT_DB_PARAM_INT64_E  = 3,
+    ENT_DB_PARAM_DOUBLE_E = 4,
+    ENT_DB_PARAM_NULL_E   = 5,
+    ENT_DB_PARAM_BLOB_E   = 6
+} ENT_DB_PARAM_TYPE;
+
+typedef struct ENT_DB_PARAM_TAG
+{
+    ENT_DB_PARAM_TYPE type;
+    union
+    {
+        const char* text;
+        int         i32;
+        long long   i64;
+        double      d64;
+        struct
+        {
+            const void* data;
+            size_t      size;
+        } blob;
+    } value;
+} ENT_DB_PARAM;
 
 #ifdef __cplusplus
 extern "C" {
@@ -59,6 +88,20 @@ ENT_PUBLIC MSG_ID_T  ENT_DbCloseHandle(DB_HANDLE dbHandle);
 ENT_PUBLIC MSG_ID_T  ENT_DbRead(DB_HANDLE dbHandle,const char* sql,SqlResultCB sqlCb,void* userData);
 
 ENT_PUBLIC MSG_ID_T ENT_DbWrite(DB_HANDLE dbHandle,const char* sql,SqlResultCB sqlCb,void* userData);
+
+ENT_PUBLIC MSG_ID_T ENT_DbReadParams(DB_HANDLE dbHandle,
+                                     const char* sql,
+                                     const ENT_DB_PARAM* params,
+                                     size_t paramCount,
+                                     SqlResultCB sqlCb,
+                                     void* userData);
+
+ENT_PUBLIC MSG_ID_T ENT_DbWriteParams(DB_HANDLE dbHandle,
+                                      const char* sql,
+                                      const ENT_DB_PARAM* params,
+                                      size_t paramCount,
+                                      SqlResultCB sqlCb,
+                                      void* userData);
 
 #ifdef __cplusplus
 }

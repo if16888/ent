@@ -179,3 +179,8 @@ ALLOC_FAILED  err 5  allocate database resource failed
 OPEN_FAILED   err 6  open database connection failed
 QUERY_FAILED  err 7  execute database query failed
 RESULT_FAILED err 8  fetch database query result failed
+BAD_PARAMS    err 9  invalid database parameter array
+PARAM_COUNT   err 10 invalid database parameter count
+PREPARE_FAILED err 11 prepare database statement failed
+BIND_FAILED   err 12 bind database statement parameter failed
+EXEC_FAILED   err 13 execute prepared database statement failed

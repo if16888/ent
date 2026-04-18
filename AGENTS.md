@@ -25,6 +25,7 @@ When editing `msg/ent.msg` or generated message-code usage, follow these constra
 - Current ENT submodules are: `SYS`, `INIT`, `RT`, `THRD`, `UTHD`, `SOCK`, `TMR`, `TPL`, `DLL`, `SCR`, `DBS`.
 - `SCR` submodule is reserved for script runtime lifecycle and execution errors (load/compile/runtime/function lookup).
 - `DBS` submodule is reserved for database service and backend lifecycle errors (argument validation, unsupported backend, allocation/open/query/result failures).
+- Parameterized DB APIs use the `DBS` submodule as well; keep `BAD_PARAMS`, `PARAM_COUNT`, `PREPARE_FAILED`, `BIND_FAILED`, and `EXEC_FAILED` aligned with `msg/ent.msg` when extending the DB surface.
 - Any message-code change (new/removed/renamed submodule, code, or text) must be synced in this `AGENTS.md` file in the same change set so future contributors see the latest rules and conventions.
 
 ## Testing Guidelines

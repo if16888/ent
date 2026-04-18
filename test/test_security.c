@@ -372,7 +372,28 @@ static void test_log_invalid_level_no_crash(void)
 }
 
 /* ══════════════════════════════════════════════════════════
- * TEST 6: ent_db — SQL 注入 DROP TABLE
+ * TEST 6: ent_db — 参数化 API 形状编译检查
+ * 风险：新的 public API / 参数类型未导出，安全测试无法引用
+ * ══════════════════════════════════════════════════════════ */
+static void test_db_parameterized_api_shape(void)
+{
+    TEST_BEGIN("test_db_parameterized_api_shape");
+
+    ENT_DB_PARAM params[1];
+    memset(params, 0, sizeof(params));
+    params[0].type = ENT_DB_PARAM_TEXT_E;
+    params[0].value.text = "Alice";
+
+    ASSERT_EQ((long)sizeof(ENT_DB_PARAM), (long)sizeof(params[0]),
+              "ENT_DB_PARAM should be a concrete public type");
+    ASSERT_TRUE(sizeof(&ENT_DbReadParams) > 0, "ENT_DbReadParams should be declared");
+    ASSERT_TRUE(sizeof(&ENT_DbWriteParams) > 0, "ENT_DbWriteParams should be declared");
+
+    TEST_END();
+}
+
+/* ══════════════════════════════════════════════════════════
+ * TEST 7: ent_db — SQL 注入 DROP TABLE
  * 风险：sqlite3_exec 直接执行原始 SQL，无参数化
  * ══════════════════════════════════════════════════════════ */
 static void test_db_sql_injection_drop_table(void)
@@ -428,7 +449,7 @@ static void test_db_sql_injection_drop_table(void)
 }
 
 /* ══════════════════════════════════════════════════════════
- * TEST 7: ent_db — SQL 注入 UNION SELECT 信息泄露
+ * TEST 8: ent_db — SQL 注入 UNION SELECT 信息泄露
  * 风险：攻击者可通过 UNION 查询窃取其他表数据
  * ══════════════════════════════════════════════════════════ */
 typedef struct {
@@ -512,7 +533,7 @@ static void test_db_sql_injection_union_select(void)
 }
 
 /* ══════════════════════════════════════════════════════════
- * TEST 8: ent_db — NULL sql 参数被正确拒绝
+ * TEST 9: ent_db — NULL sql 参数被正确拒绝
  * ══════════════════════════════════════════════════════════ */
 static void test_db_null_sql_rejected(void)
 {
@@ -546,7 +567,7 @@ static void test_db_null_sql_rejected(void)
 }
 
 /* ══════════════════════════════════════════════════════════
- * TEST 9: ent_db — NULL handle 被正确拒绝
+ * TEST 10: ent_db — NULL handle 被正确拒绝
  * 风险：dbHandle==NULL 时先解引用 dbCfg 会触发未定义行为
  * ══════════════════════════════════════════════════════════ */
 static void test_db_null_handle_rejected(void)
@@ -591,6 +612,7 @@ int main(void)
 
     /* SQL injection tests */
     fprintf(stdout, "\n[SQL Injection]\n");
+    test_db_parameterized_api_shape();
     test_db_sql_injection_drop_table();
     test_db_sql_injection_union_select();
     test_db_null_sql_rejected();

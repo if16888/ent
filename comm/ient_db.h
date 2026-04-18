@@ -19,6 +19,7 @@
 #define _I_ENT_DB_H_
 
 #include <stdlib.h>
+#include <stddef.h>
 
 #ifdef WIN32
 #include <windows.h>
@@ -105,6 +106,18 @@ MSG_ID_T ENT_DbSqliteWrite(sqlite3* dbHandle,
                            const char* query,
                            SqlResultCB userCb,
                            void* userData);
+MSG_ID_T ENT_DbSqliteReadParams(sqlite3* dbHandle,
+                                const char* sql,
+                                const ENT_DB_PARAM* params,
+                                size_t paramCount,
+                                SqlResultCB userCb,
+                                void* userData);
+MSG_ID_T ENT_DbSqliteWriteParams(sqlite3* dbHandle,
+                                 const char* sql,
+                                 const ENT_DB_PARAM* params,
+                                 size_t paramCount,
+                                 SqlResultCB userCb,
+                                 void* userData);
 #endif
 
 #if ENT_ENABLE_MYSQL
@@ -118,6 +131,18 @@ MSG_ID_T ENT_DbMySQLWrite(MYSQL* dbHandle,
                           const char* query,
                           SqlResultCB userCb,
                           void* userData);
+MSG_ID_T ENT_DbMySQLReadParams(MYSQL* dbHandle,
+                               const char* sql,
+                               const ENT_DB_PARAM* params,
+                               size_t paramCount,
+                               SqlResultCB userCb,
+                               void* userData);
+MSG_ID_T ENT_DbMySQLWriteParams(MYSQL* dbHandle,
+                                const char* sql,
+                                const ENT_DB_PARAM* params,
+                                size_t paramCount,
+                                SqlResultCB userCb,
+                                void* userData);
 #endif
 
 #if ENT_ENABLE_PGSQL
@@ -131,6 +156,18 @@ MSG_ID_T ENT_DbPgSQLWrite(void* dbHandle,
                           const char* query,
                           SqlResultCB userCb,
                           void* userData);
+MSG_ID_T ENT_DbPgSQLReadParams(void* dbHandle,
+                               const char* sql,
+                               const ENT_DB_PARAM* params,
+                               size_t paramCount,
+                               SqlResultCB userCb,
+                               void* userData);
+MSG_ID_T ENT_DbPgSQLWriteParams(void* dbHandle,
+                                const char* sql,
+                                const ENT_DB_PARAM* params,
+                                size_t paramCount,
+                                SqlResultCB userCb,
+                                void* userData);
 #endif
 
 extern long sDbNum;
