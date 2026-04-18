@@ -103,7 +103,7 @@ static void inject_capture_cb(char** fields, char** rowRes,
 static void safe_reset_ent(void)
 {
     ENT_Close();
-    safe_reset_ent();
+    memset(&gEntCtx, 0, sizeof(gEntCtx));
 }
 
 static int get_temp_root(char* path, size_t path_len)
@@ -629,7 +629,10 @@ static void test_db_sql_injection_union_select(void)
  * ══════════════════════════════════════════════════════════ */
 static void test_db_pgsql_parameterized_queries_if_configured(void)
 {
-    TEST_BEGIN("test_db_pgsql_parameterized_queries_if_configured");
+    const char* _test_name = "test_db_pgsql_parameterized_queries_if_configured";
+
+    s_checks++;
+    fprintf(stdout, "  [RUN ] %s\n", _test_name);
 
 #if ENT_ENABLE_PGSQL
     const char* host;
@@ -645,7 +648,7 @@ static void test_db_pgsql_parameterized_queries_if_configured(void)
     if(test_security_pgsql_is_configured(&host, &database, &user, &passwd, &port) == 0)
     {
         fprintf(stdout, "    -> PostgreSQL security test skipped: set ENT_PGSQL_HOST, ENT_PGSQL_DB, and ENT_PGSQL_USER to run it.\n");
-        TEST_END();
+        fprintf(stdout, "  [DONE] %s\n", _test_name);
         return;
     }
 
@@ -697,7 +700,7 @@ static void test_db_pgsql_parameterized_queries_if_configured(void)
     fprintf(stdout, "    -> PostgreSQL security test skipped: ENT_ENABLE_PGSQL is disabled in this build.\n");
 #endif
 
-    TEST_END();
+    fprintf(stdout, "  [DONE] %s\n", _test_name);
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -706,7 +709,10 @@ static void test_db_pgsql_parameterized_queries_if_configured(void)
  * ══════════════════════════════════════════════════════════ */
 static void test_db_mysql_parameterized_queries_if_configured(void)
 {
-    TEST_BEGIN("test_db_mysql_parameterized_queries_if_configured");
+    const char* _test_name = "test_db_mysql_parameterized_queries_if_configured";
+
+    s_checks++;
+    fprintf(stdout, "  [RUN ] %s\n", _test_name);
 
 #if ENT_ENABLE_MYSQL
     const char* host;
@@ -722,7 +728,7 @@ static void test_db_mysql_parameterized_queries_if_configured(void)
     if(test_security_mysql_is_configured(&host, &database, &user, &passwd, &port) == 0)
     {
         fprintf(stdout, "    -> MySQL security test skipped: set ENT_MYSQL_HOST, ENT_MYSQL_DB, and ENT_MYSQL_USER to run it.\n");
-        TEST_END();
+        fprintf(stdout, "  [DONE] %s\n", _test_name);
         return;
     }
 
@@ -774,7 +780,7 @@ static void test_db_mysql_parameterized_queries_if_configured(void)
     fprintf(stdout, "    -> MySQL security test skipped: ENT_ENABLE_MYSQL is disabled in this build.\n");
 #endif
 
-    TEST_END();
+    fprintf(stdout, "  [DONE] %s\n", _test_name);
 }
 
 /* ══════════════════════════════════════════════════════════

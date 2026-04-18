@@ -21,6 +21,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifdef WIN32
+#include <windows.h>
+#endif
+
 #ifndef WIN32
 #include <pthread.h>
 #endif

@@ -42,6 +42,8 @@ jobs:
     runs-on: windows-2022
     env:
       BUILD_DIR: build
+      WINDOWS_CMAKE_PLATFORM: Win32
+      WINDOWS_DISABLE_PGSQL: ON
 
     steps:
       - name: Checkout
