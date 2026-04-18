@@ -19,29 +19,9 @@
 #define _I_ENT_COMM_H_
 #include <stdlib.h>
 #include <string.h>
+#include "ient_runtime.h"
 #include "ent_log.h"
 #include "ent_utility.h"
-
-typedef struct ENT_CTX {
-    bool           isInit;
-    bool           rtRequested;
-    bool           rtEnabled;
-    char*          entName;
-    char*          workPath;
-    char*          logName;
-    char*          logPath;
-    int            rtCpu;
-    int            rtPolicy;
-    int            rtPriority;
-    int            rtLastError;
-    ENT_LOG_LEV_E  logLevel;       
-    ENT_LOG        entLog; 
-    UTL_LOCK       entLock;
-    UTL_CV         entCV;   
-} ENT_CTX;
-
-extern ENT_CTX gEntCtx;
-ENT_LOG iENT_LogDefaultHandle(void);
 
 #ifdef WIN32
 

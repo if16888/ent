@@ -11,6 +11,7 @@
 #endif
 
 #include "ient_comm.h"
+#include "ient_runtime.h"
 #include "ent_msg.h"
 
 ENT_CTX gEntCtx;

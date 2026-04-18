@@ -12,6 +12,7 @@
 #endif
 
 #include "ient_comm.h"
+#include "ient_runtime.h"
 #include "ent_log.h"
 
 /* Linked against the split log sources from the test CMake target. */

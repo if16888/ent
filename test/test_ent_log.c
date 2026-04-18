@@ -15,6 +15,7 @@
 
 #include "ent_log.h"
 #include "ient_comm.h"
+#include "ient_runtime.h"
 
 /* The log implementation is now split across core/writer/options/compat sources. */
 

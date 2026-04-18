@@ -17,6 +17,7 @@
 #endif
 
 #include "ient_comm.h"
+#include "ient_runtime.h"
 #include "ent_utility.h"
 
 #define FAIL_STEP(step)                         \

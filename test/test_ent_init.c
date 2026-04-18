@@ -4,6 +4,7 @@
 #include <errno.h>
 
 #include "ient_comm.h"
+#include "ient_runtime.h"
 #include "ent_init.h"
 #include "ent_msg.h"
 

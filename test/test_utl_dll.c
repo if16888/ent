@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "ient_comm.h"
+#include "ient_runtime.h"
 #include "ent_msg.h"
 
 typedef struct TEST_NODE
