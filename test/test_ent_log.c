@@ -233,6 +233,107 @@ static int test_log_rejects_uninitialized_calls(void)
                        "ENT_LogCloseHandle should reject use before ENT_LogInit");
 }
 
+static int test_explicit_context_isolated_from_default(void)
+{
+    ENT_LOG_CTX ctx = NULL;
+    ENT_LOG privateLog = NULL;
+    ENT_LOG_LEV_E level = LOG_LEV_INFO_E;
+
+    if(expect_true(ENT_LogInit() == 0, "ENT_LogInit should initialize before explicit-context testing") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(ENT_LogInitHandle(NULL, "DefaultCtxModule", ".") == 0,
+                   "ENT_LogInitHandle should initialize the default log handle") != 0)
+    {
+        ENT_LogClose();
+        return 1;
+    }
+
+    if(expect_true(ENT_LogSetOption(NULL, ENT_LOG_LEVEL_E, &level) == 0,
+                   "ENT_LogSetOption should adjust the default log level") != 0)
+    {
+        ENT_LogCloseHandle(NULL);
+        ENT_LogClose();
+        return 1;
+    }
+
+    if(expect_true(ENT_LogCtxInit(&ctx) == 0,
+                   "ENT_LogCtxInit should create an explicit context") != 0)
+    {
+        ENT_LogCloseHandle(NULL);
+        ENT_LogClose();
+        return 1;
+    }
+
+    if(expect_true(ENT_LogCtxInitHandle(ctx, &privateLog, "CtxModule", ".") == 0,
+                   "ENT_LogCtxInitHandle should create a private log handle") != 0)
+    {
+        ENT_LogCtxClose(ctx);
+        ENT_LogCloseHandle(NULL);
+        ENT_LogClose();
+        return 1;
+    }
+
+    if(expect_true(ENT_LogCtxSetOption(ctx, privateLog, ENT_LOG_LEVEL_E, &level) == 0,
+                   "ENT_LogCtxSetOption should accept per-context options") != 0)
+    {
+        ENT_LogCtxCloseHandle(ctx, privateLog);
+        ENT_LogCtxClose(ctx);
+        ENT_LogCloseHandle(NULL);
+        ENT_LogClose();
+        return 1;
+    }
+
+    if(expect_true(ENT_LogCtxPrint(ctx, privateLog, "explicit context message\n") == 0,
+                   "ENT_LogCtxPrint should write through the private context") != 0)
+    {
+        ENT_LogCtxCloseHandle(ctx, privateLog);
+        ENT_LogCtxClose(ctx);
+        ENT_LogCloseHandle(NULL);
+        ENT_LogClose();
+        return 1;
+    }
+
+    if(expect_true(ENT_LogCtxCloseHandle(ctx, privateLog) == 0,
+                   "ENT_LogCtxCloseHandle should close the private handle") != 0)
+    {
+        ENT_LogCtxClose(ctx);
+        ENT_LogCloseHandle(NULL);
+        ENT_LogClose();
+        return 1;
+    }
+
+    privateLog = NULL;
+
+    if(expect_true(ENT_LogPrint(NULL, "default path still works after private teardown\n") == 0,
+                   "ENT_LogPrint should still work after private context teardown") != 0)
+    {
+        ENT_LogCtxClose(ctx);
+        ENT_LogCloseHandle(NULL);
+        ENT_LogClose();
+        return 1;
+    }
+
+    if(expect_true(ENT_LogCtxClose(ctx) == 0,
+                   "ENT_LogCtxClose should destroy the explicit context") != 0)
+    {
+        ENT_LogCloseHandle(NULL);
+        ENT_LogClose();
+        return 1;
+    }
+
+    if(expect_true(ENT_LogCloseHandle(NULL) == 0,
+                   "ENT_LogCloseHandle should close the default log handle") != 0)
+    {
+        ENT_LogClose();
+        return 1;
+    }
+
+    return expect_true(ENT_LogClose() == 0, "ENT_LogClose should shut down the log subsystem");
+}
+
 static int test_default_log_handle_lifecycle(void)
 {
     ENT_LOG_LEV_E level = LOG_LEV_INFO_E;
@@ -996,6 +1097,7 @@ int main(void)
     int failures = 0;
 
     failures += test_log_rejects_uninitialized_calls();
+    failures += test_explicit_context_isolated_from_default();
     failures += test_default_log_handle_lifecycle();
     failures += test_log_close_rejects_invalid_handle();
     failures += test_log_set_option_validates_arguments();

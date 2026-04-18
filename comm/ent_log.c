@@ -40,6 +40,7 @@
 
 #include <time.h>
 #include "ent_log.h"
+#include "ient_log.h"
 #include "ient_comm.h"
 
 
@@ -50,17 +51,6 @@
 #define ENT_LOG_FILE_BUFFER_SIZE (64 * 1024)
 #define ENT_LOG_POOL_MSG_SIZE 1024
 #define ENT_LOG_POOL_MAX_FREE_NODES 512
-
-typedef struct ENT_LOG_MSG_NODE_TAG
-{
-    struct ENT_LOG_MSG_NODE_TAG* next;
-    time_t                       rollTime;
-    size_t                       msgLen;
-    size_t                       msgCap;
-    bool                         forceFlush;
-    bool                         pooled;
-    char                         msg[1];
-} ENT_LOG_MSG_NODE;
 
 #ifdef WIN32
 static CRITICAL_SECTION sLogMutex;
@@ -74,51 +64,6 @@ static pthread_mutex_t  sLogMutex;
 static int              sLogNum = 0;
 volatile static bool    sLogMutexInit = false;
 
-
-#define ENTLOG_TAG (0x6AFEFE6A)
-typedef struct
-{
-    unsigned int     tag;//check tag
-    bool             isInit;//
-    bool             isDebug;//
-    bool             isBuffer;
-    ENT_LOG_LEV_E    logLevel;//log level
-    FILE*            logFp;
-#ifdef WIN32
-    CRITICAL_SECTION cs;
-    CONDITION_VARIABLE closeCv;
-    CONDITION_VARIABLE bufferCv;
-    HANDLE            bufferThread;
-    volatile LONG    closing;
-    volatile LONG    activeWriters;
-    volatile LONG    isDebugFast;
-    volatile LONG    isBufferFast;
-#else
-    pthread_mutex_t  cs;
-    pthread_cond_t   closeCv;
-    pthread_cond_t   bufferCv;
-    pthread_t        bufferThread;
-    volatile int     closing;
-    volatile int     activeWriters;
-    volatile int     isDebugFast;
-    volatile int     isBufferFast;
-#endif
-    bool             bufferThreadStarted;
-    bool             bufferThreadStop;
-    int              pendingFlushes;
-    int              flushBatch;
-    int              flushIntervalMs;
-    long long        lastFlushMs;
-    ENT_LOG_MSG_NODE* bufferHead;
-    ENT_LOG_MSG_NODE* bufferTail;
-    ENT_LOG_MSG_NODE* poolFreeHead;
-    int              poolFreeCount;
-    char*            moduleName;
-    char*            logPath;
-    int              maxNum;
-    time_t           nextCreate;
-} ENT_LOG_CTX;
-
 static const char* sLogLevelStr[]={
                 "FATAL",
                 "ERROR",
@@ -126,7 +71,7 @@ static const char* sLogLevelStr[]={
                 "INFO",
                 "DEBUG"};
 
-static ENT_LOG_CTX sDefLog;
+static ENT_LOG_CTX_INTERNAL sDefLog;
             
 static MSG_ID_T iENT_LogPathCheck(const char* path);
 static MSG_ID_T iENT_LogFormatMessage(const char* format,
@@ -135,20 +80,25 @@ static MSG_ID_T iENT_LogFormatMessage(const char* format,
                                       size_t stackBufLen,
                                       char** msgBuf,
                                       size_t* msgLen);
-static void iENT_LogFlushMaybe(ENT_LOG_CTX* log, FILE* fp, bool forceFlush);
-static int iENT_LogIsClosing(const ENT_LOG_CTX* log);
-static void iENT_LogSetClosing(ENT_LOG_CTX* log);
-static int iENT_LogActiveGet(const ENT_LOG_CTX* log);
-static void iENT_LogActiveInc(ENT_LOG_CTX* log);
-static int iENT_LogActiveDec(ENT_LOG_CTX* log);
+static MSG_ID_T iENT_LogVRaw(ENT_LOG_CTX_INTERNAL* log,const char* format,va_list va_args);
+static MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX_INTERNAL* log,ENT_LOG_LEV_E logLevel,const char* format,va_list va_args);
+static void iENT_LogFlushMaybe(ENT_LOG_CTX_INTERNAL* log, FILE* fp, bool forceFlush);
+static MSG_ID_T iENT_LogGetCtx(ENT_LOG_CTX_INTERNAL** logCtx,ENT_LOG logHandle);
+static MSG_ID_T iENT_LogAcquireWriter(ENT_LOG_CTX_INTERNAL** logCtx,ENT_LOG logHandle);
+static void iENT_LogReleaseWriter(ENT_LOG_CTX_INTERNAL* log);
+static int iENT_LogIsClosing(const ENT_LOG_CTX_INTERNAL* log);
+static void iENT_LogSetClosing(ENT_LOG_CTX_INTERNAL* log);
+static int iENT_LogActiveGet(const ENT_LOG_CTX_INTERNAL* log);
+static void iENT_LogActiveInc(ENT_LOG_CTX_INTERNAL* log);
+static int iENT_LogActiveDec(ENT_LOG_CTX_INTERNAL* log);
 static MSG_ID_T iENT_LogFormatPrefix(ENT_LOG_LEV_E logLevel,
                                      char* prefixBuf,
                                      size_t prefixBufLen,
                                      size_t* prefixLen,
                                      time_t* rollTime);
-static MSG_ID_T iENT_LogStartBufferThread(ENT_LOG_CTX* log);
-static void iENT_LogStopBufferThread(ENT_LOG_CTX* log);
-static MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX* log,
+static MSG_ID_T iENT_LogStartBufferThread(ENT_LOG_CTX_INTERNAL* log);
+static void iENT_LogStopBufferThread(ENT_LOG_CTX_INTERNAL* log);
+static MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX_INTERNAL* log,
                                      const char* msg,
                                      size_t msgLen,
                                      time_t rollTime,
@@ -168,9 +118,131 @@ static void iENT_LogFastFlagSet(
 #endif
                                 int value);
 static long long iENT_LogNowMs(void);
-static bool iENT_LogBufferReady(const ENT_LOG_CTX* log);
+static bool iENT_LogBufferReady(const ENT_LOG_CTX_INTERNAL* log);
 static ENT_LOG_MSG_NODE* iENT_LogAllocNode(size_t msgCap, bool pooled);
-static void iENT_LogFreePoolNodes(ENT_LOG_CTX* log);
+static void iENT_LogFreePoolNodes(ENT_LOG_CTX_INTERNAL* log);
+static MSG_ID_T iENT_LogInitCtx(ENT_LOG_CTX_INTERNAL* log,
+                                const char* moduleName,
+                                const char* logPath);
+
+ENT_LOG_CTX_INTERNAL* iENT_LogDefaultCtx(void)
+{
+    return &sDefLog;
+}
+
+ENT_LOG_CTX_INTERNAL* iENT_LogCtxFromHandle(ENT_LOG_CTX ctx)
+{
+    return (ENT_LOG_CTX_INTERNAL*)ctx;
+}
+
+static MSG_ID_T iENT_LogInitCtx(ENT_LOG_CTX_INTERNAL* log,
+                                const char* moduleName,
+                                const char* logPath)
+{
+    size_t len = 0;
+    MSG_ID_T sts = 0;
+
+    if(log == NULL)
+    {
+        return -1;
+    }
+
+    memset(log, 0, sizeof(*log));
+    if(moduleName)
+        log->moduleName = strdup(moduleName);
+    else
+        log->moduleName = strdup("default");
+
+    if(log->moduleName == NULL)
+    {
+        return -1;
+    }
+
+    if(logPath)
+    {
+        log->logPath = strdup(logPath);
+        if(log->logPath == NULL)
+        {
+            free(log->moduleName);
+            log->moduleName = NULL;
+            return -1;
+        }
+        len = strlen(log->logPath);
+        if(len > 0 && (log->logPath[len-1]=='\\' || log->logPath[len-1]=='/'))
+        {
+            log->logPath[len-1]='\0';
+        }
+        sts = iENT_LogPathCheck(log->logPath);
+        if(sts < 0)
+        {
+            free(log->moduleName);
+            log->moduleName = NULL;
+            free(log->logPath);
+            log->logPath = NULL;
+            return sts;
+        }
+    }
+
+#ifdef WIN32
+    InitializeCriticalSection(&log->cs);
+    InitializeConditionVariable(&log->closeCv);
+    InitializeConditionVariable(&log->bufferCv);
+    log->bufferThread = NULL;
+#else
+    pthread_mutex_init(&log->cs,NULL);
+    if(pthread_cond_init(&log->closeCv,NULL) != 0)
+    {
+        if(log->moduleName)
+        {
+            free(log->moduleName);
+            log->moduleName = NULL;
+        }
+        if(log->logPath)
+        {
+            free(log->logPath);
+            log->logPath = NULL;
+        }
+        return -1;
+    }
+    if(pthread_cond_init(&log->bufferCv,NULL) != 0)
+    {
+        pthread_cond_destroy(&log->closeCv);
+        pthread_mutex_destroy(&log->cs);
+        if(log->moduleName)
+        {
+            free(log->moduleName);
+            log->moduleName = NULL;
+        }
+        if(log->logPath)
+        {
+            free(log->logPath);
+            log->logPath = NULL;
+        }
+        return -1;
+    }
+#endif
+    log->closing = 0;
+    log->activeWriters = 0;
+    log->bufferThreadStarted = false;
+    log->bufferThreadStop = false;
+    log->pendingFlushes = 0;
+    log->flushBatch = ENT_LOG_FLUSH_BATCH;
+    log->flushIntervalMs = 0;
+    log->lastFlushMs = 0;
+    log->bufferHead = NULL;
+    log->bufferTail = NULL;
+    log->poolFreeHead = NULL;
+    log->poolFreeCount = 0;
+    log->isInit = true;
+    log->isDebug = false;
+    log->isBuffer = false;
+    iENT_LogFastFlagSet(&log->isDebugFast, 0);
+    iENT_LogFastFlagSet(&log->isBufferFast, 0);
+    log->logLevel = LOG_LEV_WARN_E;
+    log->maxNum = DEF_MAX_NUM_LOG;
+    log->tag = ENTLOG_TAG;
+    return 0;
+}
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :iENT_LogRollCheck
@@ -191,7 +263,7 @@ static void iENT_LogFreePoolNodes(ENT_LOG_CTX* log);
 #define FUNC_NAME "iENT_LogRollCheck"
 static MSG_ID_T  iENT_LogRollCheck(ENT_LOG logHandle,time_t nowTime)
 {
-    ENT_LOG_CTX* log = (ENT_LOG_CTX*)logHandle;
+    ENT_LOG_CTX_INTERNAL* log = (ENT_LOG_CTX_INTERNAL*)logHandle;
     const static char* tmFormat="%Y%m%d";
     char dayStr[9];//4+2+2
     struct tm nowTm;
@@ -391,7 +463,7 @@ static MSG_ID_T iENT_LogFormatMessage(const char* format,
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "iENT_LogFlushMaybe"
-static void iENT_LogFlushMaybe(ENT_LOG_CTX* log, FILE* fp, bool forceFlush)
+static void iENT_LogFlushMaybe(ENT_LOG_CTX_INTERNAL* log, FILE* fp, bool forceFlush)
 {
     long long nowMs = 0;
     int flushBatch = 0;
@@ -515,7 +587,7 @@ static long long iENT_LogNowMs(void)
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "iENT_LogBufferReady"
-static bool iENT_LogBufferReady(const ENT_LOG_CTX* log)
+static bool iENT_LogBufferReady(const ENT_LOG_CTX_INTERNAL* log)
 {
     return log != NULL && log->isBuffer && log->bufferThreadStarted && !log->bufferThreadStop;
 }
@@ -561,7 +633,7 @@ static ENT_LOG_MSG_NODE* iENT_LogAllocNode(size_t msgCap, bool pooled)
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "iENT_LogFreePoolNodes"
-static void iENT_LogFreePoolNodes(ENT_LOG_CTX* log)
+static void iENT_LogFreePoolNodes(ENT_LOG_CTX_INTERNAL* log)
 {
     ENT_LOG_MSG_NODE* node = NULL;
     ENT_LOG_MSG_NODE* next = NULL;
@@ -592,7 +664,7 @@ static void iENT_LogFreePoolNodes(ENT_LOG_CTX* log)
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "iENT_LogIsClosing"
-static int iENT_LogIsClosing(const ENT_LOG_CTX* log)
+static int iENT_LogIsClosing(const ENT_LOG_CTX_INTERNAL* log)
 {
 #ifdef WIN32
     return InterlockedCompareExchange((volatile LONG*)&log->closing, 0, 0) != 0;
@@ -611,7 +683,7 @@ static int iENT_LogIsClosing(const ENT_LOG_CTX* log)
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "iENT_LogSetClosing"
-static void iENT_LogSetClosing(ENT_LOG_CTX* log)
+static void iENT_LogSetClosing(ENT_LOG_CTX_INTERNAL* log)
 {
 #ifdef WIN32
     InterlockedExchange(&log->closing, 1);
@@ -630,7 +702,7 @@ static void iENT_LogSetClosing(ENT_LOG_CTX* log)
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "iENT_LogActiveGet"
-static int iENT_LogActiveGet(const ENT_LOG_CTX* log)
+static int iENT_LogActiveGet(const ENT_LOG_CTX_INTERNAL* log)
 {
 #ifdef WIN32
     return (int)InterlockedCompareExchange((volatile LONG*)&log->activeWriters, 0, 0);
@@ -649,7 +721,7 @@ static int iENT_LogActiveGet(const ENT_LOG_CTX* log)
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "iENT_LogActiveInc"
-static void iENT_LogActiveInc(ENT_LOG_CTX* log)
+static void iENT_LogActiveInc(ENT_LOG_CTX_INTERNAL* log)
 {
 #ifdef WIN32
     InterlockedIncrement(&log->activeWriters);
@@ -668,7 +740,7 @@ static void iENT_LogActiveInc(ENT_LOG_CTX* log)
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "iENT_LogActiveDec"
-static int iENT_LogActiveDec(ENT_LOG_CTX* log)
+static int iENT_LogActiveDec(ENT_LOG_CTX_INTERNAL* log)
 {
 #ifdef WIN32
     return (int)InterlockedDecrement(&log->activeWriters);
@@ -770,7 +842,7 @@ static DWORD WINAPI iENT_LogBufferThreadMain(LPVOID data)
 static void* iENT_LogBufferThreadMain(void* data)
 #endif
 {
-    ENT_LOG_CTX* log = (ENT_LOG_CTX*)data;
+    ENT_LOG_CTX_INTERNAL* log = (ENT_LOG_CTX_INTERNAL*)data;
     ENT_LOG_MSG_NODE* head = NULL;
     ENT_LOG_MSG_NODE* batchHead = NULL;
     ENT_LOG_MSG_NODE* batchTail = NULL;
@@ -947,7 +1019,7 @@ static void* iENT_LogBufferThreadMain(void* data)
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "iENT_LogStartBufferThread"
-static MSG_ID_T iENT_LogStartBufferThread(ENT_LOG_CTX* log)
+static MSG_ID_T iENT_LogStartBufferThread(ENT_LOG_CTX_INTERNAL* log)
 {
     MSG_ID_T sts = 0;
 
@@ -1018,7 +1090,7 @@ static MSG_ID_T iENT_LogStartBufferThread(ENT_LOG_CTX* log)
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "iENT_LogStopBufferThread"
-static void iENT_LogStopBufferThread(ENT_LOG_CTX* log)
+static void iENT_LogStopBufferThread(ENT_LOG_CTX_INTERNAL* log)
 {
     bool shouldJoin = false;
 
@@ -1068,7 +1140,7 @@ static void iENT_LogStopBufferThread(ENT_LOG_CTX* log)
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "iENT_LogQueueMessage"
-static MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX* log,
+static MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX_INTERNAL* log,
                                      const char* msg,
                                      size_t msgLen,
                                      time_t rollTime,
@@ -1252,6 +1324,451 @@ ENT_PUBLIC MSG_ID_T  ENT_LogClose()
     sLogMutexInit = false;
     return 0;
 }
+
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :ENT_LogCtxInit
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "ENT_LogCtxInit"
+ENT_PUBLIC MSG_ID_T ENT_LogCtxInit(ENT_LOG_CTX* pCtx)
+{
+    struct ENT_LOG_CTX_TAG* ctx = NULL;
+
+    if(sLogMutexInit == false)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],Uninitialized,please call ENT_LogInit.\n",FUNC_NAME,__LINE__);
+        return -1;
+    }
+
+    if(pCtx == NULL)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
+        return -1;
+    }
+
+    ctx = (struct ENT_LOG_CTX_TAG*)malloc(sizeof(*ctx));
+    if(ctx == NULL)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],malloc failed.\n",FUNC_NAME,__LINE__);
+        return -1;
+    }
+
+    ctx->tag = ENTLOG_CTX_TAG;
+    ctx->isInit = true;
+    *pCtx = ctx;
+    return 0;
+}
+
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :ENT_LogCtxClose
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "ENT_LogCtxClose"
+ENT_PUBLIC MSG_ID_T ENT_LogCtxClose(ENT_LOG_CTX ctx)
+{
+    struct ENT_LOG_CTX_TAG* logCtx = (struct ENT_LOG_CTX_TAG*)ctx;
+
+    if(sLogMutexInit == false)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],Uninitialized,please call ENT_LogInit.\n",FUNC_NAME,__LINE__);
+        return -1;
+    }
+
+    if(logCtx == NULL || logCtx->tag != ENTLOG_CTX_TAG || logCtx->isInit == false)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
+        return -2;
+    }
+
+    logCtx->isInit = false;
+    free(logCtx);
+    return 0;
+}
+
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :ENT_LogCtxInitHandle
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "ENT_LogCtxInitHandle"
+ENT_PUBLIC MSG_ID_T ENT_LogCtxInitHandle(ENT_LOG_CTX ctx,ENT_LOG* pLogHandle,const char* moduleName,const char* logPath)
+{
+    struct ENT_LOG_CTX_TAG* logCtx = (struct ENT_LOG_CTX_TAG*)ctx;
+
+    if(sLogMutexInit == false)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],Uninitialized,please call ENT_LogInit.\n",FUNC_NAME,__LINE__);
+        return -1;
+    }
+
+    if(logCtx == NULL || logCtx->tag != ENTLOG_CTX_TAG || logCtx->isInit == false)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
+        return -2;
+    }
+
+    if(pLogHandle == NULL)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
+        return -1;
+    }
+
+    return ENT_LogInitHandle(pLogHandle, moduleName, logPath);
+}
+
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :ENT_LogCtxSetOption
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "ENT_LogCtxSetOption"
+ENT_PUBLIC MSG_ID_T ENT_LogCtxSetOption(ENT_LOG_CTX ctx,ENT_LOG logHandle,ENT_LOG_OPTIONS_E option,const void* arg)
+{
+    struct ENT_LOG_CTX_TAG* logCtx = (struct ENT_LOG_CTX_TAG*)ctx;
+
+    if(sLogMutexInit == false)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],Uninitialized,please call ENT_LogInit.\n",FUNC_NAME,__LINE__);
+        return -1;
+    }
+
+    if(logCtx == NULL || logCtx->tag != ENTLOG_CTX_TAG || logCtx->isInit == false)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
+        return -2;
+    }
+
+    return ENT_LogSetOption(logHandle, option, arg);
+}
+
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :ENT_LogCtxCloseHandle
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "ENT_LogCtxCloseHandle"
+ENT_PUBLIC MSG_ID_T ENT_LogCtxCloseHandle(ENT_LOG_CTX ctx,ENT_LOG logHandle)
+{
+    struct ENT_LOG_CTX_TAG* logCtx = (struct ENT_LOG_CTX_TAG*)ctx;
+
+    if(sLogMutexInit == false)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],Uninitialized,please call ENT_LogInit.\n",FUNC_NAME,__LINE__);
+        return -1;
+    }
+
+    if(logCtx == NULL || logCtx->tag != ENTLOG_CTX_TAG || logCtx->isInit == false)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
+        return -2;
+    }
+
+    return ENT_LogCloseHandle(logHandle);
+}
+
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :ENT_LogCtxRaw
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "ENT_LogCtxRaw"
+ENT_PUBLIC MSG_ID_T ENT_LogCtxRaw(ENT_LOG_CTX ctx,ENT_LOG logHandle,const char* format,...)
+{
+    MSG_ID_T sts = 0;
+    ENT_LOG_CTX_INTERNAL* logCtx = NULL;
+    va_list va_args;
+
+    if(sLogMutexInit == false)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],Uninitialized,please call ENT_LogInit.\n",FUNC_NAME,__LINE__);
+        return -1;
+    }
+
+    if(ctx == NULL || ((struct ENT_LOG_CTX_TAG*)ctx)->tag != ENTLOG_CTX_TAG || ((struct ENT_LOG_CTX_TAG*)ctx)->isInit == false)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
+        return -2;
+    }
+
+    sts = iENT_LogAcquireWriter(&logCtx, logHandle);
+    if(sts < 0)
+    {
+        return sts;
+    }
+
+    va_start(va_args, format);
+    sts = iENT_LogVRaw(logCtx, format, va_args);
+    va_end(va_args);
+    iENT_LogReleaseWriter(logCtx);
+    return sts;
+}
+
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :ENT_LogCtxFatal
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "ENT_LogCtxFatal"
+ENT_PUBLIC MSG_ID_T ENT_LogCtxFatal(ENT_LOG_CTX ctx,ENT_LOG logHandle,const char* format,...)
+{
+    MSG_ID_T sts = 0;
+    ENT_LOG_CTX_INTERNAL* logCtx = NULL;
+    va_list va_args;
+
+    if(sLogMutexInit == false)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],Uninitialized,please call ENT_LogInit.\n",FUNC_NAME,__LINE__);
+        return -1;
+    }
+
+    if(ctx == NULL || ((struct ENT_LOG_CTX_TAG*)ctx)->tag != ENTLOG_CTX_TAG || ((struct ENT_LOG_CTX_TAG*)ctx)->isInit == false)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
+        return -2;
+    }
+
+    sts = iENT_LogAcquireWriter(&logCtx, logHandle);
+    if(sts < 0)
+    {
+        return sts;
+    }
+    if(LOG_LEV_FATAL_E > logCtx->logLevel)
+    {
+        iENT_LogReleaseWriter(logCtx);
+        return 1;
+    }
+
+    va_start(va_args, format);
+    sts = iENT_LogVPrint(logCtx, LOG_LEV_FATAL_E, format, va_args);
+    va_end(va_args);
+    iENT_LogReleaseWriter(logCtx);
+    return sts;
+}
+
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :ENT_LogCtxError
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "ENT_LogCtxError"
+ENT_PUBLIC MSG_ID_T ENT_LogCtxError(ENT_LOG_CTX ctx,ENT_LOG logHandle,const char* format,...)
+{
+    MSG_ID_T sts = 0;
+    ENT_LOG_CTX_INTERNAL* logCtx = NULL;
+    va_list va_args;
+
+    if(sLogMutexInit == false)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],Uninitialized,please call ENT_LogInit.\n",FUNC_NAME,__LINE__);
+        return -1;
+    }
+
+    if(ctx == NULL || ((struct ENT_LOG_CTX_TAG*)ctx)->tag != ENTLOG_CTX_TAG || ((struct ENT_LOG_CTX_TAG*)ctx)->isInit == false)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
+        return -2;
+    }
+
+    sts = iENT_LogAcquireWriter(&logCtx, logHandle);
+    if(sts < 0)
+    {
+        return sts;
+    }
+    if(LOG_LEV_ERROR_E > logCtx->logLevel)
+    {
+        iENT_LogReleaseWriter(logCtx);
+        return 1;
+    }
+
+    va_start(va_args, format);
+    sts = iENT_LogVPrint(logCtx, LOG_LEV_ERROR_E, format, va_args);
+    va_end(va_args);
+    iENT_LogReleaseWriter(logCtx);
+    return sts;
+}
+
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :ENT_LogCtxWarn
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "ENT_LogCtxWarn"
+ENT_PUBLIC MSG_ID_T ENT_LogCtxWarn(ENT_LOG_CTX ctx,ENT_LOG logHandle,const char* format,...)
+{
+    MSG_ID_T sts = 0;
+    ENT_LOG_CTX_INTERNAL* logCtx = NULL;
+    va_list va_args;
+
+    if(sLogMutexInit == false)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],Uninitialized,please call ENT_LogInit.\n",FUNC_NAME,__LINE__);
+        return -1;
+    }
+
+    if(ctx == NULL || ((struct ENT_LOG_CTX_TAG*)ctx)->tag != ENTLOG_CTX_TAG || ((struct ENT_LOG_CTX_TAG*)ctx)->isInit == false)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
+        return -2;
+    }
+
+    sts = iENT_LogAcquireWriter(&logCtx, logHandle);
+    if(sts < 0)
+    {
+        return sts;
+    }
+    if(LOG_LEV_WARN_E > logCtx->logLevel)
+    {
+        iENT_LogReleaseWriter(logCtx);
+        return 1;
+    }
+
+    va_start(va_args, format);
+    sts = iENT_LogVPrint(logCtx, LOG_LEV_WARN_E, format, va_args);
+    va_end(va_args);
+    iENT_LogReleaseWriter(logCtx);
+    return sts;
+}
+
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :ENT_LogCtxPrint
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "ENT_LogCtxPrint"
+ENT_PUBLIC MSG_ID_T ENT_LogCtxPrint(ENT_LOG_CTX ctx,ENT_LOG logHandle,const char* format,...)
+{
+    MSG_ID_T sts = 0;
+    ENT_LOG_CTX_INTERNAL* logCtx = NULL;
+    va_list va_args;
+
+    if(sLogMutexInit == false)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],Uninitialized,please call ENT_LogInit.\n",FUNC_NAME,__LINE__);
+        return -1;
+    }
+
+    if(ctx == NULL || ((struct ENT_LOG_CTX_TAG*)ctx)->tag != ENTLOG_CTX_TAG || ((struct ENT_LOG_CTX_TAG*)ctx)->isInit == false)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
+        return -2;
+    }
+
+    sts = iENT_LogAcquireWriter(&logCtx, logHandle);
+    if(sts < 0)
+    {
+        return sts;
+    }
+    if(LOG_LEV_INFO_E > logCtx->logLevel)
+    {
+        iENT_LogReleaseWriter(logCtx);
+        return 1;
+    }
+
+    va_start(va_args, format);
+    sts = iENT_LogVPrint(logCtx, LOG_LEV_INFO_E, format, va_args);
+    va_end(va_args);
+    iENT_LogReleaseWriter(logCtx);
+    return sts;
+}
+
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :ENT_LogCtxDebug
+ *
+ * DESCRIPTION :
+ *
+ *
+ *-----------------------------------------------------------------------------
+ */
+#undef  FUNC_NAME
+#define FUNC_NAME "ENT_LogCtxDebug"
+ENT_PUBLIC MSG_ID_T ENT_LogCtxDebug(ENT_LOG_CTX ctx,ENT_LOG logHandle,const char* format,...)
+{
+    MSG_ID_T sts = 0;
+    ENT_LOG_CTX_INTERNAL* logCtx = NULL;
+    va_list va_args;
+
+    if(sLogMutexInit == false)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],Uninitialized,please call ENT_LogInit.\n",FUNC_NAME,__LINE__);
+        return -1;
+    }
+
+    if(ctx == NULL || ((struct ENT_LOG_CTX_TAG*)ctx)->tag != ENTLOG_CTX_TAG || ((struct ENT_LOG_CTX_TAG*)ctx)->isInit == false)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
+        return -2;
+    }
+
+    sts = iENT_LogAcquireWriter(&logCtx, logHandle);
+    if(sts < 0)
+    {
+        return sts;
+    }
+    if(LOG_LEV_DEBUG_E > logCtx->logLevel)
+    {
+        iENT_LogReleaseWriter(logCtx);
+        return 1;
+    }
+
+    va_start(va_args, format);
+    sts = iENT_LogVPrint(logCtx, LOG_LEV_DEBUG_E, format, va_args);
+    va_end(va_args);
+    iENT_LogReleaseWriter(logCtx);
+    return sts;
+}
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :ENT_LogInitHandle
@@ -1273,8 +1790,8 @@ ENT_PUBLIC MSG_ID_T  ENT_LogClose()
 ENT_PUBLIC MSG_ID_T  ENT_LogInitHandle(ENT_LOG* pLogHandle,const char* moduleName,const char* logPath)
 {
     MSG_ID_T sts = 0;
-    size_t   len;
-    ENT_LOG_CTX* log;
+    ENT_LOG_CTX_INTERNAL* log = NULL;
+    ENT_LOG_CTX_INTERNAL* existing = NULL;
     
     if(sLogMutexInit==false)
     {
@@ -1287,118 +1804,37 @@ ENT_PUBLIC MSG_ID_T  ENT_LogInitHandle(ENT_LOG* pLogHandle,const char* moduleNam
 #else
     pthread_mutex_lock(&sLogMutex);
 #endif
-    
-    //_ftime(&nowTmb);
-    
     if(pLogHandle==NULL)
     {
-        log = &sDefLog;
-        if(log->isInit)
+        existing = iENT_LogDefaultCtx();
+        if(existing->isInit)
         {
             sts = 1;
             fprintf(stderr,"Func [%s] Line [%d],The module [%s] log path [%s] was already opened.\n",FUNC_NAME,__LINE__,moduleName,logPath);
             goto END_OF_ROUTINE;
-         }      
+         }
+        log = existing;
     }
     else
     {
-        log = (ENT_LOG_CTX*)malloc(sizeof(ENT_LOG_CTX));
+        log = (ENT_LOG_CTX_INTERNAL*)malloc(sizeof(ENT_LOG_CTX_INTERNAL));
         if(log == NULL)
         {
             sts = -1;
             fprintf(stderr,"Func [%s] Line [%d],The module [%s] log path [%s] malloc failed.\n",FUNC_NAME,__LINE__,moduleName,logPath);
             goto END_OF_ROUTINE;
-        }   
-        memset(log,0,sizeof(ENT_LOG_CTX));
+        }
     }
-    if(moduleName)
-        log->moduleName = strdup(moduleName);
-    else
-        log->moduleName = strdup("default");  
-        
-    if(logPath)
+
+    sts = iENT_LogInitCtx(log, moduleName, logPath);
+    if(sts < 0)
     {
-        log->logPath = strdup(logPath);
-        len = strlen(log->logPath);
-        if(log->logPath[len-1]=='\\' ||
-        log->logPath[len-1]=='/')
-        {
-            log->logPath[len-1]='\0';
-        }
-        sts=iENT_LogPathCheck(log->logPath);
-    }
-    //iENT_LogRollCheck(log,nowTmb.time);
-#ifdef WIN32
-    InitializeCriticalSection(&log->cs);
-    InitializeConditionVariable(&log->closeCv);
-    InitializeConditionVariable(&log->bufferCv);
-    log->bufferThread = NULL;
-#else
-    pthread_mutex_init(&log->cs,NULL);
-    if(pthread_cond_init(&log->closeCv,NULL) != 0)
-    {
-        sts = -1;
-        fprintf(stderr,"Func [%s] Line [%d],pthread_cond_init failed.\n",FUNC_NAME,__LINE__);
-        pthread_mutex_destroy(&log->cs);
-        if(log->moduleName)
-        {
-            free(log->moduleName);
-            log->moduleName = NULL;
-        }
-        if(log->logPath)
-        {
-            free(log->logPath);
-            log->logPath = NULL;
-        }
-        if(log!=&sDefLog)
+        if(log != existing && log != NULL)
         {
             free(log);
         }
         goto END_OF_ROUTINE;
     }
-    if(pthread_cond_init(&log->bufferCv,NULL) != 0)
-    {
-        sts = -1;
-        fprintf(stderr,"Func [%s] Line [%d],pthread_cond_init failed.\n",FUNC_NAME,__LINE__);
-        pthread_cond_destroy(&log->closeCv);
-        pthread_mutex_destroy(&log->cs);
-        if(log->moduleName)
-        {
-            free(log->moduleName);
-            log->moduleName = NULL;
-        }
-        if(log->logPath)
-        {
-            free(log->logPath);
-            log->logPath = NULL;
-        }
-        if(log!=&sDefLog)
-        {
-            free(log);
-        }
-        goto END_OF_ROUTINE;
-    }
-#endif
-    log->closing = 0;
-    log->activeWriters = 0;
-    log->bufferThreadStarted = false;
-    log->bufferThreadStop = false;
-    log->pendingFlushes = 0;
-    log->flushBatch = ENT_LOG_FLUSH_BATCH;
-    log->flushIntervalMs = 0;
-    log->lastFlushMs = 0;
-    log->bufferHead = NULL;
-    log->bufferTail = NULL;
-    log->poolFreeHead = NULL;
-    log->poolFreeCount = 0;
-    log->isInit   = true;
-    log->isDebug  = false;
-    log->isBuffer = false;
-    iENT_LogFastFlagSet(&log->isDebugFast, 0);
-    iENT_LogFastFlagSet(&log->isBufferFast, 0);
-    log->logLevel = LOG_LEV_WARN_E;
-    log->maxNum   = DEF_MAX_NUM_LOG;
-    log->tag      = ENTLOG_TAG;
     if(pLogHandle)
     {
         *pLogHandle = log;
@@ -1436,7 +1872,7 @@ END_OF_ROUTINE:
 #define FUNC_NAME "ENT_LogSetOption"
 ENT_PUBLIC MSG_ID_T  ENT_LogSetOption(ENT_LOG logHandle,ENT_LOG_OPTIONS_E option,const void* arg)
 {
-    ENT_LOG_CTX* log = (ENT_LOG_CTX*)logHandle;
+    ENT_LOG_CTX_INTERNAL* log = (ENT_LOG_CTX_INTERNAL*)logHandle;
     size_t       len;
     MSG_ID_T     sts=0;
     MSG_ID_T     bufferSts = 0;
@@ -1456,8 +1892,8 @@ ENT_PUBLIC MSG_ID_T  ENT_LogSetOption(ENT_LOG logHandle,ENT_LOG_OPTIONS_E option
     
     if(log == NULL)
     {
-        if(sDefLog.isInit)
-            log = &sDefLog;
+        if(iENT_LogDefaultCtx()->isInit)
+            log = iENT_LogDefaultCtx();
         else
         {
             fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
@@ -1607,11 +2043,11 @@ ENT_PUBLIC MSG_ID_T ENT_LogCloseHandle(ENT_LOG logHandle)
     pthread_mutex_lock(&sLogMutex);
 #endif
             
-    ENT_LOG_CTX* log = (ENT_LOG_CTX*)logHandle;
+    ENT_LOG_CTX_INTERNAL* log = (ENT_LOG_CTX_INTERNAL*)logHandle;
     if(log == NULL)
     {
-        if(sDefLog.isInit)
-            log = &sDefLog;
+        if(iENT_LogDefaultCtx()->isInit)
+            log = iENT_LogDefaultCtx();
         else
         {
             sts = -2;
@@ -1657,7 +2093,7 @@ ENT_PUBLIC MSG_ID_T ENT_LogCloseHandle(ENT_LOG logHandle)
     pthread_cond_destroy(&log->bufferCv);
 #endif
     
-    if(log!=&sDefLog)
+    if(log!=iENT_LogDefaultCtx())
     {
         if(log->moduleName)
         {
@@ -1700,9 +2136,9 @@ END_OF_ROUTINE:
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "iENT_LogGetCtx"
-static MSG_ID_T iENT_LogGetCtx(ENT_LOG_CTX** logCtx,ENT_LOG logHandle)
+static MSG_ID_T iENT_LogGetCtx(ENT_LOG_CTX_INTERNAL** logCtx,ENT_LOG logHandle)
 {
-    ENT_LOG_CTX* log = (ENT_LOG_CTX*)logHandle;
+    ENT_LOG_CTX_INTERNAL* log = (ENT_LOG_CTX_INTERNAL*)logHandle;
     *logCtx = NULL;
     
     if(sLogMutexInit==false)
@@ -1713,8 +2149,8 @@ static MSG_ID_T iENT_LogGetCtx(ENT_LOG_CTX** logCtx,ENT_LOG logHandle)
     
     if(log == NULL)
     {
-        if(sDefLog.isInit)
-            log = &sDefLog;
+        if(iENT_LogDefaultCtx()->isInit)
+            log = iENT_LogDefaultCtx();
         else
         {
             fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
@@ -1748,9 +2184,9 @@ static MSG_ID_T iENT_LogGetCtx(ENT_LOG_CTX** logCtx,ENT_LOG logHandle)
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "iENT_LogAcquireWriter"
-static MSG_ID_T iENT_LogAcquireWriter(ENT_LOG_CTX** logCtx,ENT_LOG logHandle)
+static MSG_ID_T iENT_LogAcquireWriter(ENT_LOG_CTX_INTERNAL** logCtx,ENT_LOG logHandle)
 {
-    ENT_LOG_CTX* log = NULL;
+    ENT_LOG_CTX_INTERNAL* log = NULL;
 
     *logCtx = NULL;
     if(sLogMutexInit==false)
@@ -1767,8 +2203,8 @@ static MSG_ID_T iENT_LogAcquireWriter(ENT_LOG_CTX** logCtx,ENT_LOG logHandle)
 
     if(logHandle == NULL)
     {
-        if(sDefLog.isInit)
-            log = &sDefLog;
+        if(iENT_LogDefaultCtx()->isInit)
+            log = iENT_LogDefaultCtx();
         else
         {
 #ifdef WIN32
@@ -1782,7 +2218,7 @@ static MSG_ID_T iENT_LogAcquireWriter(ENT_LOG_CTX** logCtx,ENT_LOG logHandle)
     }
     else
     {
-        log = (ENT_LOG_CTX*)logHandle;
+        log = (ENT_LOG_CTX_INTERNAL*)logHandle;
         if(log->tag!=ENTLOG_TAG || log->isInit==false)
         {
 #ifdef WIN32
@@ -1832,7 +2268,7 @@ static MSG_ID_T iENT_LogAcquireWriter(ENT_LOG_CTX** logCtx,ENT_LOG logHandle)
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "iENT_LogReleaseWriter"
-static void iENT_LogReleaseWriter(ENT_LOG_CTX* log)
+static void iENT_LogReleaseWriter(ENT_LOG_CTX_INTERNAL* log)
 {
     if(iENT_LogActiveDec(log) == 0 && iENT_LogIsClosing(log))
     {
@@ -1867,7 +2303,7 @@ static void iENT_LogReleaseWriter(ENT_LOG_CTX* log)
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "iENT_LogVRaw"
-static MSG_ID_T iENT_LogVRaw(ENT_LOG_CTX* log,const char* format,va_list va_args)
+static MSG_ID_T iENT_LogVRaw(ENT_LOG_CTX_INTERNAL* log,const char* format,va_list va_args)
 {
     char stackBuf[512];
     char* msgBuf = stackBuf;
@@ -1939,7 +2375,7 @@ static MSG_ID_T iENT_LogVRaw(ENT_LOG_CTX* log,const char* format,va_list va_args
 ENT_PUBLIC MSG_ID_T ENT_LogRaw(ENT_LOG logHandle,const char* format,...)
 {
     MSG_ID_T  sts=0;
-    ENT_LOG_CTX*  logCtx = NULL;
+    ENT_LOG_CTX_INTERNAL*  logCtx = NULL;
     
     sts = iENT_LogAcquireWriter(&logCtx,logHandle);
     if(sts<0)
@@ -1971,7 +2407,7 @@ ENT_PUBLIC MSG_ID_T ENT_LogRaw(ENT_LOG logHandle,const char* format,...)
  */
 #undef  FUNC_NAME
 #define FUNC_NAME "ENT_LogVPrint"
-static MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX* log,ENT_LOG_LEV_E logLevel,const char* format,va_list va_args)
+static MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX_INTERNAL* log,ENT_LOG_LEV_E logLevel,const char* format,va_list va_args)
 {
     char prefixBuf[96];
     char stackBuf[512];
@@ -2088,7 +2524,7 @@ static MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX* log,ENT_LOG_LEV_E logLevel,const cha
 ENT_PUBLIC MSG_ID_T ENT_LogFatal(ENT_LOG logHandle,const char* format,...)
 {
     MSG_ID_T  sts=0;
-    ENT_LOG_CTX*  logCtx = NULL;
+    ENT_LOG_CTX_INTERNAL*  logCtx = NULL;
     
     sts = iENT_LogAcquireWriter(&logCtx,logHandle);
     if(sts<0)
@@ -2129,7 +2565,7 @@ ENT_PUBLIC MSG_ID_T ENT_LogFatal(ENT_LOG logHandle,const char* format,...)
 ENT_PUBLIC MSG_ID_T ENT_LogError(ENT_LOG logHandle,const char* format,...)
 {
     MSG_ID_T  sts=0;
-    ENT_LOG_CTX*  logCtx = NULL;
+    ENT_LOG_CTX_INTERNAL*  logCtx = NULL;
     
     sts = iENT_LogAcquireWriter(&logCtx,logHandle);
     if(sts<0)
@@ -2170,7 +2606,7 @@ ENT_PUBLIC MSG_ID_T ENT_LogError(ENT_LOG logHandle,const char* format,...)
 ENT_PUBLIC MSG_ID_T ENT_LogWarn(ENT_LOG logHandle,const char* format,...)
 {
     MSG_ID_T  sts=0;
-    ENT_LOG_CTX*  logCtx = NULL;
+    ENT_LOG_CTX_INTERNAL*  logCtx = NULL;
     
     sts = iENT_LogAcquireWriter(&logCtx,logHandle);
     if(sts<0)
@@ -2211,7 +2647,7 @@ ENT_PUBLIC MSG_ID_T ENT_LogWarn(ENT_LOG logHandle,const char* format,...)
 ENT_PUBLIC MSG_ID_T ENT_LogPrint(ENT_LOG logHandle,const char* format,...)
 {
     MSG_ID_T  sts=0;
-    ENT_LOG_CTX*  logCtx = NULL;
+    ENT_LOG_CTX_INTERNAL*  logCtx = NULL;
     
     sts = iENT_LogAcquireWriter(&logCtx,logHandle);
     if(sts<0)
@@ -2252,7 +2688,7 @@ ENT_PUBLIC MSG_ID_T ENT_LogPrint(ENT_LOG logHandle,const char* format,...)
 ENT_PUBLIC MSG_ID_T ENT_LogDebug(ENT_LOG logHandle,const char* format,...)
 {
     MSG_ID_T  sts=0;
-    ENT_LOG_CTX*  logCtx = NULL;
+    ENT_LOG_CTX_INTERNAL*  logCtx = NULL;
     
     sts = iENT_LogAcquireWriter(&logCtx,logHandle);
     if(sts<0)

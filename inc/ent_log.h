@@ -22,6 +22,7 @@
 #include "ent_types.h"
 
 typedef void*  ENT_LOG;
+typedef struct ENT_LOG_CTX_TAG*  ENT_LOG_CTX;
 
 typedef enum
 {
@@ -52,6 +53,28 @@ ENT_PUBLIC MSG_ID_T  ENT_LogInit();
 ENT_PUBLIC MSG_ID_T  ENT_LogClose();
 
 ENT_PUBLIC MSG_ID_T  ENT_LogInitHandle(ENT_LOG* pLogHandle,const char* moduleName,const char* logPath);
+
+ENT_PUBLIC MSG_ID_T  ENT_LogCtxInit(ENT_LOG_CTX* pCtx);
+
+ENT_PUBLIC MSG_ID_T  ENT_LogCtxClose(ENT_LOG_CTX ctx);
+
+ENT_PUBLIC MSG_ID_T  ENT_LogCtxInitHandle(ENT_LOG_CTX ctx,ENT_LOG* pLogHandle,const char* moduleName,const char* logPath);
+
+ENT_PUBLIC MSG_ID_T  ENT_LogCtxSetOption(ENT_LOG_CTX ctx,ENT_LOG logHandle,ENT_LOG_OPTIONS_E option,const void* arg);
+
+ENT_PUBLIC MSG_ID_T  ENT_LogCtxCloseHandle(ENT_LOG_CTX ctx,ENT_LOG logHandle);
+
+ENT_PUBLIC MSG_ID_T  ENT_LogCtxRaw(ENT_LOG_CTX ctx,ENT_LOG logHandle,const char* format,...);
+
+ENT_PUBLIC MSG_ID_T  ENT_LogCtxFatal(ENT_LOG_CTX ctx,ENT_LOG logHandle,const char* format,...);
+
+ENT_PUBLIC MSG_ID_T  ENT_LogCtxError(ENT_LOG_CTX ctx,ENT_LOG logHandle,const char* format,...);
+
+ENT_PUBLIC MSG_ID_T  ENT_LogCtxWarn(ENT_LOG_CTX ctx,ENT_LOG logHandle,const char* format,...);
+
+ENT_PUBLIC MSG_ID_T  ENT_LogCtxPrint(ENT_LOG_CTX ctx,ENT_LOG logHandle,const char* format,...);
+
+ENT_PUBLIC MSG_ID_T  ENT_LogCtxDebug(ENT_LOG_CTX ctx,ENT_LOG logHandle,const char* format,...);
 
 ENT_PUBLIC MSG_ID_T  ENT_LogSetOption(ENT_LOG logHandle,ENT_LOG_OPTIONS_E option,const void* arg);
 

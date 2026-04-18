@@ -1,0 +1,106 @@
+/*-----------------------------------------------------------------------------
+ *   Copyright 2019 Fei Li
+ * 
+ *   Licensed under the Apache License, Version 2.0 (the "License");
+ *   you may not use this file except in compliance with the License.
+ *   You may obtain a copy of the License at
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ *   Unless required by applicable law or agreed to in writing, software
+ *   distributed under the License is distributed on an "AS IS" BASIS,
+ *   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *   See the License for the specific language governing permissions and
+ *   limitations under the License.
+ *
+ *-----------------------------------------------------------------------------
+ */
+#ifndef _I_ENT_LOG_H_
+#define _I_ENT_LOG_H_
+
+#include <stdio.h>
+#include <time.h>
+
+#ifdef WIN32
+#include <Windows.h>
+#else
+#include <pthread.h>
+#endif
+
+#include "ent_log.h"
+
+#define ENT_LOG_FLUSH_BATCH      256
+#define ENT_LOG_WRITE_BATCH      64
+#define ENT_LOG_FILE_BUFFER_SIZE  (64 * 1024)
+#define ENT_LOG_POOL_MSG_SIZE    1024
+#define ENT_LOG_POOL_MAX_FREE_NODES 512
+
+#define ENTLOG_TAG     (0x6AFEFE6A)
+#define ENTLOG_CTX_TAG (0x6AFEFE6B)
+
+typedef struct ENT_LOG_MSG_NODE_TAG
+{
+    struct ENT_LOG_MSG_NODE_TAG* next;
+    time_t                       rollTime;
+    size_t                       msgLen;
+    size_t                       msgCap;
+    bool                         forceFlush;
+    bool                         pooled;
+    char                         msg[1];
+} ENT_LOG_MSG_NODE;
+
+typedef struct ENT_LOG_CTX_INTERNAL_TAG
+{
+    unsigned int     tag;
+    bool             isInit;
+    bool             isDebug;
+    bool             isBuffer;
+    ENT_LOG_LEV_E    logLevel;
+    FILE*            logFp;
+#ifdef WIN32
+    CRITICAL_SECTION cs;
+    CONDITION_VARIABLE closeCv;
+    CONDITION_VARIABLE bufferCv;
+    HANDLE            bufferThread;
+    volatile LONG     closing;
+    volatile LONG     activeWriters;
+    volatile LONG     isDebugFast;
+    volatile LONG     isBufferFast;
+#else
+    pthread_mutex_t   cs;
+    pthread_cond_t    closeCv;
+    pthread_cond_t    bufferCv;
+    pthread_t         bufferThread;
+    volatile int      closing;
+    volatile int      activeWriters;
+    volatile int      isDebugFast;
+    volatile int      isBufferFast;
+#endif
+    bool             bufferThreadStarted;
+    bool             bufferThreadStop;
+    int              pendingFlushes;
+    int              flushBatch;
+    int              flushIntervalMs;
+    long long        lastFlushMs;
+    struct ENT_LOG_MSG_NODE_TAG* bufferHead;
+    struct ENT_LOG_MSG_NODE_TAG* bufferTail;
+    struct ENT_LOG_MSG_NODE_TAG* poolFreeHead;
+    int              poolFreeCount;
+    char*            moduleName;
+    char*            logPath;
+    int              maxNum;
+    time_t           nextCreate;
+} ENT_LOG_CTX_INTERNAL;
+
+typedef ENT_LOG_CTX_INTERNAL ENT_LOG_PRIV;
+
+typedef struct ENT_LOG_CTX_TAG
+{
+    unsigned int tag;
+    bool         isInit;
+} ENT_LOG_CTX_TAG;
+
+ENT_LOG_PRIV* iENT_LogDefaultCtx(void);
+ENT_LOG_PRIV* iENT_LogCtxFromHandle(ENT_LOG_CTX ctx);
+
+#endif
