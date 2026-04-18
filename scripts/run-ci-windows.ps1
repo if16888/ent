@@ -2,14 +2,23 @@ $ErrorActionPreference = "Stop"
 
 $Stage = if ($args.Length -gt 0) { $args[0] } else { "all" }
 $BuildDir = if ($env:BUILD_DIR) { $env:BUILD_DIR } else { "build-ci" }
-$Platform = if ($env:WINDOWS_CMAKE_PLATFORM) { $env:WINDOWS_CMAKE_PLATFORM } else { "x64" }
+$Platform = if ($env:WINDOWS_CMAKE_PLATFORM) { $env:WINDOWS_CMAKE_PLATFORM } else { "Win32" }
+$DisablePostgreSQL = if ($env:WINDOWS_DISABLE_PGSQL) { $env:WINDOWS_DISABLE_PGSQL } else { "" }
 
 function Run-Configure {
-    cmake -S . -B $BuildDir -A $Platform `
-        -DCMAKE_BUILD_TYPE=Release `
-        -DENT_ENABLE_SQLITE=ON `
-        -DENT_ENABLE_MYSQL=ON `
-        -DENT_ALLOW_VENDORED_DB_LIBS=ON
+    $CmakeArgs = @(
+        "-S", ".",
+        "-B", $BuildDir,
+        "-A", $Platform,
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DENT_ENABLE_SQLITE=ON",
+        "-DENT_ENABLE_MYSQL=ON",
+        "-DENT_ALLOW_VENDORED_DB_LIBS=ON"
+    )
+    if ($DisablePostgreSQL -and $DisablePostgreSQL.ToLower() -notin @("0", "off", "false")) {
+        $CmakeArgs += "-DCMAKE_DISABLE_FIND_PACKAGE_PostgreSQL=ON"
+    }
+    cmake @CmakeArgs
 }
 
 function Run-Build {
