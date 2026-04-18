@@ -103,7 +103,7 @@ static void inject_capture_cb(char** fields, char** rowRes,
 static void safe_reset_ent(void)
 {
     ENT_Close();
-    memset(&gEntCtx, 0, sizeof(gEntCtx));
+    safe_reset_ent();
 }
 
 static int get_temp_root(char* path, size_t path_len)
@@ -311,7 +311,7 @@ static void test_init_long_name_no_overflow(void)
     if (ret == 0) {
         ENT_Close();
     }
-    memset(&gEntCtx, 0, sizeof(gEntCtx));
+    safe_reset_ent();
 
     TEST_END();
 }
@@ -349,7 +349,7 @@ static void test_init_long_workpath_no_overflow(void)
     if (ret == 0) {
         ENT_Close();
     }
-    memset(&gEntCtx, 0, sizeof(gEntCtx));
+    safe_reset_ent();
 
     TEST_END();
 }
