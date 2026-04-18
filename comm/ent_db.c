@@ -445,11 +445,11 @@ ENT_PUBLIC MSG_ID_T ENT_DbOpen(DB_HANDLE dbHandle)
 
 END_OF_ROUTINE:
 #ifdef WIN32
-    LeaveCriticalSection(&dbCfg->cs); 
+    LeaveCriticalSection(&dbCfg->cs);
 #else
     pthread_mutex_unlock(&dbCfg->cs);
 #endif
-       
+
     return sts;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
@@ -610,7 +610,7 @@ ENT_PUBLIC MSG_ID_T ENT_DbRead(DB_HANDLE dbHandle,const char* sql,SqlResultCB sq
             break;
     }
 #ifdef WIN32
-    LeaveCriticalSection(&dbCfg->cs); 
+    LeaveCriticalSection(&dbCfg->cs);
 #else
     pthread_mutex_unlock(&dbCfg->cs);
 #endif
@@ -695,10 +695,144 @@ ENT_PUBLIC MSG_ID_T ENT_DbWrite(DB_HANDLE dbHandle,const char* sql,SqlResultCB s
             break;
     }
 #ifdef WIN32
-    LeaveCriticalSection(&dbCfg->cs); 
+    LeaveCriticalSection(&dbCfg->cs);
 #else
     pthread_mutex_unlock(&dbCfg->cs);
 #endif
-     
+
+    return sts;
+}
+
+ENT_PUBLIC MSG_ID_T ENT_DbReadParams(DB_HANDLE dbHandle,
+                                     const char* sql,
+                                     const ENT_DB_PARAM* params,
+                                     size_t paramCount,
+                                     SqlResultCB sqlCb,
+                                     void* userData)
+{
+    MSG_ID_T sts=ENT_SYS_NORMAL;
+    DB_CFG*  dbCfg=NULL;
+
+    if(sql==NULL)
+    {
+        IENT_LOG_ERROR("Arguments are invalid.\n");
+        return ENT_DBS_BAD_ARGUMENT;
+    }
+
+    sts = iENT_DbValidateHandle(dbHandle, &dbCfg, true);
+    if(sts < 0)
+    {
+        return sts;
+    }
+
+    if(dbCfg->isOpen==false)
+    {
+        sts = ENT_DbOpen(dbCfg);
+        if(sts<0)
+        {
+            IENT_LOG_ERROR("ENT_DbOpen failed.\n");
+            return sts;
+        }
+    }
+
+#ifdef WIN32
+    EnterCriticalSection(&dbCfg->cs);
+#else
+    pthread_mutex_lock(&dbCfg->cs);
+#endif
+
+    switch(dbCfg->dbType)
+    {
+        case SQLITE_TYPE:
+#if ENT_ENABLE_SQLITE
+            sts = ENT_DbSqliteReadParams(dbCfg->dbInstance.sqlite, sql, params, paramCount, sqlCb, userData);
+#else
+            sts = iENT_DbBackendUnsupported(SQLITE_TYPE);
+#endif
+            break;
+        case MYSQL_TYPE:
+            sts = iENT_DbBackendUnsupported(MYSQL_TYPE);
+            break;
+        case PGSQL_TYPE:
+            sts = iENT_DbBackendUnsupported(PGSQL_TYPE);
+            break;
+        default:
+            sts = ENT_DBS_BAD_HANDLE;
+            break;
+    }
+
+#ifdef WIN32
+    LeaveCriticalSection(&dbCfg->cs);
+#else
+    pthread_mutex_unlock(&dbCfg->cs);
+#endif
+
+    return sts;
+}
+
+ENT_PUBLIC MSG_ID_T ENT_DbWriteParams(DB_HANDLE dbHandle,
+                                      const char* sql,
+                                      const ENT_DB_PARAM* params,
+                                      size_t paramCount,
+                                      SqlResultCB sqlCb,
+                                      void* userData)
+{
+    MSG_ID_T sts=ENT_SYS_NORMAL;
+    DB_CFG*  dbCfg=NULL;
+
+    if(sql==NULL)
+    {
+        IENT_LOG_ERROR("Arguments are invalid.\n");
+        return ENT_DBS_BAD_ARGUMENT;
+    }
+
+    sts = iENT_DbValidateHandle(dbHandle, &dbCfg, true);
+    if(sts < 0)
+    {
+        return sts;
+    }
+
+    if(dbCfg->isOpen==false)
+    {
+        sts = ENT_DbOpen(dbCfg);
+        if(sts<0)
+        {
+            IENT_LOG_ERROR("ENT_DbOpen failed.\n");
+            return sts;
+        }
+    }
+
+#ifdef WIN32
+    EnterCriticalSection(&dbCfg->cs);
+#else
+    pthread_mutex_lock(&dbCfg->cs);
+#endif
+
+    switch(dbCfg->dbType)
+    {
+        case SQLITE_TYPE:
+#if ENT_ENABLE_SQLITE
+            sts = ENT_DbSqliteWriteParams(dbCfg->dbInstance.sqlite, sql, params, paramCount, sqlCb, userData);
+#else
+            sts = iENT_DbBackendUnsupported(SQLITE_TYPE);
+#endif
+            break;
+        case MYSQL_TYPE:
+            sts = iENT_DbBackendUnsupported(MYSQL_TYPE);
+            break;
+        case PGSQL_TYPE:
+            sts = iENT_DbBackendUnsupported(PGSQL_TYPE);
+            break;
+        default:
+            sts = ENT_DBS_BAD_HANDLE;
+            break;
+    }
+
+#ifdef WIN32
+    LeaveCriticalSection(&dbCfg->cs);
+#else
+    pthread_mutex_unlock(&dbCfg->cs);
+#endif
+
     return sts;
 }

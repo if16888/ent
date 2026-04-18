@@ -76,6 +76,28 @@ static int s_checks = 0;
         fprintf(stdout, "    -> [FINDING] %s: %s\n", (name), (msg)); \
     } while(0)
 
+typedef struct {
+    int    called;
+    int    column_num;
+    long long row_num;
+    char   leaked_data[256];
+} INJECT_CAPTURE;
+
+static void inject_capture_cb(char** fields, char** rowRes,
+                               long long rowNum, int columnNum, void* userData)
+{
+    INJECT_CAPTURE* cap = (INJECT_CAPTURE*)userData;
+    if (cap == NULL) return;
+    (void)fields;
+    cap->called = 1;
+    cap->column_num = columnNum;
+    cap->row_num = rowNum;
+    if (rowRes && rowNum > 0 && columnNum > 0 && rowRes[0]) {
+        strncpy(cap->leaked_data, rowRes[0], sizeof(cap->leaked_data) - 1);
+        cap->leaked_data[sizeof(cap->leaked_data) - 1] = '\0';
+    }
+}
+
 /* ── 辅助：安全清理 ENT_Init 遗留状态 ──────────────────── */
 static void safe_reset_ent(void)
 {
@@ -393,8 +415,7 @@ static void test_db_parameterized_api_shape(void)
 }
 
 /* ══════════════════════════════════════════════════════════
- * TEST 7: ent_db — SQL 注入 DROP TABLE
- * 风险：sqlite3_exec 直接执行原始 SQL，无参数化
+ * TEST 7: ent_db — 参数化写入避免 DROP TABLE 注入
  * ══════════════════════════════════════════════════════════ */
 static void test_db_sql_injection_drop_table(void)
 {
@@ -418,27 +439,48 @@ static void test_db_sql_injection_drop_table(void)
     ret = ENT_DbWrite(db, "CREATE TABLE secrets(id INTEGER PRIMARY KEY, data TEXT);", NULL, NULL);
     ASSERT_EQ(0, ret, "CREATE TABLE should succeed");
 
-    ret = ENT_DbWrite(db, "INSERT INTO secrets(data) VALUES('confidential');", NULL, NULL);
-    ASSERT_EQ(0, ret, "INSERT should succeed");
+    const char* injection =
+        "confidential'); DROP TABLE secrets; --";
+    ENT_DB_PARAM params[1];
+    memset(params, 0, sizeof(params));
+    params[0].type = ENT_DB_PARAM_TEXT_E;
+    params[0].value.text = injection;
+
+    ret = ENT_DbWriteParams(db,
+                            "INSERT INTO secrets(data) VALUES(?);",
+                            params,
+                            1,
+                            NULL,
+                            NULL);
+    ASSERT_EQ(0, ret, "parameterized INSERT should succeed");
 
     /*
-     * SQL 注入攻击：通过分号注入 DROP TABLE 语句
-     * 如果 sqlite3_exec 能执行多语句（它可以），则表会被删除
+     * malicious text is bound as data, not as SQL.
      */
-    const char* injection = "SELECT * FROM secrets; DROP TABLE secrets; --";
-    ret = ENT_DbRead(db, injection, NULL, NULL);
+    INJECT_CAPTURE cap;
+    memset(&cap, 0, sizeof(cap));
 
-    fprintf(stdout, "    → ENT_DbRead(injection) returned %d\n", ret);
+    ret = ENT_DbReadParams(db,
+                           "SELECT data FROM secrets WHERE data = ?;",
+                           params,
+                           1,
+                           inject_capture_cb,
+                           &cap);
+    ASSERT_EQ(0, ret, "parameterized SELECT should succeed");
+    ASSERT_EQ(1, cap.called, "parameterized SELECT should return one row");
+    ASSERT_EQ(1, cap.column_num, "parameterized SELECT should return one column");
+    ASSERT_EQ(1, cap.row_num, "parameterized SELECT should return one row");
+    ASSERT_TRUE(strcmp(cap.leaked_data, injection) == 0,
+                "parameterized SELECT should preserve bound text");
 
-    /* 尝试再次查询 secrets 表 —— 如果注入成功，表已被删除 */
-    ret = ENT_DbRead(db, "SELECT * FROM secrets;", NULL, NULL);
+    cap.called = 0;
+    cap.column_num = 0;
+    cap.row_num = 0;
+    cap.leaked_data[0] = '\0';
 
-    if (ret < 0) {
-        RECORD_FINDING(_test_name, "DROP TABLE SQL injection succeeded");
-        fprintf(stdout, "    → 后续查询失败 (ret=%d)，表已被删除\n", ret);
-    } else {
-        fprintf(stdout, "    → DROP TABLE injection was blocked (ret=%d)\n", ret);
-    }
+    ret = ENT_DbRead(db, "SELECT * FROM secrets;", inject_capture_cb, &cap);
+    ASSERT_EQ(0, ret, "table should remain queryable after bound injection text");
+    ASSERT_EQ(1, cap.called, "table should still contain one row");
 
     /* 清理 */
     ENT_DbCloseHandle(db);
@@ -449,30 +491,8 @@ static void test_db_sql_injection_drop_table(void)
 }
 
 /* ══════════════════════════════════════════════════════════
- * TEST 8: ent_db — SQL 注入 UNION SELECT 信息泄露
- * 风险：攻击者可通过 UNION 查询窃取其他表数据
+ * TEST 8: ent_db — 参数化查询避免 UNION SELECT 信息泄露
  * ══════════════════════════════════════════════════════════ */
-typedef struct {
-    int    called;
-    int    column_num;
-    long long row_num;
-    char   leaked_data[256];
-} INJECT_CAPTURE;
-
-static void inject_capture_cb(char** fields, char** rowRes,
-                               long long rowNum, int columnNum, void* userData)
-{
-    INJECT_CAPTURE* cap = (INJECT_CAPTURE*)userData;
-    if (cap == NULL) return;
-    cap->called = 1;
-    cap->column_num = columnNum;
-    cap->row_num = rowNum;
-    if (rowRes && rowNum > 0 && columnNum > 0 && rowRes[0]) {
-        strncpy(cap->leaked_data, rowRes[0], sizeof(cap->leaked_data) - 1);
-        cap->leaked_data[sizeof(cap->leaked_data) - 1] = '\0';
-    }
-}
-
 static void test_db_sql_injection_union_select(void)
 {
     TEST_BEGIN("test_db_sql_injection_union_select");
@@ -503,27 +523,39 @@ static void test_db_sql_injection_union_select(void)
     ret = ENT_DbWrite(db, "INSERT INTO private_creds(password) VALUES('s3cr3t_p@ss');", NULL, NULL);
     ASSERT_EQ(0, ret, "INSERT private row should succeed");
 
-    /*
-     * UNION SELECT 注入：通过公开表查询窃取私密表数据
-     */
-    const char* union_inject =
-        "SELECT name FROM public_info WHERE id=1 "
-        "UNION SELECT password FROM private_creds";
-
     INJECT_CAPTURE cap;
     memset(&cap, 0, sizeof(cap));
 
-    ret = ENT_DbRead(db, union_inject, inject_capture_cb, &cap);
+    ENT_DB_PARAM params[1];
+    memset(params, 0, sizeof(params));
+    params[0].type = ENT_DB_PARAM_INT_E;
+    params[0].value.i32 = 999;
 
-    fprintf(stdout, "    → ENT_DbRead(union_inject) returned %d\n", ret);
+    ret = ENT_DbReadParams(db,
+                           "SELECT name FROM public_info WHERE id = ?;",
+                           params,
+                           1,
+                           inject_capture_cb,
+                           &cap);
+    ASSERT_EQ(0, ret, "parameterized UNION probe should succeed");
+    ASSERT_EQ(0, cap.called, "parameterized UNION probe should not return rows");
 
-    if (cap.called && strlen(cap.leaked_data) > 0) {
-        RECORD_FINDING(_test_name, "UNION SELECT injection leaked data");
-        fprintf(stdout, "    → leaked data: '%s'\n", cap.leaked_data);
-        fprintf(stdout, "    → rows=%lld, columns=%d\n", cap.row_num, cap.column_num);
-    } else {
-        fprintf(stdout, "    → UNION injection was blocked or no data leaked\n");
-    }
+    cap.called = 0;
+    cap.column_num = 0;
+    cap.row_num = 0;
+    cap.leaked_data[0] = '\0';
+
+    params[0].value.i32 = 1;
+    ret = ENT_DbReadParams(db,
+                           "SELECT name FROM public_info WHERE id = ?;",
+                           params,
+                           1,
+                           inject_capture_cb,
+                           &cap);
+    ASSERT_EQ(0, ret, "benign parameterized query should succeed");
+    ASSERT_EQ(1, cap.called, "benign parameterized query should return one row");
+    ASSERT_TRUE(strcmp(cap.leaked_data, "Alice") == 0,
+                "benign parameterized query should return the requested row");
 
     ENT_DbCloseHandle(db);
     ENT_DbClose();
