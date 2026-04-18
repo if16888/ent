@@ -61,7 +61,7 @@ typedef struct MYSQL_PARAM_BIND_CTX
 {
     MYSQL_BIND* binds;
     unsigned long* lengths;
-    my_bool* isNull;
+    bool* isNull;
     int* int32Values;
     long long* int64Values;
     double* doubleValues;
@@ -71,7 +71,7 @@ typedef struct MYSQL_RESULT_BIND_CTX
 {
     MYSQL_BIND* binds;
     unsigned long* lengths;
-    my_bool* isNull;
+    bool* isNull;
     char** buffers;
     size_t* bufferSizes;
 } MYSQL_RESULT_BIND_CTX;
@@ -120,7 +120,7 @@ static void iENT_DbMySQLFreeResultBindCtx(MYSQL_RESULT_BIND_CTX* ctx, size_t fie
 static MSG_ID_T iENT_DbMySQLBindParam(const ENT_DB_PARAM* param,
                                       MYSQL_BIND* bind,
                                       unsigned long* length,
-                                      my_bool* isNull,
+                                      bool* isNull,
                                       int* int32Value,
                                       long long* int64Value,
                                       double* doubleValue)
@@ -252,7 +252,7 @@ static MSG_ID_T iENT_DbMySQLBindParams(const ENT_DB_PARAM* params,
 
     bindCtx->binds = (MYSQL_BIND*)calloc(paramCount, sizeof(MYSQL_BIND));
     bindCtx->lengths = (unsigned long*)calloc(paramCount, sizeof(unsigned long));
-    bindCtx->isNull = (my_bool*)calloc(paramCount, sizeof(my_bool));
+    bindCtx->isNull = (bool*)calloc(paramCount, sizeof(bool));
     bindCtx->int32Values = (int*)calloc(paramCount, sizeof(int));
     bindCtx->int64Values = (long long*)calloc(paramCount, sizeof(long long));
     bindCtx->doubleValues = (double*)calloc(paramCount, sizeof(double));
@@ -337,7 +337,7 @@ static MSG_ID_T iENT_DbMySQLBindResults(MYSQL_STMT* stmt,
 
     resultCtx->binds = (MYSQL_BIND*)calloc(fieldCount, sizeof(MYSQL_BIND));
     resultCtx->lengths = (unsigned long*)calloc(fieldCount, sizeof(unsigned long));
-    resultCtx->isNull = (my_bool*)calloc(fieldCount, sizeof(my_bool));
+    resultCtx->isNull = (bool*)calloc(fieldCount, sizeof(bool));
     resultCtx->buffers = (char**)calloc(fieldCount, sizeof(char*));
     resultCtx->bufferSizes = (size_t*)calloc(fieldCount, sizeof(size_t));
     if(resultCtx->binds == NULL || resultCtx->lengths == NULL ||
@@ -577,7 +577,7 @@ static MSG_ID_T iENT_DbMySQLExecPrepared(MYSQL* dbHandle,
     }
 
     {
-        my_bool updateMaxLength = 1;
+        bool updateMaxLength = true;
         if(mysql_stmt_attr_set(stmt, STMT_ATTR_UPDATE_MAX_LENGTH, &updateMaxLength))
         {
             IENT_LOG_WARN("mysql_stmt_attr_set failed:[%s]\n", mysql_stmt_error(stmt));
