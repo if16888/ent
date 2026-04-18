@@ -214,6 +214,40 @@ static void cleanup_temp_db_path(const char* db_path)
 #endif
 }
 
+static const char* read_env_or_null(const char* name)
+{
+    const char* value = getenv(name);
+    if(value != NULL && value[0] == '\0')
+    {
+        return NULL;
+    }
+    return value;
+}
+
+static int test_security_pgsql_is_configured(const char** host,
+                                             const char** database,
+                                             const char** user,
+                                             const char** passwd,
+                                             int* port)
+{
+    *host = read_env_or_null("ENT_PGSQL_HOST");
+    *database = read_env_or_null("ENT_PGSQL_DB");
+    *user = read_env_or_null("ENT_PGSQL_USER");
+    *passwd = getenv("ENT_PGSQL_PASSWORD");
+    if(*passwd == NULL)
+    {
+        *passwd = "";
+    }
+    *port = 5432;
+
+    if(read_env_or_null("ENT_PGSQL_PORT") != NULL)
+    {
+        *port = atoi(getenv("ENT_PGSQL_PORT"));
+    }
+
+    return (*host != NULL && *database != NULL && *user != NULL);
+}
+
 /* ══════════════════════════════════════════════════════════
  * TEST 1: ent_init — 超长 name 不崩溃
  * 风险：sprintf(tmpStr, "ent_%s", name) 无边界检查
@@ -565,6 +599,83 @@ static void test_db_sql_injection_union_select(void)
 }
 
 /* ══════════════════════════════════════════════════════════
+ * TEST 9: ent_db — PostgreSQL 参数化查询应使用绑定参数
+ * 风险：PgSQL 分支仍然只走 raw SQL，参数化 API 直接返回 UNSUPPORTED
+ * ══════════════════════════════════════════════════════════ */
+static void test_db_pgsql_parameterized_queries_if_configured(void)
+{
+    TEST_BEGIN("test_db_pgsql_parameterized_queries_if_configured");
+
+#if ENT_ENABLE_PGSQL
+    const char* host;
+    const char* database;
+    const char* user;
+    const char* passwd;
+    int port;
+    DB_HANDLE db = NULL;
+    MSG_ID_T ret;
+    INJECT_CAPTURE cap;
+    ENT_DB_PARAM params[1];
+
+    if(test_security_pgsql_is_configured(&host, &database, &user, &passwd, &port) == 0)
+    {
+        fprintf(stdout, "    -> PostgreSQL security test skipped: set ENT_PGSQL_HOST, ENT_PGSQL_DB, and ENT_PGSQL_USER to run it.\n");
+        TEST_END();
+        return;
+    }
+
+    memset(&cap, 0, sizeof(cap));
+    memset(params, 0, sizeof(params));
+
+    ret = ENT_DbInit();
+    ASSERT_TRUE(ret == 0 || ret == 1, "ENT_DbInit should succeed");
+
+    ret = ENT_DbInitHandle(&db, PGSQL_TYPE, host, database, user, passwd, port);
+    ASSERT_EQ(0, ret, "ENT_DbInitHandle should create a PostgreSQL handle");
+
+    ret = ENT_DbOpen(db);
+    ASSERT_EQ(0, ret, "ENT_DbOpen should connect to PostgreSQL");
+
+    ret = ENT_DbWrite(db,
+                      "CREATE TEMP TABLE ent_security_pgsql(id SERIAL PRIMARY KEY, data TEXT NOT NULL);",
+                      NULL,
+                      NULL);
+    ASSERT_EQ(0, ret, "CREATE TEMP TABLE should succeed");
+
+    params[0].type = ENT_DB_PARAM_TEXT_E;
+    params[0].value.text = "pg'); DROP TABLE ent_security_pgsql; --";
+
+    ret = ENT_DbWriteParams(db,
+                            "INSERT INTO ent_security_pgsql(data) VALUES(?);",
+                            params,
+                            1,
+                            NULL,
+                            NULL);
+    ASSERT_EQ(0, ret, "PostgreSQL parameterized INSERT should succeed");
+
+    ret = ENT_DbReadParams(db,
+                           "SELECT data FROM ent_security_pgsql WHERE data = ?;",
+                           params,
+                           1,
+                           inject_capture_cb,
+                           &cap);
+    ASSERT_EQ(0, ret, "PostgreSQL parameterized SELECT should succeed");
+    ASSERT_EQ(1, cap.called, "PostgreSQL parameterized SELECT should return one row");
+    ASSERT_EQ(1, cap.column_num, "PostgreSQL parameterized SELECT should return one column");
+    ASSERT_EQ(1, cap.row_num, "PostgreSQL parameterized SELECT should return one row");
+    ASSERT_TRUE(strcmp(cap.leaked_data, params[0].value.text) == 0,
+                "PostgreSQL parameterized SELECT should preserve bound text");
+
+    ENT_DbCloseHandle(db);
+    ENT_DbClose();
+#else
+    fprintf(stdout, "    -> PostgreSQL security test skipped: ENT_ENABLE_PGSQL is disabled in this build.\n");
+#endif
+
+    TEST_END();
+}
+
+/* ══════════════════════════════════════════════════════════
  * TEST 9: ent_db — NULL sql 参数被正确拒绝
  * ══════════════════════════════════════════════════════════ */
 static void test_db_null_sql_rejected(void)
@@ -647,6 +758,7 @@ int main(void)
     test_db_parameterized_api_shape();
     test_db_sql_injection_drop_table();
     test_db_sql_injection_union_select();
+    test_db_pgsql_parameterized_queries_if_configured();
     test_db_null_sql_rejected();
     test_db_null_handle_rejected();
 

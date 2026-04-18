@@ -754,7 +754,11 @@ ENT_PUBLIC MSG_ID_T ENT_DbReadParams(DB_HANDLE dbHandle,
             sts = iENT_DbBackendUnsupported(MYSQL_TYPE);
             break;
         case PGSQL_TYPE:
+#if ENT_ENABLE_PGSQL
+            sts = ENT_DbPgSQLReadParams(dbCfg->dbInstance.pgsql, sql, params, paramCount, sqlCb, userData);
+#else
             sts = iENT_DbBackendUnsupported(PGSQL_TYPE);
+#endif
             break;
         default:
             sts = ENT_DBS_BAD_HANDLE;
@@ -821,7 +825,11 @@ ENT_PUBLIC MSG_ID_T ENT_DbWriteParams(DB_HANDLE dbHandle,
             sts = iENT_DbBackendUnsupported(MYSQL_TYPE);
             break;
         case PGSQL_TYPE:
+#if ENT_ENABLE_PGSQL
+            sts = ENT_DbPgSQLWriteParams(dbCfg->dbInstance.pgsql, sql, params, paramCount, sqlCb, userData);
+#else
             sts = iENT_DbBackendUnsupported(PGSQL_TYPE);
+#endif
             break;
         default:
             sts = ENT_DBS_BAD_HANDLE;
