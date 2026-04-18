@@ -62,6 +62,10 @@ if(TARGET ent_s)
 
   target_link_libraries(test_ent_script PRIVATE ent_s)
 
+  if(APPLE OR UNIX)
+    target_link_libraries(test_ent_script PRIVATE pthread)
+  endif()
+
   add_test(NAME test_ent_script COMMAND test_ent_script)
 endif()
 

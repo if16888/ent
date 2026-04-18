@@ -21,6 +21,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifndef WIN32
+#include <pthread.h>
+#endif
+
 #if ENT_ENABLE_LUA
 #include "lua.h"
 #include "lauxlib.h"
@@ -33,6 +37,30 @@
 #else
 #define ENT_SCRIPT_PATH_MAX 1024
 #endif
+#endif
+
+#ifdef WIN32
+static SRWLOCK sScriptLock = SRWLOCK_INIT;
+static void iENT_ScriptLock(void)
+{
+    AcquireSRWLockExclusive(&sScriptLock);
+}
+
+static void iENT_ScriptUnlock(void)
+{
+    ReleaseSRWLockExclusive(&sScriptLock);
+}
+#else
+static pthread_mutex_t sScriptLock = PTHREAD_MUTEX_INITIALIZER;
+static void iENT_ScriptLock(void)
+{
+    pthread_mutex_lock(&sScriptLock);
+}
+
+static void iENT_ScriptUnlock(void)
+{
+    pthread_mutex_unlock(&sScriptLock);
+}
 #endif
 
 typedef struct
@@ -131,13 +159,18 @@ static void iENT_ScriptDisableDangerousGlobals(lua_State* state)
 
 ENT_PUBLIC MSG_ID_T ENT_ScriptInit(const char* scriptRoot)
 {
+    MSG_ID_T sts = ENT_SYS_NORMAL;
+
+    iENT_ScriptLock();
     if(gEntScriptCtx.isInit == true)
     {
+        iENT_ScriptUnlock();
         return ENT_SCR_ALREADY_INIT;
     }
 
     if(iENT_ScriptIsBlank(scriptRoot))
     {
+        iENT_ScriptUnlock();
         return ENT_SCR_BAD_ARGUMENT;
     }
 
@@ -145,6 +178,7 @@ ENT_PUBLIC MSG_ID_T ENT_ScriptInit(const char* scriptRoot)
                            sizeof(gEntScriptCtx.scriptRoot),
                            scriptRoot) != ENT_SYS_NORMAL)
     {
+        iENT_ScriptUnlock();
         return ENT_SCR_LOAD_FAILED;
     }
 
@@ -153,6 +187,7 @@ ENT_PUBLIC MSG_ID_T ENT_ScriptInit(const char* scriptRoot)
     if(gEntScriptCtx.state == NULL)
     {
         memset(gEntScriptCtx.scriptRoot, 0, sizeof(gEntScriptCtx.scriptRoot));
+        iENT_ScriptUnlock();
         return ENT_SCR_LOAD_FAILED;
     }
 
@@ -161,7 +196,9 @@ ENT_PUBLIC MSG_ID_T ENT_ScriptInit(const char* scriptRoot)
 #endif
 
     gEntScriptCtx.isInit = true;
-    return ENT_SYS_NORMAL;
+    sts = ENT_SYS_NORMAL;
+    iENT_ScriptUnlock();
+    return sts;
 }
 
 ENT_PUBLIC MSG_ID_T ENT_ScriptReload(const char* scriptName)
@@ -171,14 +208,19 @@ ENT_PUBLIC MSG_ID_T ENT_ScriptReload(const char* scriptName)
     MSG_ID_T sts = ENT_SYS_NORMAL;
     int rc = 0;
 #endif
+    MSG_ID_T ret = ENT_SYS_NORMAL;
+
+    iENT_ScriptLock();
 
     if(gEntScriptCtx.isInit == false)
     {
+        iENT_ScriptUnlock();
         return ENT_SCR_NOT_INITIALIZED;
     }
 
     if(iENT_ScriptIsBlank(scriptName))
     {
+        iENT_ScriptUnlock();
         return ENT_SCR_BAD_ARGUMENT;
     }
 
@@ -189,7 +231,8 @@ ENT_PUBLIC MSG_ID_T ENT_ScriptReload(const char* scriptName)
                               scriptName);
     if(sts != ENT_SYS_NORMAL)
     {
-        return sts;
+        ret = sts;
+        goto END_OF_ROUTINE;
     }
 
     rc = luaL_loadfile(gEntScriptCtx.state, scriptPath);
@@ -198,7 +241,8 @@ ENT_PUBLIC MSG_ID_T ENT_ScriptReload(const char* scriptName)
         fprintf(stderr, "ENT_ScriptReload compile failed,file[%s],reason[%s]\n",
                 scriptPath, lua_tostring(gEntScriptCtx.state, -1));
         lua_pop(gEntScriptCtx.state, 1);
-        return ENT_SCR_COMPILE_FAILED;
+        ret = ENT_SCR_COMPILE_FAILED;
+        goto END_OF_ROUTINE;
     }
 
     rc = lua_pcall(gEntScriptCtx.state, 0, 0, 0);
@@ -207,26 +251,37 @@ ENT_PUBLIC MSG_ID_T ENT_ScriptReload(const char* scriptName)
         fprintf(stderr, "ENT_ScriptReload runtime failed,file[%s],reason[%s]\n",
                 scriptPath, lua_tostring(gEntScriptCtx.state, -1));
         lua_pop(gEntScriptCtx.state, 1);
-        return ENT_SCR_RUNTIME_FAILED;
+        ret = ENT_SCR_RUNTIME_FAILED;
+        goto END_OF_ROUTINE;
     }
 
-    return ENT_SYS_NORMAL;
+    ret = ENT_SYS_NORMAL;
+END_OF_ROUTINE:
+    iENT_ScriptUnlock();
+    return ret;
 #endif
 
-    return ENT_SCR_UNSUPPORTED;
+    ret = ENT_SCR_UNSUPPORTED;
+    iENT_ScriptUnlock();
+    return ret;
 }
 
 ENT_PUBLIC MSG_ID_T ENT_ScriptCall(const char* fn,
                                    const ENT_SCRIPT_ARG_T* in,
                                    ENT_SCRIPT_RET_T* out)
 {
+    MSG_ID_T ret = ENT_SYS_NORMAL;
+
+    iENT_ScriptLock();
     if(gEntScriptCtx.isInit == false)
     {
+        iENT_ScriptUnlock();
         return ENT_SCR_NOT_INITIALIZED;
     }
 
     if(iENT_ScriptIsBlank(fn) || out == NULL)
     {
+        iENT_ScriptUnlock();
         return ENT_SCR_BAD_ARGUMENT;
     }
 
@@ -239,7 +294,8 @@ ENT_PUBLIC MSG_ID_T ENT_ScriptCall(const char* fn,
         if(!lua_isfunction(gEntScriptCtx.state, -1))
         {
             lua_pop(gEntScriptCtx.state, 1);
-            return ENT_SCR_FUNC_NOTFOUND;
+            ret = ENT_SCR_FUNC_NOTFOUND;
+            goto END_OF_ROUTINE;
         }
 
         lua_newtable(gEntScriptCtx.state);
@@ -293,7 +349,8 @@ ENT_PUBLIC MSG_ID_T ENT_ScriptCall(const char* fn,
             fprintf(stderr, "ENT_ScriptCall runtime failed,fn[%s],reason[%s]\n",
                     fn, lua_tostring(gEntScriptCtx.state, -1));
             lua_pop(gEntScriptCtx.state, 1);
-            return ENT_SCR_RUNTIME_FAILED;
+            ret = ENT_SCR_RUNTIME_FAILED;
+            goto END_OF_ROUTINE;
         }
 
         out->code = 0;
@@ -328,19 +385,28 @@ ENT_PUBLIC MSG_ID_T ENT_ScriptCall(const char* fn,
         }
 
         lua_pop(gEntScriptCtx.state, 1);
-        return ENT_SYS_NORMAL;
+        ret = ENT_SYS_NORMAL;
+END_OF_ROUTINE:
+        iENT_ScriptUnlock();
+        return ret;
     }
 #endif
 
     out->code = -1;
     out->message[0] = '\0';
-    return ENT_SCR_UNSUPPORTED;
+    ret = ENT_SCR_UNSUPPORTED;
+    iENT_ScriptUnlock();
+    return ret;
 }
 
 ENT_PUBLIC MSG_ID_T ENT_ScriptClose(void)
 {
+    MSG_ID_T ret = ENT_SYS_NORMAL;
+
+    iENT_ScriptLock();
     if(gEntScriptCtx.isInit == false)
     {
+        iENT_ScriptUnlock();
         return ENT_SCR_NOT_INITIALIZED;
     }
 
@@ -353,5 +419,7 @@ ENT_PUBLIC MSG_ID_T ENT_ScriptClose(void)
 #endif
 
     memset(&gEntScriptCtx, 0, sizeof(gEntScriptCtx));
-    return ENT_SYS_NORMAL;
+    ret = ENT_SYS_NORMAL;
+    iENT_ScriptUnlock();
+    return ret;
 }

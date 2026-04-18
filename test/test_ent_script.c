@@ -2,6 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef WIN32
+#include <pthread.h>
+#endif
+
 #include "ent_script.h"
 
 static int expect_true(int condition, const char* message)
@@ -13,6 +17,90 @@ static int expect_true(int condition, const char* message)
     }
     return 0;
 }
+
+#ifndef WIN32
+typedef struct
+{
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    int ready;
+    int start;
+    int failed;
+#if ENT_ENABLE_LUA
+    const char* scriptName;
+#endif
+    const char* functionName;
+    const ENT_SCRIPT_ARG_T* in;
+    int iterations;
+} TEST_SCRIPT_RACE_CTX;
+
+static int iENT_ScriptReloadStatusAllowed(MSG_ID_T sts)
+{
+#if ENT_ENABLE_LUA
+    return (sts == ENT_SYS_NORMAL ||
+            sts == ENT_SCR_NOT_INITIALIZED ||
+            sts == ENT_SCR_COMPILE_FAILED);
+#else
+    return (sts == ENT_SCR_NOT_INITIALIZED ||
+            sts == ENT_SCR_UNSUPPORTED);
+#endif
+}
+
+static int iENT_ScriptCallStatusAllowed(MSG_ID_T sts)
+{
+#if ENT_ENABLE_LUA
+    return (sts == ENT_SYS_NORMAL ||
+            sts == ENT_SCR_NOT_INITIALIZED ||
+            sts == ENT_SCR_FUNC_NOTFOUND);
+#else
+    return (sts == ENT_SCR_NOT_INITIALIZED ||
+            sts == ENT_SCR_UNSUPPORTED);
+#endif
+}
+
+static void* iENT_ScriptRaceWorker(void* data)
+{
+    TEST_SCRIPT_RACE_CTX* ctx = (TEST_SCRIPT_RACE_CTX*)data;
+    ENT_SCRIPT_RET_T out;
+    int i = 0;
+
+    pthread_mutex_lock(&ctx->mutex);
+    ctx->ready = 1;
+    pthread_cond_broadcast(&ctx->cond);
+    while(ctx->start == 0)
+    {
+        pthread_cond_wait(&ctx->cond, &ctx->mutex);
+    }
+    pthread_mutex_unlock(&ctx->mutex);
+
+    for(i = 0; i < ctx->iterations; ++i)
+    {
+#if ENT_ENABLE_LUA
+        MSG_ID_T sts = ENT_ScriptReload(ctx->scriptName);
+        if(!iENT_ScriptReloadStatusAllowed(sts))
+        {
+            pthread_mutex_lock(&ctx->mutex);
+            ctx->failed = 1;
+            pthread_mutex_unlock(&ctx->mutex);
+            return NULL;
+        }
+#endif
+
+        {
+            MSG_ID_T sts = ENT_ScriptCall(ctx->functionName, ctx->in, &out);
+            if(!iENT_ScriptCallStatusAllowed(sts))
+            {
+                pthread_mutex_lock(&ctx->mutex);
+                ctx->failed = 1;
+                pthread_mutex_unlock(&ctx->mutex);
+                return NULL;
+            }
+        }
+    }
+
+    return NULL;
+}
+#endif
 
 int main(void)
 {
@@ -145,6 +233,121 @@ int main(void)
         remove(scriptPath);
         return EXIT_FAILURE;
     }
+
+#ifndef WIN32
+    {
+        pthread_t raceThread;
+        TEST_SCRIPT_RACE_CTX raceCtx;
+        int i = 0;
+
+        memset(&raceCtx, 0, sizeof(raceCtx));
+        if(expect_true(pthread_mutex_init(&raceCtx.mutex, NULL) == 0,
+                       "pthread_mutex_init should prepare the script race mutex") != 0)
+        {
+            remove(scriptPath);
+            return EXIT_FAILURE;
+        }
+
+        if(expect_true(pthread_cond_init(&raceCtx.cond, NULL) == 0,
+                       "pthread_cond_init should prepare the script race condition") != 0)
+        {
+            pthread_mutex_destroy(&raceCtx.mutex);
+            remove(scriptPath);
+            return EXIT_FAILURE;
+        }
+
+        raceCtx.functionName = "calc_discount";
+        raceCtx.in = &in;
+        raceCtx.iterations = 512;
+#if ENT_ENABLE_LUA
+        raceCtx.scriptName = scriptFile;
+#endif
+
+        if(expect_true(pthread_create(&raceThread, NULL, iENT_ScriptRaceWorker, &raceCtx) == 0,
+                       "pthread_create should start the script race worker") != 0)
+        {
+            pthread_cond_destroy(&raceCtx.cond);
+            pthread_mutex_destroy(&raceCtx.mutex);
+            remove(scriptPath);
+            return EXIT_FAILURE;
+        }
+
+        if(expect_true(pthread_mutex_lock(&raceCtx.mutex) == 0,
+                       "pthread_mutex_lock should synchronize with the script race worker") != 0)
+        {
+            pthread_join(raceThread, NULL);
+            pthread_cond_destroy(&raceCtx.cond);
+            pthread_mutex_destroy(&raceCtx.mutex);
+            remove(scriptPath);
+            return EXIT_FAILURE;
+        }
+
+        while(raceCtx.ready == 0)
+        {
+            pthread_cond_wait(&raceCtx.cond, &raceCtx.mutex);
+        }
+        raceCtx.start = 1;
+        pthread_cond_broadcast(&raceCtx.cond);
+        pthread_mutex_unlock(&raceCtx.mutex);
+
+        for(i = 0; i < 128; ++i)
+        {
+            sts = ENT_ScriptClose();
+            if(expect_true(sts == ENT_SYS_NORMAL,
+                           "ENT_ScriptClose should remain safe during concurrent access") != 0)
+            {
+                pthread_join(raceThread, NULL);
+                pthread_cond_destroy(&raceCtx.cond);
+                pthread_mutex_destroy(&raceCtx.mutex);
+                remove(scriptPath);
+                return EXIT_FAILURE;
+            }
+
+            sts = ENT_ScriptInit(scriptRoot);
+            if(expect_true(sts == ENT_SYS_NORMAL || sts == ENT_SCR_ALREADY_INIT,
+                           "ENT_ScriptInit should remain safe during concurrent access") != 0)
+            {
+                pthread_join(raceThread, NULL);
+                pthread_cond_destroy(&raceCtx.cond);
+                pthread_mutex_destroy(&raceCtx.mutex);
+                remove(scriptPath);
+                return EXIT_FAILURE;
+            }
+        }
+
+        sts = ENT_ScriptInit(scriptRoot);
+        if(expect_true(sts == ENT_SYS_NORMAL || sts == ENT_SCR_ALREADY_INIT,
+                       "ENT_ScriptInit should leave the script engine initialized for cleanup") != 0)
+        {
+            pthread_join(raceThread, NULL);
+            pthread_cond_destroy(&raceCtx.cond);
+            pthread_mutex_destroy(&raceCtx.mutex);
+            remove(scriptPath);
+            return EXIT_FAILURE;
+        }
+
+        if(expect_true(pthread_join(raceThread, NULL) == 0,
+                       "pthread_join should join the script race worker") != 0)
+        {
+            pthread_cond_destroy(&raceCtx.cond);
+            pthread_mutex_destroy(&raceCtx.mutex);
+            remove(scriptPath);
+            return EXIT_FAILURE;
+        }
+
+        if(expect_true(raceCtx.failed == 0,
+                       "concurrent script calls should only observe supported statuses") != 0)
+        {
+            pthread_cond_destroy(&raceCtx.cond);
+            pthread_mutex_destroy(&raceCtx.mutex);
+            remove(scriptPath);
+            return EXIT_FAILURE;
+        }
+
+        pthread_cond_destroy(&raceCtx.cond);
+        pthread_mutex_destroy(&raceCtx.mutex);
+    }
+#endif
 
     remove(scriptPath);
 #else
