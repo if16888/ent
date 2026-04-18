@@ -41,10 +41,7 @@ typedef struct ENT_CTX {
 } ENT_CTX;
 
 extern ENT_CTX gEntCtx;
-static inline ENT_LOG iENT_LogDefaultHandle(void)
-{
-    return gEntCtx.entLog;
-}
+ENT_LOG iENT_LogDefaultHandle(void);
 
 #ifdef WIN32
 

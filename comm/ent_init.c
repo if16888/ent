@@ -41,6 +41,11 @@
 
 ENT_CTX gEntCtx;
 
+ENT_LOG iENT_LogDefaultHandle(void)
+{
+    return gEntCtx.entLog;
+}
+
 static inline void iENT_CTXResetRuntime(ENT_CTX* ctx)
 {
     if(ctx == NULL)
