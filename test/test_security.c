@@ -22,6 +22,8 @@
 #include "ent_db.h"
 #include "ent_msg.h"
 
+/* Security checks compile against the split log sources through test CMake wiring. */
+
 /* ── 测试宏 ────────────────────────────────────────────── */
 static int s_assert_failures = 0;
 static int s_findings = 0;
@@ -288,11 +290,8 @@ static void test_log_empty_path_no_crash(void)
     /* 传入空字符串作为 logPath —— 这会触发 logPath[-1] 访问 */
     ret = ENT_LogInitHandle(&logHandle, "SecModule", "");
 
-    fprintf(stdout, "    → ENT_LogInitHandle(\"\") returned %d (no crash)\n", ret);
-
-    if (ret == 0) {
-        RECORD_FINDING(_test_name, "ENT_LogInitHandle accepted an empty logPath");
-    }
+    fprintf(stdout, "    → ENT_LogInitHandle(\"\") returned %d\n", ret);
+    ASSERT_TRUE(ret != 0, "ENT_LogInitHandle should reject an empty logPath");
 
     /* 无论结果如何，能到这里就是好的 */
     if (logHandle != NULL) {
@@ -325,19 +324,12 @@ static void test_log_option_negative_maxnum(void)
     ASSERT_EQ(0, ret, "ENT_LogInitHandle should succeed");
     ASSERT_TRUE(logHandle != NULL, "logHandle should not be NULL");
 
-    /* 设置 maxNum 为负数 —— 当前代码不做校验 */
+    /* 设置 maxNum 为负数 —— 应该被拒绝 */
     int neg_max = -1;
     ret = ENT_LogSetOption(logHandle, ENT_LOG_MAX_E, &neg_max);
 
     fprintf(stdout, "    → ENT_LogSetOption(maxNum=-1) returned %d\n", ret);
-
-    /*
-     * 如果返回 0 表示被接受了（风险存在），
-     * 理想情况应返回错误码拒绝负数。
-     */
-    if (ret == 0) {
-        RECORD_FINDING(_test_name, "ENT_LogSetOption accepted negative maxNum");
-    }
+    ASSERT_TRUE(ret != 0, "ENT_LogSetOption should reject negative maxNum");
 
     ENT_LogCloseHandle(logHandle);
     ENT_LogClose();
@@ -367,25 +359,11 @@ static void test_log_invalid_level_no_crash(void)
     ASSERT_EQ(0, ret, "ENT_LogInitHandle should succeed");
     ASSERT_TRUE(logHandle != NULL, "logHandle should not be NULL");
 
-    /* 设置一个超大的日志等级，使所有打印都通过等级检查 */
+    /* 设置一个非法的日志等级，应该被拒绝 */
     ENT_LOG_LEV_E invalid_level = (ENT_LOG_LEV_E)999;
     ret = ENT_LogSetOption(logHandle, ENT_LOG_LEVEL_E, &invalid_level);
-    ASSERT_EQ(0, ret, "ENT_LogSetOption should accept (no validation currently)");
-
-    /*
-     * 调用 ENT_LogPrint — 内部会用 sLogLevelStr[logLevel] 索引数组，
-     * 但 logLevel 实参由函数内部硬编码为 LOG_LEV_INFO_E (3)，
-     * 所以这个调用本身不会越界。
-     *
-     * 真正的风险是 iENT_LogVPrint 接收到的 logLevel 参数，
-     * 在宏 ENT_LOG_FATAL 等中是固定值，不受 logLevel 字段影响。
-     * 但将 logLevel 字段设置为 999 会使 level 检查条件全部通过，
-     * 这本身就是一个安全风险（所有日志都会被写入，无法抑制）。
-     */
-    ret = ENT_LogPrint(logHandle, "test message from invalid level %d\n", 999);
-    fprintf(stdout, "    → ENT_LogPrint with logLevel=999 returned %d (no crash)\n", ret);
-
-    RECORD_FINDING(_test_name, "invalid log level is accepted without validation");
+    fprintf(stdout, "    → ENT_LogSetOption(level=999) returned %d\n", ret);
+    ASSERT_TRUE(ret != 0, "ENT_LogSetOption should reject invalid log levels");
 
     ENT_LogCloseHandle(logHandle);
     ENT_LogClose();

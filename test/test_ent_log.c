@@ -16,6 +16,8 @@
 #include "ent_log.h"
 #include "ient_comm.h"
 
+/* The log implementation is now split across core/writer/options/compat sources. */
+
 ENT_CTX gEntCtx;
 
 typedef struct TEST_BAD_LOG_CTX

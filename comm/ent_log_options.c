@@ -1,0 +1,171 @@
+/*-----------------------------------------------------------------------------
+ *   Copyright 2019 Fei Li
+ *-----------------------------------------------------------------------------
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#ifdef WIN32
+#include <Windows.h>
+#else
+#include <pthread.h>
+#endif
+
+#include "ent_log.h"
+#include "ient_log.h"
+
+MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const void* arg)
+{
+    ENT_LOG_CTX_INTERNAL* log = (ENT_LOG_CTX_INTERNAL*)logHandle;
+    size_t len;
+    MSG_ID_T sts = 0;
+    MSG_ID_T bufferSts = 0;
+    bool startBufferThread = false;
+
+    if(sLogMutexInit == false)
+    {
+        fprintf(stderr, "Func [%s] Line [%d],Uninitialized,please call ENT_LogInit.\n", "ENT_LogSetOption", __LINE__);
+        return -1;
+    }
+
+    if(arg == NULL)
+    {
+        fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogSetOption", __LINE__);
+        return -1;
+    }
+
+    if(log == NULL)
+    {
+        if(iENT_LogDefaultCtx()->isInit)
+            log = iENT_LogDefaultCtx();
+        else
+        {
+            fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogSetOption", __LINE__);
+            return -2;
+        }
+    }
+    else if(log->tag != ENTLOG_TAG || log->isInit == false)
+    {
+        fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogSetOption", __LINE__);
+        return -2;
+    }
+
+#ifdef WIN32
+    EnterCriticalSection(&log->cs);
+#else
+    pthread_mutex_lock(&log->cs);
+#endif
+
+    switch(option)
+    {
+        case ENT_LOG_DEBUG_E:
+            log->isDebug = *(bool*)arg;
+            iENT_LogFastFlagSet(&log->isDebugFast, log->isDebug ? 1 : 0);
+            break;
+
+        case ENT_LOG_PATH_E:
+            if(log->logPath)
+            {
+                free(log->logPath);
+                log->logPath = NULL;
+            }
+            log->logPath = strdup((const char*)arg);
+            if(log->logPath == NULL)
+            {
+                sts = -3;
+                fprintf(stderr, "Func [%s] Line [%d],strdup failed.\n", "ENT_LogSetOption", __LINE__);
+                goto END_OF_ROUTINE;
+            }
+            len = strlen(log->logPath);
+            if(len > 0 && (log->logPath[len - 1] == '\\' || log->logPath[len - 1] == '/'))
+            {
+                log->logPath[len - 1] = '\0';
+            }
+            sts = iENT_LogPathCheck(log->logPath);
+            if(sts < 0)
+            {
+                if(log->logPath)
+                {
+                    free(log->logPath);
+                    log->logPath = NULL;
+                }
+            }
+            break;
+
+        case ENT_LOG_MAX_E:
+        {
+            int maxNum = *(int*)arg;
+            if(maxNum < 0)
+            {
+                sts = -1;
+                break;
+            }
+            log->maxNum = maxNum;
+            break;
+        }
+
+        case ENT_LOG_BUFFER_E:
+            log->isBuffer = *(bool*)arg;
+            iENT_LogFastFlagSet(&log->isBufferFast, log->isBuffer ? 1 : 0);
+            log->pendingFlushes = 0;
+            log->lastFlushMs = iENT_LogNowMs();
+            startBufferThread = log->isBuffer && !log->bufferThreadStarted;
+            break;
+
+        case ENT_LOG_LEVEL_E:
+        {
+            ENT_LOG_LEV_E level = *(ENT_LOG_LEV_E*)arg;
+            if(level < LOG_LEV_FATAL_E || level > LOG_LEV_DEBUG_E)
+            {
+                sts = -1;
+                break;
+            }
+            log->logLevel = level;
+            break;
+        }
+
+        case ENT_LOG_FLUSH_BATCH_E:
+        {
+            int flushBatch = *(int*)arg;
+            if(flushBatch <= 0)
+            {
+                sts = -1;
+                break;
+            }
+            log->flushBatch = flushBatch;
+            break;
+        }
+
+        case ENT_LOG_FLUSH_INTERVAL_E:
+        {
+            int flushIntervalMs = *(int*)arg;
+            if(flushIntervalMs < 0)
+            {
+                sts = -1;
+                break;
+            }
+            log->flushIntervalMs = flushIntervalMs;
+            log->lastFlushMs = iENT_LogNowMs();
+            break;
+        }
+
+        default:
+            break;
+    }
+END_OF_ROUTINE:
+#ifdef WIN32
+    LeaveCriticalSection(&log->cs);
+#else
+    pthread_mutex_unlock(&log->cs);
+#endif
+    if(sts == 0 && startBufferThread)
+    {
+        bufferSts = iENT_LogStartBufferThread(log);
+        if(bufferSts < 0)
+        {
+            sts = bufferSts;
+        }
+    }
+    return sts;
+}

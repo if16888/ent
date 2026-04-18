@@ -104,5 +104,59 @@ typedef struct ENT_LOG_CTX_TAG
 
 ENT_LOG_PRIV* iENT_LogDefaultCtx(void);
 ENT_LOG_PRIV* iENT_LogCtxFromHandle(ENT_LOG_CTX ctx);
+extern volatile bool sLogMutexInit;
+MSG_ID_T      iENT_LogInit(void);
+MSG_ID_T      iENT_LogClose(void);
+MSG_ID_T      iENT_LogInitHandle(ENT_LOG* pLogHandle, const char* moduleName, const char* logPath);
+MSG_ID_T      iENT_LogCloseHandle(ENT_LOG logHandle);
+MSG_ID_T      iENT_LogCtxValidate(const struct ENT_LOG_CTX_TAG* ctx, ENT_LOG logHandle);
+MSG_ID_T      iENT_LogPathCheck(const char* path);
+MSG_ID_T      iENT_LogGetCtx(ENT_LOG_CTX_INTERNAL** logCtx, ENT_LOG logHandle);
+MSG_ID_T      iENT_LogAcquireWriter(ENT_LOG_CTX_INTERNAL** logCtx, ENT_LOG logHandle);
+void          iENT_LogReleaseWriter(ENT_LOG_CTX_INTERNAL* log);
+int           iENT_LogIsClosing(const ENT_LOG_CTX_INTERNAL* log);
+void          iENT_LogSetClosing(ENT_LOG_CTX_INTERNAL* log);
+int           iENT_LogActiveGet(const ENT_LOG_CTX_INTERNAL* log);
+void          iENT_LogActiveInc(ENT_LOG_CTX_INTERNAL* log);
+int           iENT_LogActiveDec(ENT_LOG_CTX_INTERNAL* log);
+MSG_ID_T      iENT_LogFormatMessage(const char* format,
+                                    va_list va_args,
+                                    char* stackBuf,
+                                    size_t stackBufLen,
+                                    char** msgBuf,
+                                    size_t* msgLen);
+void          iENT_LogFlushMaybe(ENT_LOG_CTX_INTERNAL* log, FILE* fp, bool forceFlush);
+int           iENT_LogFastFlagGet(
+#ifdef WIN32
+                               const volatile LONG* flag
+#else
+                               const volatile int* flag
+#endif
+                               );
+void          iENT_LogFastFlagSet(
+#ifdef WIN32
+                                volatile LONG* flag,
+#else
+                                volatile int* flag,
+#endif
+                                int value);
+long long     iENT_LogNowMs(void);
+bool          iENT_LogBufferReady(const ENT_LOG_CTX_INTERNAL* log);
+ENT_LOG_MSG_NODE* iENT_LogAllocNode(size_t msgCap, bool pooled);
+void          iENT_LogFreePoolNodes(ENT_LOG_CTX_INTERNAL* log);
+MSG_ID_T      iENT_LogFormatPrefix(ENT_LOG_LEV_E logLevel,
+                                   char* prefixBuf,
+                                   size_t prefixBufLen,
+                                   size_t* prefixLen,
+                                   time_t* rollTime);
+MSG_ID_T      iENT_LogStartBufferThread(ENT_LOG_CTX_INTERNAL* log);
+void          iENT_LogStopBufferThread(ENT_LOG_CTX_INTERNAL* log);
+MSG_ID_T      iENT_LogQueueMessage(ENT_LOG_CTX_INTERNAL* log,
+                                   const char* msg,
+                                   size_t msgLen,
+                                   time_t rollTime,
+                                   bool forceFlush);
+MSG_ID_T      iENT_LogVRaw(ENT_LOG_CTX_INTERNAL* log, const char* format, va_list va_args);
+MSG_ID_T      iENT_LogVPrint(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_LEV_E logLevel, const char* format, va_list va_args);
 
 #endif

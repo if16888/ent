@@ -371,7 +371,9 @@ endif()
 add_library(
   ${LIB_NAME_OBJS}
   OBJECT
-  ent_init.c ent_db.c ent_db_sqlite.c ent_db_mysql.c ent_db_pgsql.c ent_log.c ent_thread.c ent_msg.c ent_script.c
+  ent_init.c ent_db.c ent_db_sqlite.c ent_db_mysql.c ent_db_pgsql.c
+  ent_log_core.c ent_log_writer.c ent_log_options.c ent_log_compat.c
+  ent_thread.c ent_msg.c ent_script.c
   utl_socket.c utl_thread.c utl_timer.c utl_dll.c utl_tpool.c
   ${ENT_MSG_GENERATED_SOURCE}
   )

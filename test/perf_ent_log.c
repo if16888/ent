@@ -14,6 +14,8 @@
 #include "ient_comm.h"
 #include "ent_log.h"
 
+/* Linked against the split log sources from the test CMake target. */
+
 ENT_CTX gEntCtx;
 
 typedef struct

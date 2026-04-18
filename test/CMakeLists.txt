@@ -252,7 +252,10 @@ endif()
 add_executable(
   test_ent_log
   test_ent_log.c
-  ../comm/ent_log.c
+  ../comm/ent_log_core.c
+  ../comm/ent_log_writer.c
+  ../comm/ent_log_options.c
+  ../comm/ent_log_compat.c
   ../comm/utl_thread.c
   ../comm/utl_dll.c
 )
@@ -272,13 +275,16 @@ add_test(NAME test_ent_log COMMAND test_ent_log)
 
 if(ENT_ENABLE_SQLITE AND (NOT WIN32 OR ENT_SQLITE_LIBRARY))
   add_executable(
-    test_security
-    test_security.c
-    ../comm/ent_init.c
-    ../comm/ent_log.c
-    ../comm/ent_db.c
-    ../comm/ent_db_sqlite.c
-    ../comm/ent_db_mysql.c
+  test_security
+  test_security.c
+  ../comm/ent_init.c
+  ../comm/ent_log_core.c
+  ../comm/ent_log_writer.c
+  ../comm/ent_log_options.c
+  ../comm/ent_log_compat.c
+  ../comm/ent_db.c
+  ../comm/ent_db_sqlite.c
+  ../comm/ent_db_mysql.c
     ../comm/ent_db_pgsql.c
     ../comm/utl_thread.c
     ../comm/utl_dll.c
@@ -425,7 +431,10 @@ endif()
 add_executable(
   perf_ent_log
   perf_ent_log.c
-  ../comm/ent_log.c
+  ../comm/ent_log_core.c
+  ../comm/ent_log_writer.c
+  ../comm/ent_log_options.c
+  ../comm/ent_log_compat.c
   ../comm/utl_thread.c
   ../comm/utl_dll.c
 )
