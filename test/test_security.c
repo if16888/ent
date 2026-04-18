@@ -103,7 +103,7 @@ static void inject_capture_cb(char** fields, char** rowRes,
 static void safe_reset_ent(void)
 {
     ENT_Close();
-    safe_reset_ent();
+    memset(&gEntCtx, 0, sizeof(gEntCtx));
 }
 
 static int get_temp_root(char* path, size_t path_len)
