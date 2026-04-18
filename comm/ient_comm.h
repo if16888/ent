@@ -41,67 +41,71 @@ typedef struct ENT_CTX {
 } ENT_CTX;
 
 extern ENT_CTX gEntCtx;
+static inline ENT_LOG iENT_LogDefaultHandle(void)
+{
+    return gEntCtx.entLog;
+}
 
 #ifdef WIN32
 
 #define IENT_LOG_FATAL(format,...) \
  do { \
-    ENT_LogFatal(gEntCtx.entLog,"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,__VA_ARGS__);\
+    ENT_LogFatal(iENT_LogDefaultHandle(),"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,__VA_ARGS__);\
  }\
  while(0)
  
 #define IENT_LOG_ERROR(format,...) \
  do { \
-    ENT_LogError(gEntCtx.entLog,"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,__VA_ARGS__);\
+    ENT_LogError(iENT_LogDefaultHandle(),"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,__VA_ARGS__);\
  }\
  while(0)
  
 #define IENT_LOG_WARN(format,...) \
  do { \
-    ENT_LogWarn(gEntCtx.entLog,"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,__VA_ARGS__);\
+    ENT_LogWarn(iENT_LogDefaultHandle(),"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,__VA_ARGS__);\
  }\
  while(0)
  
 #define IENT_LOG_PRINT(format,...) \
  do { \
-    ENT_LogPrint(gEntCtx.entLog,"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,__VA_ARGS__);\
+    ENT_LogPrint(iENT_LogDefaultHandle(),"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,__VA_ARGS__);\
  }\
  while(0)
  
 #define IENT_LOG_DEBUG(format,...) \
  do { \
-    ENT_LogDebug(gEntCtx.entLog,"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,__VA_ARGS__);\
+    ENT_LogDebug(iENT_LogDefaultHandle(),"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,__VA_ARGS__);\
  }\
  while(0)
 #else
 
 #define IENT_LOG_FATAL(format,...) \
  do { \
-    ENT_LogFatal(gEntCtx.entLog,"Func [%s] Line [%d]," format,__func__,__LINE__,##__VA_ARGS__);\
+    ENT_LogFatal(iENT_LogDefaultHandle(),"Func [%s] Line [%d]," format,__func__,__LINE__,##__VA_ARGS__);\
  }\
  while(0)
  
 #define IENT_LOG_ERROR(format,...) \
  do { \
-    ENT_LogError(gEntCtx.entLog,"Func [%s] Line [%d]," format,__func__,__LINE__,##__VA_ARGS__);\
+    ENT_LogError(iENT_LogDefaultHandle(),"Func [%s] Line [%d]," format,__func__,__LINE__,##__VA_ARGS__);\
  }\
  while(0)
  
 #define IENT_LOG_WARN(format,...) \
  do { \
-    ENT_LogWarn(gEntCtx.entLog,"Func [%s] Line [%d]," format,__func__,__LINE__,##__VA_ARGS__);\
+    ENT_LogWarn(iENT_LogDefaultHandle(),"Func [%s] Line [%d]," format,__func__,__LINE__,##__VA_ARGS__);\
  }\
  while(0)
  
 #define IENT_LOG_PRINT(format,...) \
  do { \
-    ENT_LogPrint(gEntCtx.entLog,"Func [%s] Line [%d]," format,__func__,__LINE__,##__VA_ARGS__);\
+    ENT_LogPrint(iENT_LogDefaultHandle(),"Func [%s] Line [%d]," format,__func__,__LINE__,##__VA_ARGS__);\
  }\
  while(0)
  
 #define IENT_LOG_DEBUG(format,...) \
  do { \
-    ENT_LogDebug(gEntCtx.entLog,"Func [%s] Line [%d]," format,__func__,__LINE__,##__VA_ARGS__);\
+    ENT_LogDebug(iENT_LogDefaultHandle(),"Func [%s] Line [%d]," format,__func__,__LINE__,##__VA_ARGS__);\
  }\
  while(0)
 #endif

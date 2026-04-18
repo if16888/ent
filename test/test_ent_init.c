@@ -248,7 +248,7 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle, const char* format, ...)
 MSG_ID_T UTL_LockInit(UTL_LOCK* lock, const char* name)
 {
     (void)name;
-    s_ent_log_at_lock_init = gEntCtx.entLog;
+    s_ent_log_at_lock_init = iENT_LogDefaultHandle();
     if(s_fail_lock_init != 0)
     {
         return s_fail_lock_init;
@@ -396,7 +396,7 @@ static int test_ent_close_clears_runtime_handles(void)
         return 1;
     }
 
-    if(expect_true(gEntCtx.entLog == NULL, "ENT_Close should clear entLog after closing it") != 0)
+    if(expect_true(iENT_LogDefaultHandle() == NULL, "ENT_Close should clear entLog after closing it") != 0)
     {
         return 1;
     }
@@ -573,6 +573,12 @@ static int test_ent_init_builds_paths_without_trailing_separator(void)
 
     if(expect_true(s_log_set_option_calls == 2,
                    "ENT_Init should set log level for the default and entity loggers") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(iENT_LogDefaultHandle() == s_ent_log_at_lock_init,
+                   "ENT_Init should expose the entity log through the default-handle accessor") != 0)
     {
         return 1;
     }

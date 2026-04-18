@@ -410,6 +410,7 @@ ENT_PUBLIC MSG_ID_T  ENT_Init(const char* name,
 ENT_PUBLIC MSG_ID_T  ENT_Close()
 {
     MSG_ID_T  sts = 0;
+    ENT_LOG defaultLog = iENT_LogDefaultHandle();
     if(!gEntCtx.isInit)
     {
         return ENT_SYS_CLOSE_UNINITIALIZED;
@@ -431,7 +432,7 @@ ENT_PUBLIC MSG_ID_T  ENT_Close()
     sts = UTL_LockClose(gEntCtx.entLock);
     gEntCtx.entLock = NULL;
 
-    sts = ENT_LogCloseHandle(gEntCtx.entLog);
+    sts = ENT_LogCloseHandle(defaultLog);
     gEntCtx.entLog = NULL;
 
     sts = ENT_LogCloseHandle(NULL);
