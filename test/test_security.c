@@ -248,6 +248,30 @@ static int test_security_pgsql_is_configured(const char** host,
     return (*host != NULL && *database != NULL && *user != NULL);
 }
 
+static int test_security_mysql_is_configured(const char** host,
+                                             const char** database,
+                                             const char** user,
+                                             const char** passwd,
+                                             int* port)
+{
+    *host = read_env_or_null("ENT_MYSQL_HOST");
+    *database = read_env_or_null("ENT_MYSQL_DB");
+    *user = read_env_or_null("ENT_MYSQL_USER");
+    *passwd = getenv("ENT_MYSQL_PASSWORD");
+    if(*passwd == NULL)
+    {
+        *passwd = "";
+    }
+    *port = 3306;
+
+    if(read_env_or_null("ENT_MYSQL_PORT") != NULL)
+    {
+        *port = atoi(getenv("ENT_MYSQL_PORT"));
+    }
+
+    return (*host != NULL && *database != NULL && *user != NULL);
+}
+
 /* ══════════════════════════════════════════════════════════
  * TEST 1: ent_init — 超长 name 不崩溃
  * 风险：sprintf(tmpStr, "ent_%s", name) 无边界检查
@@ -676,6 +700,83 @@ static void test_db_pgsql_parameterized_queries_if_configured(void)
 }
 
 /* ══════════════════════════════════════════════════════════
+ * TEST 10: ent_db — MySQL 参数化查询应使用绑定参数
+ * 风险：MySQL 分支仍然只走 raw SQL，参数化 API 直接返回 UNSUPPORTED
+ * ══════════════════════════════════════════════════════════ */
+static void test_db_mysql_parameterized_queries_if_configured(void)
+{
+    TEST_BEGIN("test_db_mysql_parameterized_queries_if_configured");
+
+#if ENT_ENABLE_MYSQL
+    const char* host;
+    const char* database;
+    const char* user;
+    const char* passwd;
+    int port;
+    DB_HANDLE db = NULL;
+    MSG_ID_T ret;
+    INJECT_CAPTURE cap;
+    ENT_DB_PARAM params[1];
+
+    if(test_security_mysql_is_configured(&host, &database, &user, &passwd, &port) == 0)
+    {
+        fprintf(stdout, "    -> MySQL security test skipped: set ENT_MYSQL_HOST, ENT_MYSQL_DB, and ENT_MYSQL_USER to run it.\n");
+        TEST_END();
+        return;
+    }
+
+    memset(&cap, 0, sizeof(cap));
+    memset(params, 0, sizeof(params));
+
+    ret = ENT_DbInit();
+    ASSERT_TRUE(ret == 0 || ret == 1, "ENT_DbInit should succeed");
+
+    ret = ENT_DbInitHandle(&db, MYSQL_TYPE, host, database, user, passwd, port);
+    ASSERT_EQ(0, ret, "ENT_DbInitHandle should create a MySQL handle");
+
+    ret = ENT_DbOpen(db);
+    ASSERT_EQ(0, ret, "ENT_DbOpen should connect to MySQL");
+
+    ret = ENT_DbWrite(db,
+                      "CREATE TEMPORARY TABLE ent_security_mysql(id INT AUTO_INCREMENT PRIMARY KEY, data TEXT NOT NULL);",
+                      NULL,
+                      NULL);
+    ASSERT_EQ(0, ret, "CREATE TEMPORARY TABLE should succeed");
+
+    params[0].type = ENT_DB_PARAM_TEXT_E;
+    params[0].value.text = "mysql'); DROP TABLE ent_security_mysql; --";
+
+    ret = ENT_DbWriteParams(db,
+                            "INSERT INTO ent_security_mysql(data) VALUES(?);",
+                            params,
+                            1,
+                            NULL,
+                            NULL);
+    ASSERT_EQ(0, ret, "MySQL parameterized INSERT should succeed");
+
+    ret = ENT_DbReadParams(db,
+                           "SELECT data FROM ent_security_mysql WHERE data = ?;",
+                           params,
+                           1,
+                           inject_capture_cb,
+                           &cap);
+    ASSERT_EQ(0, ret, "MySQL parameterized SELECT should succeed");
+    ASSERT_EQ(1, cap.called, "MySQL parameterized SELECT should return one row");
+    ASSERT_EQ(1, cap.column_num, "MySQL parameterized SELECT should return one column");
+    ASSERT_EQ(1, cap.row_num, "MySQL parameterized SELECT should return one row");
+    ASSERT_TRUE(strcmp(cap.leaked_data, params[0].value.text) == 0,
+                "MySQL parameterized SELECT should preserve bound text");
+
+    ENT_DbCloseHandle(db);
+    ENT_DbClose();
+#else
+    fprintf(stdout, "    -> MySQL security test skipped: ENT_ENABLE_MYSQL is disabled in this build.\n");
+#endif
+
+    TEST_END();
+}
+
+/* ══════════════════════════════════════════════════════════
  * TEST 9: ent_db — NULL sql 参数被正确拒绝
  * ══════════════════════════════════════════════════════════ */
 static void test_db_null_sql_rejected(void)
@@ -758,6 +859,7 @@ int main(void)
     test_db_parameterized_api_shape();
     test_db_sql_injection_drop_table();
     test_db_sql_injection_union_select();
+    test_db_mysql_parameterized_queries_if_configured();
     test_db_pgsql_parameterized_queries_if_configured();
     test_db_null_sql_rejected();
     test_db_null_handle_rejected();
