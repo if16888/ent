@@ -124,6 +124,46 @@ static MSG_ID_T iENT_DbValidateHandle(DB_HANDLE dbHandle,
 
     return ENT_SYS_NORMAL;
 }
+
+static MSG_ID_T iENT_DbOpenLocked(DB_CFG* dbCfg)
+{
+    if(dbCfg == NULL)
+    {
+        return ENT_DBS_BAD_HANDLE;
+    }
+
+    if(dbCfg->isOpen == true)
+    {
+        return ENT_SYS_NORMAL;
+    }
+
+    switch(dbCfg->dbType)
+    {
+        case SQLITE_TYPE:
+#if ENT_ENABLE_SQLITE
+            return ENT_DbSqliteInit(dbCfg);
+#else
+            return iENT_DbBackendUnsupported(SQLITE_TYPE);
+#endif
+
+        case MYSQL_TYPE:
+#if ENT_ENABLE_MYSQL
+            return ENT_DbMySQLInit(dbCfg);
+#else
+            return iENT_DbBackendUnsupported(MYSQL_TYPE);
+#endif
+
+        case PGSQL_TYPE:
+#if ENT_ENABLE_PGSQL
+            return ENT_DbPgSQLInit(dbCfg);
+#else
+            return iENT_DbBackendUnsupported(PGSQL_TYPE);
+#endif
+
+        default:
+            return ENT_DBS_BAD_HANDLE;
+    }
+}
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :iENT_DbReInit
@@ -408,40 +448,7 @@ ENT_PUBLIC MSG_ID_T ENT_DbOpen(DB_HANDLE dbHandle)
     pthread_mutex_lock(&dbCfg->cs);
 #endif
 
-    if(dbCfg->isOpen == true)
-    {
-        sts = ENT_SYS_NORMAL;
-        goto END_OF_ROUTINE;
-    }
-
-    switch(dbCfg->dbType)
-    {
-        case SQLITE_TYPE:
-#if ENT_ENABLE_SQLITE
-            sts = ENT_DbSqliteInit(dbCfg);
-#else
-            sts = iENT_DbBackendUnsupported(SQLITE_TYPE);
-#endif
-            break;
-            
-        case MYSQL_TYPE:
-#if ENT_ENABLE_MYSQL
-            sts = ENT_DbMySQLInit(dbCfg);
-#else
-            sts = iENT_DbBackendUnsupported(MYSQL_TYPE);
-#endif
-            break;
-        case PGSQL_TYPE:
-#if ENT_ENABLE_PGSQL
-            sts = ENT_DbPgSQLInit(dbCfg);
-#else
-            sts = iENT_DbBackendUnsupported(PGSQL_TYPE);
-#endif
-            break;
-        default:
-            sts = ENT_DBS_BAD_HANDLE;
-            break;
-    }
+    sts = iENT_DbOpenLocked(dbCfg);
 
 END_OF_ROUTINE:
 #ifdef WIN32
@@ -565,21 +572,26 @@ ENT_PUBLIC MSG_ID_T ENT_DbRead(DB_HANDLE dbHandle,const char* sql,SqlResultCB sq
         return sts;
     }
 
-    if(dbCfg->isOpen==false)
-    {
-        sts = ENT_DbOpen(dbCfg);
-        if(sts<0)
-        {
-            IENT_LOG_ERROR("ENT_DbOpen failed.\n");
-            return sts;
-        }
-    } 
-    
 #ifdef WIN32
     EnterCriticalSection(&dbCfg->cs);   
 #else
     pthread_mutex_lock(&dbCfg->cs);
 #endif
+
+    if(dbCfg->isOpen==false)
+    {
+        sts = iENT_DbOpenLocked(dbCfg);
+        if(sts<0)
+        {
+#ifdef WIN32
+            LeaveCriticalSection(&dbCfg->cs);
+#else
+            pthread_mutex_unlock(&dbCfg->cs);
+#endif
+            IENT_LOG_ERROR("ENT_DbOpen failed.\n");
+            return sts;
+        }
+    }
 
     switch(dbCfg->dbType)
     {
@@ -650,21 +662,26 @@ ENT_PUBLIC MSG_ID_T ENT_DbWrite(DB_HANDLE dbHandle,const char* sql,SqlResultCB s
         return sts;
     }
 
-    if(dbCfg->isOpen==false)
-    {
-        sts = ENT_DbOpen(dbCfg);
-        if(sts<0)
-        {
-            IENT_LOG_ERROR("ENT_DbOpen failed.\n");
-            return sts;
-        }
-    } 
-    
 #ifdef WIN32
     EnterCriticalSection(&dbCfg->cs);   
 #else
     pthread_mutex_lock(&dbCfg->cs);
 #endif
+
+    if(dbCfg->isOpen==false)
+    {
+        sts = iENT_DbOpenLocked(dbCfg);
+        if(sts<0)
+        {
+#ifdef WIN32
+            LeaveCriticalSection(&dbCfg->cs);
+#else
+            pthread_mutex_unlock(&dbCfg->cs);
+#endif
+            IENT_LOG_ERROR("ENT_DbOpen failed.\n");
+            return sts;
+        }
+    }
      
     switch(dbCfg->dbType)
     {
@@ -725,21 +742,26 @@ ENT_PUBLIC MSG_ID_T ENT_DbReadParams(DB_HANDLE dbHandle,
         return sts;
     }
 
-    if(dbCfg->isOpen==false)
-    {
-        sts = ENT_DbOpen(dbCfg);
-        if(sts<0)
-        {
-            IENT_LOG_ERROR("ENT_DbOpen failed.\n");
-            return sts;
-        }
-    }
-
 #ifdef WIN32
     EnterCriticalSection(&dbCfg->cs);
 #else
     pthread_mutex_lock(&dbCfg->cs);
 #endif
+
+    if(dbCfg->isOpen==false)
+    {
+        sts = iENT_DbOpenLocked(dbCfg);
+        if(sts<0)
+        {
+#ifdef WIN32
+            LeaveCriticalSection(&dbCfg->cs);
+#else
+            pthread_mutex_unlock(&dbCfg->cs);
+#endif
+            IENT_LOG_ERROR("ENT_DbOpen failed.\n");
+            return sts;
+        }
+    }
 
     switch(dbCfg->dbType)
     {
@@ -800,21 +822,26 @@ ENT_PUBLIC MSG_ID_T ENT_DbWriteParams(DB_HANDLE dbHandle,
         return sts;
     }
 
-    if(dbCfg->isOpen==false)
-    {
-        sts = ENT_DbOpen(dbCfg);
-        if(sts<0)
-        {
-            IENT_LOG_ERROR("ENT_DbOpen failed.\n");
-            return sts;
-        }
-    }
-
 #ifdef WIN32
     EnterCriticalSection(&dbCfg->cs);
 #else
     pthread_mutex_lock(&dbCfg->cs);
 #endif
+
+    if(dbCfg->isOpen==false)
+    {
+        sts = iENT_DbOpenLocked(dbCfg);
+        if(sts<0)
+        {
+#ifdef WIN32
+            LeaveCriticalSection(&dbCfg->cs);
+#else
+            pthread_mutex_unlock(&dbCfg->cs);
+#endif
+            IENT_LOG_ERROR("ENT_DbOpen failed.\n");
+            return sts;
+        }
+    }
 
     switch(dbCfg->dbType)
     {
