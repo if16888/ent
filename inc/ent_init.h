@@ -38,10 +38,27 @@ typedef enum
     ENT_RT_POLICY_RR_E
 } ENT_RT_POLICY_E;
 
+typedef struct ENT_RUNTIME_CTX_TAG* ENT_RUNTIME;
+
 ENT_PUBLIC MSG_ID_T  ENT_Init(const char* name,
                               const char* workPath,
                               ENT_LOG_LEV_E logLevel,
                               ENT_MODE_E mode);
+
+ENT_PUBLIC MSG_ID_T  ENT_RuntimeInit(ENT_RUNTIME* runtime,
+                                     const char* name,
+                                     const char* workPath,
+                                     ENT_LOG_LEV_E logLevel,
+                                     ENT_MODE_E mode);
+
+ENT_PUBLIC MSG_ID_T  ENT_RuntimeClose(ENT_RUNTIME runtime);
+
+ENT_PUBLIC MSG_ID_T  ENT_RuntimeSetRtAttributes(ENT_RUNTIME runtime,
+                                                int rtCpu,
+                                                ENT_RT_POLICY_E rtPolicy,
+                                                int rtPriority);
+
+ENT_PUBLIC MSG_ID_T  ENT_RuntimeRun(ENT_RUNTIME runtime);
 
 ENT_PUBLIC MSG_ID_T  ENT_SetRtAttributes(int rtCpu,
                                          ENT_RT_POLICY_E rtPolicy,

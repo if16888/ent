@@ -42,6 +42,35 @@
 
 ENT_CTX gEntCtx;
 
+typedef struct ENT_RUNTIME_CTX_TAG
+{
+    ENT_CTX ctx;
+} ENT_RUNTIME_CTX_T;
+
+#ifdef WIN32
+static SRWLOCK sEntRuntimeLock = SRWLOCK_INIT;
+static void iENT_RuntimeLock(void)
+{
+    AcquireSRWLockExclusive(&sEntRuntimeLock);
+}
+
+static void iENT_RuntimeUnlock(void)
+{
+    ReleaseSRWLockExclusive(&sEntRuntimeLock);
+}
+#else
+static pthread_mutex_t sEntRuntimeLock = PTHREAD_MUTEX_INITIALIZER;
+static void iENT_RuntimeLock(void)
+{
+    pthread_mutex_lock(&sEntRuntimeLock);
+}
+
+static void iENT_RuntimeUnlock(void)
+{
+    pthread_mutex_unlock(&sEntRuntimeLock);
+}
+#endif
+
 static inline void iENT_CTXResetRuntime(ENT_CTX* ctx)
 {
     if(ctx == NULL)
@@ -392,6 +421,48 @@ ENT_PUBLIC MSG_ID_T  ENT_Init(const char* name,
 
     return ENT_SYS_NORMAL;
 }
+
+ENT_PUBLIC MSG_ID_T ENT_RuntimeInit(ENT_RUNTIME* runtime,
+                                    const char* name,
+                                    const char* workPath,
+                                    ENT_LOG_LEV_E logLevel,
+                                    ENT_MODE_E mode)
+{
+    ENT_RUNTIME_CTX_T* runtimeCtx = NULL;
+    ENT_CTX savedCtx;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
+
+    if(runtime == NULL)
+    {
+        return ENT_INIT_INVALID_ARGUMENT;
+    }
+
+    runtimeCtx = (ENT_RUNTIME_CTX_T*)calloc(1, sizeof(*runtimeCtx));
+    if(runtimeCtx == NULL)
+    {
+        return ENT_INIT_LOGPATH_ALLOCFAIL;
+    }
+
+    iENT_RuntimeLock();
+    savedCtx = gEntCtx;
+    memset(&gEntCtx, 0, sizeof(gEntCtx));
+    sts = ENT_Init(name, workPath, logLevel, mode);
+    if(sts == ENT_SYS_NORMAL)
+    {
+        runtimeCtx->ctx = gEntCtx;
+    }
+    gEntCtx = savedCtx;
+    iENT_RuntimeUnlock();
+
+    if(sts != ENT_SYS_NORMAL)
+    {
+        free(runtimeCtx);
+        return sts;
+    }
+
+    *runtime = (ENT_RUNTIME)runtimeCtx;
+    return ENT_SYS_NORMAL;
+}
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :ENT_Close
@@ -445,6 +516,29 @@ ENT_PUBLIC MSG_ID_T  ENT_Close()
     return ENT_SYS_NORMAL;
 }
 
+ENT_PUBLIC MSG_ID_T ENT_RuntimeClose(ENT_RUNTIME runtime)
+{
+    ENT_RUNTIME_CTX_T* runtimeCtx = (ENT_RUNTIME_CTX_T*)runtime;
+    ENT_CTX savedCtx;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
+
+    if(runtimeCtx == NULL)
+    {
+        return ENT_INIT_INVALID_ARGUMENT;
+    }
+
+    iENT_RuntimeLock();
+    savedCtx = gEntCtx;
+    gEntCtx = runtimeCtx->ctx;
+    sts = ENT_Close();
+    runtimeCtx->ctx = gEntCtx;
+    gEntCtx = savedCtx;
+    iENT_RuntimeUnlock();
+
+    free(runtimeCtx);
+    return sts;
+}
+
 ENT_PUBLIC MSG_ID_T  ENT_SetRtAttributes(int rtCpu,
                                          ENT_RT_POLICY_E rtPolicy,
                                          int rtPriority)
@@ -461,6 +555,31 @@ ENT_PUBLIC MSG_ID_T  ENT_SetRtAttributes(int rtCpu,
     }
 
     return iENT_CTXApplyRtAttributes(&gEntCtx,rtCpu,rtPolicy,rtPriority);
+}
+
+ENT_PUBLIC MSG_ID_T ENT_RuntimeSetRtAttributes(ENT_RUNTIME runtime,
+                                               int rtCpu,
+                                               ENT_RT_POLICY_E rtPolicy,
+                                               int rtPriority)
+{
+    ENT_RUNTIME_CTX_T* runtimeCtx = (ENT_RUNTIME_CTX_T*)runtime;
+    ENT_CTX savedCtx;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
+
+    if(runtimeCtx == NULL)
+    {
+        return ENT_RT_NOT_INITIALIZED;
+    }
+
+    iENT_RuntimeLock();
+    savedCtx = gEntCtx;
+    gEntCtx = runtimeCtx->ctx;
+    sts = ENT_SetRtAttributes(rtCpu, rtPolicy, rtPriority);
+    runtimeCtx->ctx = gEntCtx;
+    gEntCtx = savedCtx;
+    iENT_RuntimeUnlock();
+
+    return sts;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -493,6 +612,28 @@ ENT_PUBLIC MSG_ID_T  ENT_Run()
         break;
     }
     return ENT_SYS_NORMAL;
+}
+
+ENT_PUBLIC MSG_ID_T ENT_RuntimeRun(ENT_RUNTIME runtime)
+{
+    ENT_RUNTIME_CTX_T* runtimeCtx = (ENT_RUNTIME_CTX_T*)runtime;
+    ENT_CTX savedCtx;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
+
+    if(runtimeCtx == NULL)
+    {
+        return ENT_SYS_RUN_UNINITIALIZED;
+    }
+
+    iENT_RuntimeLock();
+    savedCtx = gEntCtx;
+    gEntCtx = runtimeCtx->ctx;
+    sts = ENT_Run();
+    runtimeCtx->ctx = gEntCtx;
+    gEntCtx = savedCtx;
+    iENT_RuntimeUnlock();
+
+    return sts;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *

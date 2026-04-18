@@ -765,6 +765,52 @@ static int test_ent_set_rt_attributes_rejects_normal_mode(void)
     return expect_true(ENT_Close() == ENT_SYS_NORMAL, "ENT_Close should succeed after normal-mode rt rejection");
 }
 
+static int test_runtime_instance_uses_isolated_context(void)
+{
+    ENT_RUNTIME runtime = NULL;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
+
+    memset(&gEntCtx, 0, sizeof(gEntCtx));
+    reset_close_counters();
+    reset_log_failures();
+
+    sts = ENT_RuntimeInit(&runtime, "demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E);
+    if(expect_true(sts == ENT_SYS_NORMAL,
+                   "ENT_RuntimeInit should initialize an isolated runtime context") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(runtime != NULL, "ENT_RuntimeInit should return a runtime handle") != 0)
+    {
+        ENT_RuntimeClose(runtime);
+        return 1;
+    }
+
+    if(expect_true(gEntCtx.isInit == false,
+                   "ENT_RuntimeInit should not initialize the global runtime context") != 0)
+    {
+        ENT_RuntimeClose(runtime);
+        return 1;
+    }
+
+    if(expect_true(ENT_RuntimeSetRtAttributes(runtime, 0, ENT_RT_POLICY_FIFO_E, 1) == ENT_RT_NOTRT,
+                   "ENT_RuntimeSetRtAttributes should reuse runtime-specific initialization state") != 0)
+    {
+        ENT_RuntimeClose(runtime);
+        return 1;
+    }
+
+    if(expect_true(ENT_RuntimeClose(runtime) == ENT_SYS_NORMAL,
+                   "ENT_RuntimeClose should clean up an isolated runtime context") != 0)
+    {
+        return 1;
+    }
+
+    return expect_true(gEntCtx.isInit == false,
+                       "ENT_RuntimeClose should leave the global runtime context untouched");
+}
+
 int main(void)
 {
     int failures = 0;
@@ -781,6 +827,7 @@ int main(void)
     failures += test_ent_set_rt_attributes_rejects_uninitialized_context();
     failures += test_ent_set_rt_attributes_allows_noop_after_init();
     failures += test_ent_set_rt_attributes_rejects_normal_mode();
+    failures += test_runtime_instance_uses_isolated_context();
 
     if(failures != 0)
     {
