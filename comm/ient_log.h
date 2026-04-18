@@ -88,6 +88,7 @@ typedef struct ENT_LOG_CTX_INTERNAL_TAG
     int              poolFreeCount;
     char*            moduleName;
     char*            logPath;
+    struct ENT_LOG_CTX_TAG* ownerCtx;
     int              maxNum;
     time_t           nextCreate;
 } ENT_LOG_CTX_INTERNAL;
@@ -98,6 +99,7 @@ typedef struct ENT_LOG_CTX_TAG
 {
     unsigned int tag;
     bool         isInit;
+    ENT_LOG      logHandle;
 } ENT_LOG_CTX_TAG;
 
 ENT_LOG_PRIV* iENT_LogDefaultCtx(void);

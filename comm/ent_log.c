@@ -135,6 +135,21 @@ ENT_LOG_CTX_INTERNAL* iENT_LogCtxFromHandle(ENT_LOG_CTX ctx)
     return (ENT_LOG_CTX_INTERNAL*)ctx;
 }
 
+static MSG_ID_T iENT_LogCtxValidate(const struct ENT_LOG_CTX_TAG* ctx, ENT_LOG logHandle)
+{
+    if(ctx == NULL || ctx->tag != ENTLOG_CTX_TAG || ctx->isInit == false)
+    {
+        return -2;
+    }
+
+    if(ctx->logHandle != NULL && ctx->logHandle != logHandle)
+    {
+        return -2;
+    }
+
+    return 0;
+}
+
 static MSG_ID_T iENT_LogInitCtx(ENT_LOG_CTX_INTERNAL* log,
                                 const char* moduleName,
                                 const char* logPath)
@@ -233,6 +248,7 @@ static MSG_ID_T iENT_LogInitCtx(ENT_LOG_CTX_INTERNAL* log,
     log->bufferTail = NULL;
     log->poolFreeHead = NULL;
     log->poolFreeCount = 0;
+    log->ownerCtx = NULL;
     log->isInit = true;
     log->isDebug = false;
     log->isBuffer = false;
@@ -1361,6 +1377,7 @@ ENT_PUBLIC MSG_ID_T ENT_LogCtxInit(ENT_LOG_CTX* pCtx)
 
     ctx->tag = ENTLOG_CTX_TAG;
     ctx->isInit = true;
+    ctx->logHandle = NULL;
     *pCtx = ctx;
     return 0;
 }
@@ -1392,6 +1409,16 @@ ENT_PUBLIC MSG_ID_T ENT_LogCtxClose(ENT_LOG_CTX ctx)
         return -2;
     }
 
+    if(logCtx->logHandle != NULL)
+    {
+        MSG_ID_T closeSts = ENT_LogCloseHandle(logCtx->logHandle);
+        if(closeSts != 0)
+        {
+            return closeSts;
+        }
+        logCtx->logHandle = NULL;
+    }
+
     logCtx->isInit = false;
     free(logCtx);
     return 0;
@@ -1418,7 +1445,7 @@ ENT_PUBLIC MSG_ID_T ENT_LogCtxInitHandle(ENT_LOG_CTX ctx,ENT_LOG* pLogHandle,con
         return -1;
     }
 
-    if(logCtx == NULL || logCtx->tag != ENTLOG_CTX_TAG || logCtx->isInit == false)
+    if(iENT_LogCtxValidate(logCtx, NULL) != 0)
     {
         fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
         return -2;
@@ -1430,7 +1457,21 @@ ENT_PUBLIC MSG_ID_T ENT_LogCtxInitHandle(ENT_LOG_CTX ctx,ENT_LOG* pLogHandle,con
         return -1;
     }
 
-    return ENT_LogInitHandle(pLogHandle, moduleName, logPath);
+    if(logCtx->logHandle != NULL)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
+        return -2;
+    }
+
+    {
+        MSG_ID_T sts = ENT_LogInitHandle(pLogHandle, moduleName, logPath);
+        if(sts == 0)
+        {
+            logCtx->logHandle = *pLogHandle;
+            ((ENT_LOG_CTX_INTERNAL*)(*pLogHandle))->ownerCtx = logCtx;
+        }
+        return sts;
+    }
 }
 
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
@@ -1454,7 +1495,13 @@ ENT_PUBLIC MSG_ID_T ENT_LogCtxSetOption(ENT_LOG_CTX ctx,ENT_LOG logHandle,ENT_LO
         return -1;
     }
 
-    if(logCtx == NULL || logCtx->tag != ENTLOG_CTX_TAG || logCtx->isInit == false)
+    if(iENT_LogCtxValidate(logCtx, logHandle) != 0)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
+        return -2;
+    }
+
+    if(logCtx->logHandle != NULL && logHandle != logCtx->logHandle)
     {
         fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
         return -2;
@@ -1490,7 +1537,20 @@ ENT_PUBLIC MSG_ID_T ENT_LogCtxCloseHandle(ENT_LOG_CTX ctx,ENT_LOG logHandle)
         return -2;
     }
 
-    return ENT_LogCloseHandle(logHandle);
+    if(logCtx->logHandle != NULL && logHandle != logCtx->logHandle)
+    {
+        fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
+        return -2;
+    }
+
+    {
+        MSG_ID_T sts = ENT_LogCloseHandle(logHandle);
+        if(sts == 0 && logCtx->logHandle == logHandle)
+        {
+            logCtx->logHandle = NULL;
+        }
+        return sts;
+    }
 }
 
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
@@ -1516,7 +1576,7 @@ ENT_PUBLIC MSG_ID_T ENT_LogCtxRaw(ENT_LOG_CTX ctx,ENT_LOG logHandle,const char* 
         return -1;
     }
 
-    if(ctx == NULL || ((struct ENT_LOG_CTX_TAG*)ctx)->tag != ENTLOG_CTX_TAG || ((struct ENT_LOG_CTX_TAG*)ctx)->isInit == false)
+    if(iENT_LogCtxValidate((struct ENT_LOG_CTX_TAG*)ctx, logHandle) != 0)
     {
         fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
         return -2;
@@ -1558,7 +1618,7 @@ ENT_PUBLIC MSG_ID_T ENT_LogCtxFatal(ENT_LOG_CTX ctx,ENT_LOG logHandle,const char
         return -1;
     }
 
-    if(ctx == NULL || ((struct ENT_LOG_CTX_TAG*)ctx)->tag != ENTLOG_CTX_TAG || ((struct ENT_LOG_CTX_TAG*)ctx)->isInit == false)
+    if(iENT_LogCtxValidate((struct ENT_LOG_CTX_TAG*)ctx, logHandle) != 0)
     {
         fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
         return -2;
@@ -1605,7 +1665,7 @@ ENT_PUBLIC MSG_ID_T ENT_LogCtxError(ENT_LOG_CTX ctx,ENT_LOG logHandle,const char
         return -1;
     }
 
-    if(ctx == NULL || ((struct ENT_LOG_CTX_TAG*)ctx)->tag != ENTLOG_CTX_TAG || ((struct ENT_LOG_CTX_TAG*)ctx)->isInit == false)
+    if(iENT_LogCtxValidate((struct ENT_LOG_CTX_TAG*)ctx, logHandle) != 0)
     {
         fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
         return -2;
@@ -1652,7 +1712,7 @@ ENT_PUBLIC MSG_ID_T ENT_LogCtxWarn(ENT_LOG_CTX ctx,ENT_LOG logHandle,const char*
         return -1;
     }
 
-    if(ctx == NULL || ((struct ENT_LOG_CTX_TAG*)ctx)->tag != ENTLOG_CTX_TAG || ((struct ENT_LOG_CTX_TAG*)ctx)->isInit == false)
+    if(iENT_LogCtxValidate((struct ENT_LOG_CTX_TAG*)ctx, logHandle) != 0)
     {
         fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
         return -2;
@@ -1699,7 +1759,7 @@ ENT_PUBLIC MSG_ID_T ENT_LogCtxPrint(ENT_LOG_CTX ctx,ENT_LOG logHandle,const char
         return -1;
     }
 
-    if(ctx == NULL || ((struct ENT_LOG_CTX_TAG*)ctx)->tag != ENTLOG_CTX_TAG || ((struct ENT_LOG_CTX_TAG*)ctx)->isInit == false)
+    if(iENT_LogCtxValidate((struct ENT_LOG_CTX_TAG*)ctx, logHandle) != 0)
     {
         fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
         return -2;
@@ -1746,7 +1806,7 @@ ENT_PUBLIC MSG_ID_T ENT_LogCtxDebug(ENT_LOG_CTX ctx,ENT_LOG logHandle,const char
         return -1;
     }
 
-    if(ctx == NULL || ((struct ENT_LOG_CTX_TAG*)ctx)->tag != ENTLOG_CTX_TAG || ((struct ENT_LOG_CTX_TAG*)ctx)->isInit == false)
+    if(iENT_LogCtxValidate((struct ENT_LOG_CTX_TAG*)ctx, logHandle) != 0)
     {
         fprintf(stderr,"Func [%s] Line [%d],arguments is invalid.\n",FUNC_NAME,__LINE__);
         return -2;
@@ -2095,6 +2155,10 @@ ENT_PUBLIC MSG_ID_T ENT_LogCloseHandle(ENT_LOG logHandle)
     
     if(log!=iENT_LogDefaultCtx())
     {
+        if(log->ownerCtx != NULL && log->ownerCtx->logHandle == logHandle)
+        {
+            log->ownerCtx->logHandle = NULL;
+        }
         if(log->moduleName)
         {
             free(log->moduleName);
