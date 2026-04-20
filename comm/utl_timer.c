@@ -60,6 +60,7 @@ typedef struct
 #elif ENT_TMR_IMPL_LINUX
     timer_t           timerId;
     pthread_t         timerThread;
+    BOOL              selfDeleteRequested;
     long long         period_ns;
     long long         next_deadline_ns;
     pthread_t         rtWorker;
@@ -73,6 +74,7 @@ typedef struct
 #else
     /* Other POSIX platforms fall back to a worker thread. */
     pthread_t         timerThread;
+    BOOL              selfDeleteRequested;
 #endif
 } TIMER_CTX_T ,*PTIMER_CTX_T;
 
@@ -98,6 +100,7 @@ static MSG_ID_T iUTL_TimerDeleteRt(PTIMER_CTX_T timerCtx);
 
 #if ENT_TMR_IMPL_LINUX || ENT_TMR_IMPL_POSIX_FALLBACK
 static void* iUTL_TimerThread(void* data);
+static void iUTL_TimerCleanupSelfDeletedThreadTimer(PTIMER_CTX_T timerCtx);
 #endif
 
 #ifndef WIN32
@@ -113,6 +116,35 @@ static void iUTL_TimerSleepMs(int ms)
 #endif
 
 #if ENT_TMR_IMPL_LINUX || ENT_TMR_IMPL_POSIX_FALLBACK
+static void iUTL_TimerCleanupSelfDeletedThreadTimer(PTIMER_CTX_T timerCtx)
+{
+    MSG_ID_T sts = 0;
+    DLL_D_HDR* tmpDll = NULL;
+
+    if(timerCtx == NULL || timerCtx->tag != UTL_TIMER_TAG)
+    {
+        return;
+    }
+
+    if(!sUtilTimerInit)
+    {
+        memset(timerCtx,0,sizeof(TIMER_CTX_T));
+        free(timerCtx);
+        return;
+    }
+
+    UTL_LockEnter(sTimerCtx.dllLock);
+    sts = UTL_DllRemCurr((DLL_D_HDR*)timerCtx,&tmpDll);
+    UTL_LockLeave(sTimerCtx.dllLock);
+    if(sts < 0)
+    {
+        IENT_LOG_ERROR("UTL_DllRemCurr failed during timer self-cleanup,sts [%d]\n",sts);
+    }
+
+    memset(timerCtx,0,sizeof(TIMER_CTX_T));
+    free(timerCtx);
+}
+
 static void* iUTL_TimerThread(void* data)
 {
     PTIMER_CTX_T timerCtx = (PTIMER_CTX_T)data;
@@ -124,22 +156,40 @@ static void* iUTL_TimerThread(void* data)
 
     while(timerCtx->isEnable)
     {
+        UTL_TIMER_EV_F timerCb = NULL;
+        void* timerData = NULL;
+        BOOL oneshot = FALSE;
+
         iUTL_TimerSleepMs(timerCtx->ms);
         if(!timerCtx->isEnable)
         {
             break;
         }
 
-        if(timerCtx->timer_ev_cb)
+        timerCb = timerCtx->timer_ev_cb;
+        timerData = timerCtx->data;
+        oneshot = (timerCtx->timerType & UTL_TIMER_E_ONESHOT) ? TRUE : FALSE;
+
+        if(timerCb)
         {
-            timerCtx->timer_ev_cb(timerCtx->data);
+            timerCb(timerData);
         }
 
-        if(timerCtx->timerType & UTL_TIMER_E_ONESHOT)
+        if(timerCtx->selfDeleteRequested)
+        {
+            break;
+        }
+
+        if(oneshot)
         {
             timerCtx->isEnable = false;
             break;
         }
+    }
+
+    if(timerCtx->selfDeleteRequested)
+    {
+        iUTL_TimerCleanupSelfDeletedThreadTimer(timerCtx);
     }
 
     return NULL;
@@ -185,25 +235,13 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerClose()
 }
 
 #if ENT_TMR_IMPL_WINDOWS
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :iUTL_TimerWinCb
- *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
- *
- *-----------------------------------------------------------------------------
- */
 static void CALLBACK iUTL_TimerWinCb(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2)
 {
     PTIMER_CTX_T timerCtx = (PTIMER_CTX_T)dwUser;
+    (void)uTimerID;
+    (void)uMsg;
+    (void)dw1;
+    (void)dw2;
     if(timerCtx == NULL || timerCtx->tag!=UTL_TIMER_TAG)
     {
         IENT_LOG_ERROR("unvalid arg\n");
@@ -215,22 +253,7 @@ static void CALLBACK iUTL_TimerWinCb(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser,
         timerCtx->timer_ev_cb(timerCtx->data);
     }
 }
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :UTL_TimerInit
- *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
- *
- *-----------------------------------------------------------------------------
- */
+
 ENT_PUBLIC MSG_ID_T  UTL_TimerInit()
 {
     MSG_ID_T  sts = 0;
@@ -255,22 +278,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerInit()
 END_OF_ROUTINE:
     return sts;
 }
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :UTL_TimerCreate
- *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
- *
- *-----------------------------------------------------------------------------
- */
+
 ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int ms,UTL_TIMER_EV_F evCb,void* data)
 {
     PTIMER_CTX_T  timerCtx = NULL;
@@ -331,22 +339,6 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int m
     return ENT_SYS_NORMAL;
 }
 
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :UTL_TimerDelete
- *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
- *
- *-----------------------------------------------------------------------------
- */
 ENT_PUBLIC MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
 {
     MSG_ID_T      sts = 0;
@@ -390,58 +382,32 @@ ENT_PUBLIC MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
 }
 
 #elif ENT_TMR_IMPL_LINUX
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :timer_handler
- *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
- *
- *-----------------------------------------------------------------------------
- */
 #define CLOCKID CLOCK_REALTIME
 #define SIG_UTL SIGRTMIN
 static void timer_handler(int sig, siginfo_t *si, void *uc)
 {
-    PTIMER_CTX_T timerId = (PTIMER_CTX_T)si->si_value.sival_ptr;
-    if(timerId == NULL || timerId->isEnable==false || timerId->tag!=UTL_TIMER_TAG)
+    PTIMER_CTX_T timerId = NULL;
+    (void)sig;
+    (void)uc;
+
+    if(si == NULL)
+    {
+        return;
+    }
+    timerId = (PTIMER_CTX_T)si->si_value.sival_ptr;
+    if(timerId == NULL || timerId->isEnable == false || timerId->tag != UTL_TIMER_TAG)
     {
         return;
     }
 
-    if(timerId->timer_ev_cb)
-    {
-        timerId->timer_ev_cb(timerId->data);
-    }
-
-    if(timerId->timerType&UTL_TIMER_E_ONESHOT)
-    {
-        UTL_TimerDelete((UTL_TIMER_T*)&timerId);
-    }
+    /*
+     * Signal-driven callbacks are intentionally not executed here.
+     * The old implementation invoked user callbacks and even timer deletion from
+     * signal context, which is not async-signal-safe and could corrupt runtime
+     * state. Linux now falls back to thread mode for UTL_TIMER_E_SIGNAL timers.
+     */
 }
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :timer_handler
- *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
- *
- *-----------------------------------------------------------------------------
- */
+
 static long long iUTL_TimerMonotonicNs(void)
 {
     struct timespec ts;
@@ -726,22 +692,7 @@ static MSG_ID_T iUTL_TimerDeleteRt(PTIMER_CTX_T timerCtx)
     }
     return ENT_SYS_NORMAL;
 }
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :UTL_TimerInit
- *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
- *
- *-----------------------------------------------------------------------------
- */
+
 ENT_PUBLIC MSG_ID_T  UTL_TimerInit()
 {
     MSG_ID_T  sts = 0;
@@ -765,11 +716,10 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerInit()
         IENT_LOG_ERROR("UTL_DllInitHead failed,sts [%d].\n",sts);
         goto END_OF_ROUTINE;
     }
-    /* Establish handler for timer signal */
     sa.sa_flags = SA_SIGINFO;
     sa.sa_sigaction = timer_handler;
     sigemptyset(&sa.sa_mask);
-    if (sigaction(SIG_UTL, &sa, NULL) == -1)
+    if(sigaction(SIG_UTL, &sa, NULL) == -1)
     {
         UTL_LockClose(sTimerCtx.dllLock);
         IENT_LOG_ERROR("sigaction failed,error [%d]->[%s]\n",errno,strerror(errno));
@@ -783,22 +733,7 @@ END_OF_ROUTINE:
     }
     return ENT_SYS_NORMAL;
 }
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :UTL_TimerCreate
- *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
- *
- *-----------------------------------------------------------------------------
- */
+
 ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int ms,UTL_TIMER_EV_F evCb,void* data)
 {
     MSG_ID_T      sts = 0;
@@ -815,6 +750,12 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int m
     {
         IENT_LOG_ERROR("uninitialized\n");
         return ENT_TMR_NOT_INITIALIZED;
+    }
+
+    if(type & UTL_TIMER_E_SIGNAL)
+    {
+        IENT_LOG_WARN("UTL_TIMER_E_SIGNAL is unsafe on Linux and now falls back to thread mode\n");
+        type &= ~UTL_TIMER_E_SIGNAL;
     }
 
     timerCtx = (PTIMER_CTX_T)malloc(sizeof(TIMER_CTX_T));
@@ -858,7 +799,6 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int m
         return ENT_SYS_NORMAL;
     }
 
-    /* Create the timer */
     sev.sigev_notify = SIGEV_SIGNAL;
     sev.sigev_signo = SIG_UTL;
     sev.sigev_value.sival_ptr = timerCtx;
@@ -869,10 +809,9 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int m
         free(timerCtx);
         return ENT_TMR_CREATE_FAILED;
     }
-    
+
     IENT_LOG_DEBUG("timer ID is 0x%lx\n", (long) timerCtx->timerId);
-    
-    /* Start the timer */
+
     its.it_value.tv_sec  = ms/1000;
     its.it_value.tv_nsec = (ms%1000)*1000000;
     if(type&UTL_TIMER_E_ONESHOT)
@@ -915,28 +854,13 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreateUs(UTL_TIMER_T* pTimer,unsigned int type, int
 {
     return iUTL_TimerCreateRt(pTimer, type, period_us, evCb, data);
 }
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :UTL_TimerDelete
- *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
- *
- *-----------------------------------------------------------------------------
- */
+
 ENT_PUBLIC MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
 {
     MSG_ID_T      sts = 0;
     DLL_D_HDR*    tmpDll;
     PTIMER_CTX_T  timerCtx = NULL;
-    
+
     if(pTimer == NULL)
     {
         IENT_LOG_ERROR("unvalid arg\n");
@@ -969,17 +893,21 @@ ENT_PUBLIC MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
     if(!(timerCtx->timerType&UTL_TIMER_E_SIGNAL))
     {
         timerCtx->isEnable = false;
-        if(!pthread_equal(pthread_self(), timerCtx->timerThread))
+        if(pthread_equal(pthread_self(), timerCtx->timerThread))
         {
-            pthread_join(timerCtx->timerThread, NULL);
+            timerCtx->selfDeleteRequested = TRUE;
+            *pTimer = NULL;
+            return ENT_SYS_NORMAL;
         }
+
+        pthread_join(timerCtx->timerThread, NULL);
 
         UTL_LockEnter(sTimerCtx.dllLock);
         sts = UTL_DllRemCurr((DLL_D_HDR*)timerCtx,&tmpDll);
         UTL_LockLeave(sTimerCtx.dllLock);
         memset(timerCtx,0,sizeof(TIMER_CTX_T));
-
         free(timerCtx);
+
         *pTimer = NULL;
         if(sts < 0)
         {
@@ -1133,10 +1061,14 @@ ENT_PUBLIC MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
     }
 
     timerCtx->isEnable = false;
-    if(!pthread_equal(pthread_self(), timerCtx->timerThread))
+    if(pthread_equal(pthread_self(), timerCtx->timerThread))
     {
-        pthread_join(timerCtx->timerThread, NULL);
+        timerCtx->selfDeleteRequested = TRUE;
+        *pTimer = NULL;
+        return ENT_SYS_NORMAL;
     }
+
+    pthread_join(timerCtx->timerThread, NULL);
 
     UTL_LockEnter(sTimerCtx.dllLock);
     sts = UTL_DllRemCurr((DLL_D_HDR*)timerCtx,&tmpDll);
@@ -1153,22 +1085,6 @@ ENT_PUBLIC MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
 }
 #endif
 
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :UTL_Sleep
- *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
- *
- *-----------------------------------------------------------------------------
- */
 ENT_PUBLIC MSG_ID_T  UTL_Sleep(int ms)
 {
 #ifdef WIN32
