@@ -35,6 +35,9 @@ jobs:
       - name: Test
         run: ./scripts/run-ci-linux.sh test
 
+      - name: Install and downstream consumer check
+        run: ./scripts/run-ci-linux.sh install-consumer
+
       - name: Performance Smoke
         run: ./scripts/run-ci-linux.sh perf
 
@@ -60,6 +63,10 @@ jobs:
       - name: Test
         shell: pwsh
         run: .\scripts\run-ci-windows.ps1 test
+
+      - name: Install and downstream consumer check
+        shell: pwsh
+        run: .\scripts\run-ci-windows.ps1 install-consumer
 
       - name: Performance Smoke
         shell: pwsh
