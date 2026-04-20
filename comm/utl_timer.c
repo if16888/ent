@@ -89,6 +89,30 @@ typedef struct ENT_TH_CTX
 
 static bool          sUtilTimerInit;
 static TIMER_TH_CTX  sTimerCtx;
+#ifdef WIN32
+static SRWLOCK       sTimerLifecycleLock = SRWLOCK_INIT;
+#else
+static pthread_mutex_t sTimerLifecycleLock = PTHREAD_MUTEX_INITIALIZER;
+#endif
+static BOOL          sTimerClosing = FALSE;
+
+static void iUTL_TimerLifecycleLockEnter(void)
+{
+#ifdef WIN32
+    AcquireSRWLockExclusive(&sTimerLifecycleLock);
+#else
+    pthread_mutex_lock(&sTimerLifecycleLock);
+#endif
+}
+
+static void iUTL_TimerLifecycleLockLeave(void)
+{
+#ifdef WIN32
+    ReleaseSRWLockExclusive(&sTimerLifecycleLock);
+#else
+    pthread_mutex_unlock(&sTimerLifecycleLock);
+#endif
+}
 
 #if ENT_TMR_IMPL_LINUX
 static long long iUTL_TimerMonotonicNs(void);
@@ -215,22 +239,47 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerClose()
 {
     MSG_ID_T     sts = ENT_SYS_NORMAL;
     DLL_D_HDR*   tmpDll = NULL;
+
+    iUTL_TimerLifecycleLockEnter();
     if(!sUtilTimerInit)
     {
+        iUTL_TimerLifecycleLockLeave();
         IENT_LOG_ERROR("uninitialized\n");
         return ENT_TMR_NOT_INITIALIZED;
     }
-
-    while((sts = UTL_DllNextLe(&sTimerCtx.dllHeader,&tmpDll)) == ENT_SYS_NORMAL)
+    if(sTimerClosing)
     {
+        iUTL_TimerLifecycleLockLeave();
+        IENT_LOG_WARN("timer close in progress\n");
+        return ENT_SYS_NORMAL;
+    }
+    sTimerClosing = TRUE;
+    iUTL_TimerLifecycleLockLeave();
+
+    for(;;)
+    {
+        tmpDll = NULL;
+        UTL_LockEnter(sTimerCtx.dllLock);
+        sts = UTL_DllNextLe(&sTimerCtx.dllHeader,&tmpDll);
+        UTL_LockLeave(sTimerCtx.dllLock);
+        if(sts != ENT_SYS_NORMAL)
+        {
+            break;
+        }
+
         sts = UTL_TimerDelete((UTL_TIMER_T*)&tmpDll);
         if(sts < 0)
         {
             IENT_LOG_ERROR("UTL_TimerDelete failed,sts [%d]\n",sts);
         }
     }
+
+    iUTL_TimerLifecycleLockEnter();
     UTL_LockClose(sTimerCtx.dllLock);
+    memset(&sTimerCtx,0,sizeof(sTimerCtx));
     sUtilTimerInit = false;
+    sTimerClosing = FALSE;
+    iUTL_TimerLifecycleLockLeave();
     return ENT_SYS_NORMAL;
 }
 
@@ -257,6 +306,8 @@ static void CALLBACK iUTL_TimerWinCb(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser,
 ENT_PUBLIC MSG_ID_T  UTL_TimerInit()
 {
     MSG_ID_T  sts = 0;
+
+    iUTL_TimerLifecycleLockEnter();
     if(!sUtilTimerInit)
     {
         sts = UTL_LockInit(&sTimerCtx.dllLock,"UTL_TimerInit");
@@ -276,6 +327,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerInit()
     }
 
 END_OF_ROUTINE:
+    iUTL_TimerLifecycleLockLeave();
     return sts;
 }
 
@@ -697,8 +749,11 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerInit()
 {
     MSG_ID_T  sts = 0;
     struct sigaction sa;
+
+    iUTL_TimerLifecycleLockEnter();
     if(sUtilTimerInit)
     {
+        iUTL_TimerLifecycleLockLeave();
         IENT_LOG_WARN("initialized already\n");
         return ENT_SYS_NORMAL;
     }
@@ -723,10 +778,12 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerInit()
     {
         UTL_LockClose(sTimerCtx.dllLock);
         IENT_LOG_ERROR("sigaction failed,error [%d]->[%s]\n",errno,strerror(errno));
-        return ENT_TMR_CREATE_FAILED;
+        sts = ENT_TMR_CREATE_FAILED;
+        goto END_OF_ROUTINE;
     }
     sUtilTimerInit = true;
 END_OF_ROUTINE:
+    iUTL_TimerLifecycleLockLeave();
     if(sts < 0)
     {
         return ENT_TMR_THREAD_FAILED;
@@ -958,8 +1015,11 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreateUs(UTL_TIMER_T* pTimer,unsigned int type, int
 ENT_PUBLIC MSG_ID_T  UTL_TimerInit()
 {
     MSG_ID_T  sts = 0;
+
+    iUTL_TimerLifecycleLockEnter();
     if(sUtilTimerInit)
     {
+        iUTL_TimerLifecycleLockLeave();
         IENT_LOG_WARN("initialized already\n");
         return ENT_SYS_NORMAL;
     }
@@ -968,6 +1028,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerInit()
     if(sts<0)
     {
         IENT_LOG_ERROR("UTL_LockInit failed,sts [%d].\n",sts);
+        iUTL_TimerLifecycleLockLeave();
         return ENT_TMR_THREAD_FAILED;
     }
     sts = UTL_DllInitHead(&sTimerCtx.dllHeader);
@@ -975,9 +1036,11 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerInit()
     {
         UTL_LockClose(sTimerCtx.dllLock);
         IENT_LOG_ERROR("UTL_DllInitHead failed,sts [%d].\n",sts);
+        iUTL_TimerLifecycleLockLeave();
         return ENT_TMR_LIST_FAILED;
     }
     sUtilTimerInit = true;
+    iUTL_TimerLifecycleLockLeave();
     return ENT_SYS_NORMAL;
 }
 
