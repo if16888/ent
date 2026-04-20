@@ -15,6 +15,7 @@
 - `ctest` 功能测试
 - 性能冒烟测试
 - 安装后下游 `find_package(ent CONFIG REQUIRED)` 消费验证
+- Release 阶段按平台 / 架构打包 SDK 产物
 
 ---
 
@@ -36,9 +37,36 @@ cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
+> 当前 Windows 主路径默认按 **Win32/32 位** 构建，便于和已有的 32 位第三方库一起链接。
+
 ---
 
-## 2. 常用 CMake 开关
+## 2. Windows 32 位 / 64 位说明
+
+Windows 下**不能在同一个最终目标里混用 32 位和 64 位库**。
+
+这意味着：
+
+- 如果某个第三方 `.lib/.dll` 是 **32 位**，那么 `ent`、其余依赖、最终 EXE / DLL 也都必须是 **Win32/32 位**。
+- 如果最终目标是 **x64**，那么所有参与链接的库也必须全部是 **x64**。
+- **Win32 库不能直接链接到 x64 目标**，反过来也不行。
+
+当前仓库的 Windows CI 默认使用：
+
+```text
+WINDOWS_CMAKE_PLATFORM=Win32
+```
+
+因此仓库当前默认验证的是 **32 位 Windows 构建链路**。如果你后面想切到 x64，需要保证：
+
+- SQLite / MySQL / PostgreSQL / Lua / 你的私有第三方库
+- 以及运行时 DLL
+
+全部都有对应的 **x64 版本**。
+
+---
+
+## 3. 常用 CMake 开关
 
 ### 顶层开关
 
@@ -70,7 +98,7 @@ cmake --build build
 
 ---
 
-## 3. 本地安装
+## 4. 本地安装
 
 安装到自定义目录：
 
@@ -92,7 +120,7 @@ cmake --install build-install --config Release --prefix "$PWD/.local-install"
 
 ---
 
-## 4. 下游项目使用方式
+## 5. 下游项目使用方式
 
 安装完成后，下游工程可这样引用：
 
@@ -122,7 +150,7 @@ CI 会先 `cmake --install`，再使用这个 sample 验证安装后的 `find_pa
 
 ---
 
-## 5. 示例：最小下游 `CMakeLists.txt`
+## 6. 示例：最小下游 `CMakeLists.txt`
 
 ```cmake
 cmake_minimum_required(VERSION 3.15)
@@ -145,7 +173,7 @@ cmake -S . -B build -DCMAKE_PREFIX_PATH=/path/to/ent/install
 
 ---
 
-## 6. CI 脚本
+## 7. CI 脚本
 
 Linux：
 
@@ -172,7 +200,25 @@ Windows：
 
 ---
 
-## 7. 当前测试覆盖概览
+## 8. Release 产物
+
+Release workflow 现在会按平台 / 架构打包 SDK：
+
+- Linux: `ent-<tag>-linux-x86_64-sdk.tar.gz`
+- Windows: `ent-<tag>-windows-win32-sdk.zip`
+
+打包内容来自 `cmake --install` 的安装树，因此会包含：
+
+- `include/`
+- `lib/`
+- `bin/`（如有运行时文件）
+- `CMake package files`
+
+这样下游可以直接解压后使用 `CMAKE_PREFIX_PATH` 指向安装目录。
+
+---
+
+## 9. 当前测试覆盖概览
 
 已接入 `ctest` 的测试目标包括：
 
@@ -199,7 +245,7 @@ Windows：
 
 ---
 
-## 8. PostgreSQL / MySQL / SQLite 说明
+## 10. PostgreSQL / MySQL / SQLite 说明
 
 - SQLite / MySQL / PostgreSQL 都是**按构建结果启用**，不是运行时热插拔。
 - PostgreSQL 现在有显式顶层开关 `ENT_ENABLE_PGSQL`。
@@ -209,7 +255,7 @@ Windows：
 
 ---
 
-## 9. Lua 说明
+## 11. Lua 说明
 
 Lua 后端默认关闭：
 
@@ -227,9 +273,9 @@ cmake -S . -B build -DENT_ENABLE_LUA=ON -DENT_LUA_LINK_MODE=static
 
 ---
 
-## 10. 兼容性说明
+## 12. 兼容性说明
 
-老 README 中保留过较早期的 VS 工程使用痕迹；当前推荐方式已经统一到 **CMake + CI 脚本 + 安装后下游消费验证**。
+老 README 中保留过较早期的 VS 工程使用痕迹；当前推荐方式已经统一到 **CMake + CI 脚本 + 安装后下游消费验证 + SDK 打包**。
 
 如果你要把 `ent` 当作对外发布的 SDK 来用，建议优先采用本 README 中的：
 
@@ -237,3 +283,4 @@ cmake -S . -B build -DENT_ENABLE_LUA=ON -DENT_LUA_LINK_MODE=static
 - `cmake --install`
 - `find_package(ent CONFIG REQUIRED)`
 - `ent::ent` / `ent::ent_s` 目标链接
+- 与目标位宽一致的第三方库集合（Win32 全链路 32 位 / x64 全链路 64 位）
