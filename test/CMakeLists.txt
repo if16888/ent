@@ -104,6 +104,25 @@ endif()
 add_test(NAME test_utl_thread COMMAND test_utl_thread)
 
 add_executable(
+  test_utl_lock_cv
+  test_utl_lock_cv.c
+  ../comm/utl_thread.c
+)
+
+target_include_directories(
+  test_utl_lock_cv
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../comm
+)
+
+if(APPLE OR UNIX)
+  target_link_libraries(test_utl_lock_cv PRIVATE pthread)
+endif()
+
+add_test(NAME test_utl_lock_cv COMMAND test_utl_lock_cv)
+
+add_executable(
   test_ent_thread
   test_ent_thread.c
   ../comm/ent_thread.c
