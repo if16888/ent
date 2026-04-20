@@ -38,16 +38,26 @@ jobs:
       - name: Performance Smoke
         run: ./scripts/run-ci-linux.sh perf
 
-      - name: Package SDK
+      - name: Package runtime and devel SDKs
         run: |
-          cmake --install build --prefix build/package-root
-          tar -C build/package-root -czf ent-${GITHUB_REF_NAME}-linux-x86_64-sdk.tar.gz .
+          rm -rf build/package-runtime build/package-devel
+          cmake --install build --prefix build/package-runtime --component runtime
+          cmake --install build --prefix build/package-devel --component devel
+          tar -C build/package-runtime -czf ent-${GITHUB_REF_NAME}-linux-x86_64-runtime.tar.gz .
+          tar -C build/package-devel -czf ent-${GITHUB_REF_NAME}-linux-x86_64-devel.tar.gz .
 
-      - name: Upload SDK artifact
+      - name: Upload runtime artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-linux-sdk
-          path: ent-${{ github.ref_name }}-linux-x86_64-sdk.tar.gz
+          name: release-linux-runtime
+          path: ent-${{ github.ref_name }}-linux-x86_64-runtime.tar.gz
+          if-no-files-found: error
+
+      - name: Upload devel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-devel
+          path: ent-${{ github.ref_name }}-linux-x86_64-devel.tar.gz
           if-no-files-found: error
 
   build-windows:
@@ -81,17 +91,28 @@ jobs:
         shell: pwsh
         run: .\scripts\run-ci-windows.ps1 perf
 
-      - name: Package SDK
+      - name: Package runtime and devel SDKs
         shell: pwsh
         run: |
-          cmake --install build --config Release --prefix build/package-root
-          Compress-Archive -Path build/package-root\* -DestinationPath ent-${env:GITHUB_REF_NAME}-windows-win32-sdk.zip -Force
+          if (Test-Path build/package-runtime) { Remove-Item build/package-runtime -Recurse -Force }
+          if (Test-Path build/package-devel) { Remove-Item build/package-devel -Recurse -Force }
+          cmake --install build --config Release --prefix build/package-runtime --component runtime
+          cmake --install build --config Release --prefix build/package-devel --component devel
+          Compress-Archive -Path build/package-runtime\* -DestinationPath ent-${env:GITHUB_REF_NAME}-windows-win32-runtime.zip -Force
+          Compress-Archive -Path build/package-devel\* -DestinationPath ent-${env:GITHUB_REF_NAME}-windows-win32-devel.zip -Force
 
-      - name: Upload SDK artifact
+      - name: Upload runtime artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-windows-sdk
-          path: ent-${{ github.ref_name }}-windows-win32-sdk.zip
+          name: release-windows-runtime
+          path: ent-${{ github.ref_name }}-windows-win32-runtime.zip
+          if-no-files-found: error
+
+      - name: Upload devel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-devel
+          path: ent-${{ github.ref_name }}-windows-win32-devel.zip
           if-no-files-found: error
 
   publish:
