@@ -2,6 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifndef WIN32
+#include <pthread.h>
+#endif
 
 #include "ient_comm.h"
 #include "ient_runtime.h"
@@ -141,6 +144,38 @@ static void* slow_timer_cb(void* data)
     probe->in_callback = 0;
     return NULL;
 }
+
+#ifndef WIN32
+typedef struct
+{
+    UTL_TIMER_T timer;
+    volatile int hits;
+    volatile int delete_status;
+} TIMER_SELF_DELETE_PROBE;
+
+static void* self_delete_timer_cb(void* data)
+{
+    TIMER_SELF_DELETE_PROBE* probe = (TIMER_SELF_DELETE_PROBE*)data;
+
+    probe->hits++;
+    probe->delete_status = UTL_TimerDelete(&probe->timer);
+    return NULL;
+}
+
+typedef struct
+{
+    volatile MSG_ID_T close_status;
+} TIMER_CLOSE_THREAD_PROBE;
+
+static void* timer_close_thread(void* data)
+{
+    TIMER_CLOSE_THREAD_PROBE* probe = (TIMER_CLOSE_THREAD_PROBE*)data;
+
+    UTL_Sleep(5);
+    probe->close_status = UTL_TimerClose();
+    return NULL;
+}
+#endif
 
 static int test_periodic_timer_remains_stable_with_slow_callback(void)
 {
@@ -456,6 +491,114 @@ static int test_timer_create_us_periodic_timer_fires_on_linux(void)
 #endif
 }
 
+#ifndef WIN32
+static int test_timer_callback_can_self_delete_safely(void)
+{
+    TIMER_SELF_DELETE_PROBE probe;
+
+    memset(&probe, 0, sizeof(probe));
+    probe.delete_status = -999;
+
+    if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before self-delete callback test") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(UTL_TimerCreate(&probe.timer, UTL_TIMER_E_PERIOD, 10, self_delete_timer_cb, &probe) == 0,
+                   "UTL_TimerCreate should create a timer for self-delete callback test") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    UTL_Sleep(80);
+
+    if(expect_true(probe.hits == 1, "self-delete callback timer should fire exactly once") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    if(expect_true(probe.delete_status == 0, "self-delete callback should be able to delete its own timer") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    if(expect_true(probe.timer == NULL, "self-delete callback should clear the timer handle") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    return expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after self-delete callback test");
+}
+
+static int test_timer_create_is_rejected_while_close_progresses(void)
+{
+    UTL_TIMER_T timer = NULL;
+    UTL_TIMER_T rejected_timer = NULL;
+    TIMER_SLOW_PROBE slow_probe;
+    TIMER_CLOSE_THREAD_PROBE close_probe;
+    pthread_t closer;
+    int observed_rejection = 0;
+    int i = 0;
+
+    memset(&slow_probe, 0, sizeof(slow_probe));
+    memset(&close_probe, 0, sizeof(close_probe));
+    close_probe.close_status = -999;
+
+    if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before close/create race test") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(UTL_TimerCreate(&timer, UTL_TIMER_E_PERIOD, 5, slow_timer_cb, &slow_probe) == 0,
+                   "UTL_TimerCreate should create a slow periodic timer for close/create race test") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    UTL_Sleep(15);
+
+    if(expect_true(pthread_create(&closer, NULL, timer_close_thread, &close_probe) == 0,
+                   "close helper thread should start") != 0)
+    {
+        UTL_TimerDelete(&timer);
+        UTL_TimerClose();
+        return 1;
+    }
+
+    for(i = 0; i < 200; ++i)
+    {
+        MSG_ID_T sts = UTL_TimerCreate(&rejected_timer, UTL_TIMER_E_ONESHOT, 10, timer_cb, NULL);
+        if(sts == ENT_TMR_NOT_INITIALIZED)
+        {
+            observed_rejection = 1;
+            break;
+        }
+        if(sts == 0)
+        {
+            UTL_TimerDelete(&rejected_timer);
+            rejected_timer = NULL;
+        }
+        UTL_Sleep(1);
+    }
+
+    pthread_join(closer, NULL);
+    timer = NULL;
+
+    if(expect_true(close_probe.close_status == 0, "UTL_TimerClose should succeed in helper thread") != 0)
+    {
+        return 1;
+    }
+
+    return expect_true(observed_rejection == 1,
+                       "UTL_TimerCreate should be rejected once timer close has started");
+}
+#endif
+
 int main(void)
 {
     int failures = 0;
@@ -468,6 +611,10 @@ int main(void)
     failures += test_timer_create_us_has_consistent_failure_contract();
     failures += test_timer_create_us_delete_does_not_wait_full_period();
     failures += test_timer_create_us_periodic_timer_fires_on_linux();
+#ifndef WIN32
+    failures += test_timer_callback_can_self_delete_safely();
+    failures += test_timer_create_is_rejected_while_close_progresses();
+#endif
 
     if(failures != 0)
     {
