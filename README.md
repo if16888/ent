@@ -1,70 +1,239 @@
-1. 配置项目
-   假设机器上已经安装了cmake 3及visual studio 2010等开发工具，并安装了NSIS打包工具
-   mkdir -p build
-   cd build
-   cmake ..
-2. 构建项目
-   cmake --build .
-   如需禁用数据库后端，可在配置时追加 `-DENT_ENABLE_MYSQL=OFF` 或 `-DENT_ENABLE_SQLITE=OFF`
-   如需启用 Lua 脚本后端，可在配置时追加 `-DENT_ENABLE_LUA=ON`
-   Lua 链接方式默认静态，可通过 `-DENT_LUA_LINK_MODE=shared` 切换为动态库
-3. 切换构建类型
-   cmake -D CMAKE_BUILD_TYPE=Release ..
-4. 使用ide
-   进入build目录，使用visual studio 2010打开ent.sln
+# ent
 
-5. 测试补充记录
-   当前已补充并接入 `ctest` 的测试目标：
-   `test_ent_init`、`test_utl_dll`、`test_utl_thread`、`test_ent_thread`、`test_utl_tpool`、`test_utl_timer`、`test_utl_socket`、`test_ent_db`、`test_ent_log`、`test_security`
-   覆盖范围包括：
-   `ent_init` 的初始化/关闭、输入校验、失败回收
-   `utl_dll` 的空链表、头插尾插、头删尾删
-   `utl_thread` 的锁/CV 参数校验和最小加锁解锁路径
-   `ent_thread` 的参数校验、创建/等待/关闭生命周期
-   `utl_tpool` 的参数校验和 worker 启动失败路径
-   `utl_timer` 的初始化、关闭、单次和周期定时器
-   `utl_socket` 的参数校验和 localhost 最小回环收发
-   `ent_db` 的 SQLite-only 初始化、打开、读写回环、非法 SQL、回调失败路径
-   `ent_log` 的日志系统初始化判断、多级别选项及动态输出校验
-   `security` 安全审计：ent_init sprintf 缓冲区越界、ent_log 空路径下溢/负数 maxNum/非法日志等级、ent_db SQL 注入（DROP TABLE/UNION SELECT）、NULL sql 拒绝
+`ent` 是一个跨平台 C 组件库，当前主要提供以下能力：
 
-6. SQLite-only 测试配置
-   当前数据库测试按 SQLite-only 方式验证，可使用以下命令重新配置：
-   `cmake -S . -B build -DENT_ENABLE_SQLITE=ON -DENT_ENABLE_MYSQL=OFF`
+- 运行时初始化与多实例 runtime 管理
+- 日志系统
+- 线程 / 锁 / 条件变量 / 线程池 / 定时器 / socket 等基础设施
+- 数据库访问封装（SQLite / MySQL / PostgreSQL，按构建配置启用）
+- Lua 脚本后端（可选）
+- 基于 `msg/ent.msg` 的统一消息码生成
 
-7. Lua 第三方源码约定（静态链接优先）
-   默认约定 Lua 源码位于：
-   `3rd/lua/src`
-   其中应包含 `lua.h` 和 Lua 5.4 的核心 `.c` 文件（不含 `lua.c` / `luac.c` 可执行入口也可）。
-   启用 Lua 静态构建示例：
-   `cmake -S . -B build -DENT_ENABLE_LUA=ON -DENT_LUA_LINK_MODE=static`
-   若源码不存在，构建系统会给出警告并自动关闭 Lua 后端。
+当前仓库已经接入：
 
-8. 验证命令
-   在 `build` 目录执行：
-   `ctest --output-on-failure`
-   如需单独验证数据库测试：
-   `ctest --output-on-failure -R test_ent_db`
-   示例程序构建验证：
-   `cmake --build build --target example01`
+- Linux (`ubuntu-24.04`) + Windows (`windows-2022`) 双平台 CI
+- `ctest` 功能测试
+- 性能冒烟测试
+- 安装后下游 `find_package(ent CONFIG REQUIRED)` 消费验证
 
-9. GitHub Actions
-   当前仓库已提供 Linux (`ubuntu-24.04`) 和 Windows (`windows-2022`) 的 CI。
-   两个平台都通过共享脚本执行：
-   Linux: `./scripts/run-ci-linux.sh`
-   Windows: `.\scripts\run-ci-windows.ps1`
-   阶段统一为：
-   `configure`、`build`、`test`、`perf`
-   当前功能测试已恢复到双平台 `10/10`，性能冒烟也可完整执行。
+---
 
-10. CI 经验文档
-   这次 GitHub Actions 的平台差异、踩坑记录、脚本化经验和后续项目可复用的 checklist 已整理到：
-   `docs/github-actions-ci-playbook.md`
+## 1. 快速构建
 
-11. 本地下游消费安装
-   如需让其他 CMake 项目通过 `find_package(ent CONFIG REQUIRED)` 使用本库，可先本地安装：
-   `cmake -S . -B build-install -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release`
-   `cmake --build build-install --parallel 4`
-   `cmake --install build-install --prefix /Users/lifei/test/ent/.local-install`
-   下游项目配置时传入：
-   `-DCMAKE_PREFIX_PATH=/Users/lifei/test/ent/.local-install`
+### Linux / macOS
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+### Windows (Visual Studio)
+
+```powershell
+cmake -S . -B build -A Win32 -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+```
+
+---
+
+## 2. 常用 CMake 开关
+
+### 顶层开关
+
+- `-DENT_ENABLE_PGSQL=ON|OFF`
+  - 是否启用 PostgreSQL 后端探测与编译。
+- `-DENT_BUILD_EXAMPLES=ON|OFF`
+  - 是否构建仓库内示例程序。
+- `-DBUILD_TESTING=ON|OFF`
+  - 是否构建 `test/` 下的测试目标。
+
+### comm 子目录相关开关
+
+- `-DENT_ENABLE_SQLITE=ON|OFF`
+- `-DENT_ENABLE_MYSQL=ON|OFF`
+- `-DENT_ENABLE_LUA=ON|OFF`
+- `-DENT_ALLOW_VENDORED_DB_LIBS=ON|OFF`
+- `-DENT_LUA_LINK_MODE=static|shared`
+
+示例：只构建库本体，不构建 example / test，且关闭 PostgreSQL：
+
+```bash
+cmake -S . -B build \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DENT_BUILD_EXAMPLES=OFF \
+  -DBUILD_TESTING=OFF \
+  -DENT_ENABLE_PGSQL=OFF
+cmake --build build
+```
+
+---
+
+## 3. 本地安装
+
+安装到自定义目录：
+
+```bash
+cmake -S . -B build-install -DCMAKE_BUILD_TYPE=Release
+cmake --build build-install
+cmake --install build-install --prefix "$PWD/.local-install"
+```
+
+Windows：
+
+```powershell
+cmake -S . -B build-install -A Win32 -DCMAKE_BUILD_TYPE=Release
+cmake --build build-install --config Release
+cmake --install build-install --config Release --prefix "$PWD/.local-install"
+```
+
+安装后会导出 CMake package，可供下游通过 `find_package(ent CONFIG REQUIRED)` 使用。
+
+---
+
+## 4. 下游项目使用方式
+
+安装完成后，下游工程可这样引用：
+
+```cmake
+find_package(ent CONFIG REQUIRED)
+add_executable(app main.c)
+```
+
+### 链接共享库
+
+```cmake
+target_link_libraries(app PRIVATE ent::ent)
+```
+
+### 链接静态库
+
+```cmake
+target_link_libraries(app PRIVATE ent::ent_s)
+```
+
+当前仓库已补充安装后下游 sample：
+
+- `test/downstream_consumer/CMakeLists.txt`
+- `test/downstream_consumer/main.c`
+
+CI 会先 `cmake --install`，再使用这个 sample 验证安装后的 `find_package` 与链接链路。
+
+---
+
+## 5. 示例：最小下游 `CMakeLists.txt`
+
+```cmake
+cmake_minimum_required(VERSION 3.15)
+project(ent_downstream_consumer C)
+
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+
+find_package(ent CONFIG REQUIRED)
+
+add_executable(ent_downstream_consumer main.c)
+target_link_libraries(ent_downstream_consumer PRIVATE ent::ent_s)
+```
+
+如果 `ent` 安装在非系统目录，配置下游工程时传入：
+
+```bash
+cmake -S . -B build -DCMAKE_PREFIX_PATH=/path/to/ent/install
+```
+
+---
+
+## 6. CI 脚本
+
+Linux：
+
+- `./scripts/run-ci-linux.sh configure`
+- `./scripts/run-ci-linux.sh build`
+- `./scripts/run-ci-linux.sh test`
+- `./scripts/run-ci-linux.sh install-consumer`
+- `./scripts/run-ci-linux.sh perf`
+
+Windows：
+
+- `.\scripts\run-ci-windows.ps1 configure`
+- `.\scripts\run-ci-windows.ps1 build`
+- `.\scripts\run-ci-windows.ps1 test`
+- `.\scripts\run-ci-windows.ps1 install-consumer`
+- `.\scripts\run-ci-windows.ps1 perf`
+
+`install-consumer` 阶段会执行：
+
+1. 安装当前构建产物到 staging 目录
+2. 使用 `test/downstream_consumer` 作为独立下游工程重新配置
+3. 通过 `find_package(ent CONFIG REQUIRED)` 链接安装产物
+4. 构建并运行 sample
+
+---
+
+## 7. 当前测试覆盖概览
+
+已接入 `ctest` 的测试目标包括：
+
+- `test_ent_init`
+- `test_ent_msg`
+- `test_ent_script`
+- `test_utl_dll`
+- `test_utl_thread`
+- `test_ent_thread`
+- `test_utl_tpool`
+- `test_utl_timer`
+- `test_utl_socket`
+- `test_ent_db`
+- `test_ent_log`
+- `test_security`
+
+其中 `test_security` 重点覆盖：
+
+- 输入校验
+- 过长字符串防御
+- NULL 参数拒绝
+- SQL 注入场景
+- 参数化数据库接口的安全行为
+
+---
+
+## 8. PostgreSQL / MySQL / SQLite 说明
+
+- SQLite / MySQL / PostgreSQL 都是**按构建结果启用**，不是运行时热插拔。
+- PostgreSQL 现在有显式顶层开关 `ENT_ENABLE_PGSQL`。
+- Windows CI 当前默认关闭 PostgreSQL 探测：
+  - `WINDOWS_DISABLE_PGSQL=ON`
+- 静态库 `ent_s` 已显式传播系统库和数据库库依赖，便于下游静态链接。
+
+---
+
+## 9. Lua 说明
+
+Lua 后端默认关闭：
+
+```bash
+cmake -S . -B build -DENT_ENABLE_LUA=ON -DENT_LUA_LINK_MODE=static
+```
+
+静态模式默认约定源码位于：
+
+```text
+3rd/lua/src
+```
+
+若源码树不完整，构建系统会给出 warning 并自动关闭 Lua 后端。
+
+---
+
+## 10. 兼容性说明
+
+老 README 中保留过较早期的 VS 工程使用痕迹；当前推荐方式已经统一到 **CMake + CI 脚本 + 安装后下游消费验证**。
+
+如果你要把 `ent` 当作对外发布的 SDK 来用，建议优先采用本 README 中的：
+
+- CMake 选项控制
+- `cmake --install`
+- `find_package(ent CONFIG REQUIRED)`
+- `ent::ent` / `ent::ent_s` 目标链接
