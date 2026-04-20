@@ -4,6 +4,8 @@ set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON)
 
+option(ENT_ENABLE_PGSQL "Enable PostgreSQL backend" ON)
+
 if(MSVC)
     add_compile_options(/utf-8)
 endif()
@@ -44,9 +46,12 @@ endforeach()
 
 message(STATUS "Binary  Dir : ${CMAKE_BINARY_DIR}")
 message(STATUS "Install type: ${CMAKE_INSTALL_LIBDIR}")
-message(ATATUS "Path :${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}")
+message(STATUS "Path :${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}")
 
-find_package(PostgreSQL)
+if(ENT_ENABLE_PGSQL)
+    find_package(PostgreSQL)
+endif()
+
 if(PostgreSQL_FOUND)
     add_compile_definitions(ENT_ENABLE_PGSQL=1)
     include_directories(${PostgreSQL_INCLUDE_DIRS})
