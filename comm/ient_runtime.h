@@ -45,8 +45,17 @@ typedef struct ENT_CTX
 
 extern ENT_CTX gEntCtx;
 
+ENT_CTX* iENT_RuntimeActiveCtx(void);
+
 static inline ENT_LOG iENT_LogDefaultHandle(void)
 {
+    ENT_CTX* ctx = iENT_RuntimeActiveCtx();
+
+    if(ctx != NULL && ctx->entLog != NULL)
+    {
+        return ctx->entLog;
+    }
+
     return gEntCtx.entLog;
 }
 
