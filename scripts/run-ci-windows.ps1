@@ -40,12 +40,14 @@ function Run-Test {
 }
 
 function Run-InstallConsumer {
-    $PrefixPath = (Resolve-Path $InstallDir).Path
-
     cmake --install $BuildDir --config Release --prefix $InstallDir
-    cmake -S $DownstreamSourceDir -B $DownstreamBuildDir -A $Platform -DCMAKE_PREFIX_PATH=$PrefixPath
-    cmake --build $DownstreamBuildDir --config Release
-    & ".\$DownstreamBuildDir\Release\ent_downstream_consumer.exe"
+    $PrefixPath = [System.IO.Path]::GetFullPath($InstallDir)
+    $DownstreamSourcePath = [System.IO.Path]::GetFullPath($DownstreamSourceDir)
+    $DownstreamBuildPath = [System.IO.Path]::GetFullPath($DownstreamBuildDir)
+
+    cmake -S $DownstreamSourcePath -B $DownstreamBuildPath -A $Platform -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$PrefixPath
+    cmake --build $DownstreamBuildPath --config Release
+    & "$DownstreamBuildPath\Release\ent_downstream_consumer.exe"
 }
 
 function Invoke-PerfBinary {
