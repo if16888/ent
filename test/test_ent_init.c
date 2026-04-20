@@ -982,6 +982,211 @@ CLEANUP:
     return failed;
 }
 
+static int test_runtime_second_instance_lock_init_failure_keeps_first_alive(void)
+{
+    ENT_RUNTIME runtimeA = NULL;
+    ENT_RUNTIME runtimeB = NULL;
+    UTL_CV runtimeACv = NULL;
+    UTL_LOCK runtimeALock = NULL;
+    int failed = 0;
+
+    memset(&gEntCtx, 0, sizeof(gEntCtx));
+    reset_close_counters();
+    reset_log_failures();
+    reset_wait_capture();
+
+    if(expect_true(ENT_RuntimeInit(&runtimeA, "demo_a", "/tmp/demo_a", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
+                   "Runtime A should initialize before testing runtime B lock failure") != 0)
+    {
+        return 1;
+    }
+
+    s_fail_lock_init = -1;
+    if(expect_true(ENT_RuntimeInit(&runtimeB, "demo_b", "/tmp/demo_b", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_INIT_LOCK_INITFAIL,
+                   "Runtime B should report lock initialization failure") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+    s_fail_lock_init = 0;
+
+    if(expect_true(runtimeB == NULL,
+                   "Runtime B handle should remain NULL when initialization fails") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(s_log_init_calls == 1,
+                   "Second runtime failure should not reinitialize the shared logging service") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(s_log_close_calls == 0,
+                   "Second runtime failure should not close the shared logging service while runtime A is alive") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(s_log_close_handle_calls == 1,
+                   "Failed runtime B init should close only its own entity log handle") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    reset_wait_capture();
+    if(expect_true(ENT_RuntimeRun(runtimeA) == ENT_SYS_NORMAL,
+                   "Runtime A should remain runnable after runtime B lock-init failure") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+    runtimeACv = s_last_cv;
+    runtimeALock = s_last_lock;
+
+    if(expect_true(runtimeACv != NULL && runtimeALock != NULL,
+                   "Runtime A should still provide valid lock/CV handles after runtime B failure") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(ENT_RuntimeClose(runtimeA) == ENT_SYS_NORMAL,
+                   "Runtime A should still close cleanly after runtime B lock-init failure") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+    runtimeA = NULL;
+
+    if(expect_true(s_log_close_calls == 1,
+                   "Closing runtime A after runtime B failure should close shared logging exactly once") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(s_log_close_handle_calls == 2,
+                   "Runtime B failure plus runtime A close should close two entity log handles total") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+CLEANUP:
+    if(runtimeA != NULL)
+    {
+        ENT_RuntimeClose(runtimeA);
+    }
+    if(runtimeB != NULL)
+    {
+        ENT_RuntimeClose(runtimeB);
+    }
+
+    return failed;
+}
+
+static int test_runtime_second_instance_log_option_failure_keeps_first_alive(void)
+{
+    ENT_RUNTIME runtimeA = NULL;
+    ENT_RUNTIME runtimeB = NULL;
+    int failed = 0;
+
+    memset(&gEntCtx, 0, sizeof(gEntCtx));
+    reset_close_counters();
+    reset_log_failures();
+    reset_wait_capture();
+
+    if(expect_true(ENT_RuntimeInit(&runtimeA, "demo_a", "/tmp/demo_a", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
+                   "Runtime A should initialize before testing runtime B log-option failure") != 0)
+    {
+        return 1;
+    }
+
+    s_fail_log_set_option_call = 2;
+    if(expect_true(ENT_RuntimeInit(&runtimeB, "demo_b", "/tmp/demo_b", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_INIT_ENTITY_LEVELFAIL,
+                   "Runtime B should report entity log level setup failure") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+    s_fail_log_set_option_call = 0;
+
+    if(expect_true(runtimeB == NULL,
+                   "Runtime B handle should remain NULL when log option setup fails") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(s_log_init_calls == 1,
+                   "Second runtime log-option failure should not reinitialize shared logging") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(s_log_close_calls == 0,
+                   "Second runtime log-option failure should not close shared logging while runtime A is alive") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(s_log_close_handle_calls == 1,
+                   "Failed runtime B log setup should close only its own entity log handle") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    reset_wait_capture();
+    if(expect_true(ENT_RuntimeRun(runtimeA) == ENT_SYS_NORMAL,
+                   "Runtime A should remain runnable after runtime B log-option failure") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(ENT_RuntimeClose(runtimeA) == ENT_SYS_NORMAL,
+                   "Runtime A should still close cleanly after runtime B log-option failure") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+    runtimeA = NULL;
+
+    if(expect_true(s_log_close_calls == 1,
+                   "Closing runtime A after runtime B log-option failure should close shared logging exactly once") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(s_log_close_handle_calls == 2,
+                   "Runtime B log-option failure plus runtime A close should close two entity log handles total") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+CLEANUP:
+    if(runtimeA != NULL)
+    {
+        ENT_RuntimeClose(runtimeA);
+    }
+    if(runtimeB != NULL)
+    {
+        ENT_RuntimeClose(runtimeB);
+    }
+
+    return failed;
+}
+
 int main(void)
 {
     int failures = 0;
@@ -1000,6 +1205,8 @@ int main(void)
     failures += test_ent_set_rt_attributes_rejects_normal_mode();
     failures += test_runtime_instance_uses_isolated_context();
     failures += test_runtime_instances_can_run_and_close_independently();
+    failures += test_runtime_second_instance_lock_init_failure_keeps_first_alive();
+    failures += test_runtime_second_instance_log_option_failure_keeps_first_alive();
 
     if(failures != 0)
     {
