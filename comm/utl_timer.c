@@ -114,6 +114,26 @@ static void iUTL_TimerLifecycleLockLeave(void)
 #endif
 }
 
+static BOOL iUTL_TimerLifecycleCanCreate(void)
+{
+    BOOL canCreate = FALSE;
+
+    iUTL_TimerLifecycleLockEnter();
+    canCreate = (sUtilTimerInit && !sTimerClosing) ? TRUE : FALSE;
+    iUTL_TimerLifecycleLockLeave();
+    return canCreate;
+}
+
+static BOOL iUTL_TimerLifecycleCanDelete(void)
+{
+    BOOL canDelete = FALSE;
+
+    iUTL_TimerLifecycleLockEnter();
+    canDelete = sUtilTimerInit ? TRUE : FALSE;
+    iUTL_TimerLifecycleLockLeave();
+    return canDelete;
+}
+
 #if ENT_TMR_IMPL_LINUX
 static long long iUTL_TimerMonotonicNs(void);
 static void* iUTL_TimerRtWorker(void* data);
@@ -144,22 +164,29 @@ static void iUTL_TimerCleanupSelfDeletedThreadTimer(PTIMER_CTX_T timerCtx)
 {
     MSG_ID_T sts = 0;
     DLL_D_HDR* tmpDll = NULL;
+    BOOL timerInit = FALSE;
+    UTL_LOCK dllLock = NULL;
 
     if(timerCtx == NULL || timerCtx->tag != UTL_TIMER_TAG)
     {
         return;
     }
 
-    if(!sUtilTimerInit)
+    iUTL_TimerLifecycleLockEnter();
+    timerInit = sUtilTimerInit;
+    dllLock = sTimerCtx.dllLock;
+    iUTL_TimerLifecycleLockLeave();
+
+    if(!timerInit || dllLock == NULL)
     {
         memset(timerCtx,0,sizeof(TIMER_CTX_T));
         free(timerCtx);
         return;
     }
 
-    UTL_LockEnter(sTimerCtx.dllLock);
+    UTL_LockEnter(dllLock);
     sts = UTL_DllRemCurr((DLL_D_HDR*)timerCtx,&tmpDll);
-    UTL_LockLeave(sTimerCtx.dllLock);
+    UTL_LockLeave(dllLock);
     if(sts < 0)
     {
         IENT_LOG_ERROR("UTL_DllRemCurr failed during timer self-cleanup,sts [%d]\n",sts);
@@ -342,9 +369,9 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int m
         *pTimer = NULL;
     }
 
-    if(!sUtilTimerInit)
+    if(!iUTL_TimerLifecycleCanCreate())
     {
-        IENT_LOG_ERROR("uninitialized\n");
+        IENT_LOG_ERROR("timer subsystem unavailable or closing\n");
         return ENT_TMR_NOT_INITIALIZED;
     }
 
@@ -370,6 +397,15 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int m
         IENT_LOG_ERROR("timeSetEvent failed,error [%d]\n",errno);
         free(timerCtx);
         return ENT_TMR_CREATE_FAILED;
+    }
+
+    if(!iUTL_TimerLifecycleCanCreate())
+    {
+        timeKillEvent(timerCtx->timerId);
+        memset(timerCtx,0,sizeof(TIMER_CTX_T));
+        free(timerCtx);
+        IENT_LOG_WARN("timer create aborted because close started\n");
+        return ENT_TMR_NOT_INITIALIZED;
     }
 
     UTL_LockEnter(sTimerCtx.dllLock);
@@ -402,7 +438,7 @@ ENT_PUBLIC MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
         return ENT_TMR_BAD_ARGUMENT;
     }
 
-    if(!sUtilTimerInit)
+    if(!iUTL_TimerLifecycleCanDelete())
     {
         IENT_LOG_ERROR("uninitialized\n");
         return ENT_TMR_NOT_INITIALIZED;
@@ -628,9 +664,9 @@ static MSG_ID_T iUTL_TimerCreateRt(UTL_TIMER_T* pTimer,unsigned int type,int per
         *pTimer = NULL;
     }
 
-    if(!sUtilTimerInit)
+    if(!iUTL_TimerLifecycleCanCreate())
     {
-        IENT_LOG_ERROR("uninitialized\n");
+        IENT_LOG_ERROR("timer subsystem unavailable or closing\n");
         return ENT_TMR_NOT_INITIALIZED;
     }
     if(period_us <= 0)
@@ -686,6 +722,20 @@ static MSG_ID_T iUTL_TimerCreateRt(UTL_TIMER_T* pTimer,unsigned int type,int per
         UTL_LockClose(timerCtx->cbLock);
         free(timerCtx);
         return ENT_TMR_THREAD_FAILED;
+    }
+
+    if(!iUTL_TimerLifecycleCanCreate())
+    {
+        timerCtx->stopWorker = TRUE;
+        timerCtx->stopCallbackWorker = TRUE;
+        UTL_CVWakeAll(timerCtx->cbCv);
+        pthread_join(timerCtx->rtWorker, NULL);
+        pthread_join(timerCtx->cbWorker, NULL);
+        UTL_CVClose(timerCtx->cbCv);
+        UTL_LockClose(timerCtx->cbLock);
+        free(timerCtx);
+        IENT_LOG_WARN("realtime timer create aborted because close started\n");
+        return ENT_TMR_NOT_INITIALIZED;
     }
 
     UTL_LockEnter(sTimerCtx.dllLock);
@@ -803,9 +853,9 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int m
         *pTimer = NULL;
     }
 
-    if(!sUtilTimerInit)
+    if(!iUTL_TimerLifecycleCanCreate())
     {
-        IENT_LOG_ERROR("uninitialized\n");
+        IENT_LOG_ERROR("timer subsystem unavailable or closing\n");
         return ENT_TMR_NOT_INITIALIZED;
     }
 
@@ -836,6 +886,15 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int m
             IENT_LOG_ERROR("pthread_create failed,error [%d]->[%s]\n",errno,strerror(errno));
             free(timerCtx);
             return ENT_TMR_THREAD_FAILED;
+        }
+
+        if(!iUTL_TimerLifecycleCanCreate())
+        {
+            timerCtx->isEnable = false;
+            pthread_join(timerCtx->timerThread, NULL);
+            free(timerCtx);
+            IENT_LOG_WARN("timer create aborted because close started\n");
+            return ENT_TMR_NOT_INITIALIZED;
         }
 
         UTL_LockEnter(sTimerCtx.dllLock);
@@ -889,6 +948,15 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int m
         free(timerCtx);
         return ENT_TMR_START_FAILED;
     }
+
+    if(!iUTL_TimerLifecycleCanCreate())
+    {
+        timer_delete(timerCtx->timerId);
+        free(timerCtx);
+        IENT_LOG_WARN("signal timer create aborted because close started\n");
+        return ENT_TMR_NOT_INITIALIZED;
+    }
+
     UTL_LockEnter(sTimerCtx.dllLock);
     sts = UTL_DllInsHead(&sTimerCtx.dllHeader,(DLL_D_HDR*)timerCtx);
     UTL_LockLeave(sTimerCtx.dllLock);
@@ -924,7 +992,7 @@ ENT_PUBLIC MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
         return ENT_TMR_BAD_ARGUMENT;
     }
 
-    if(!sUtilTimerInit)
+    if(!iUTL_TimerLifecycleCanDelete())
     {
         IENT_LOG_ERROR("uninitialized\n");
         return ENT_TMR_NOT_INITIALIZED;
@@ -1054,9 +1122,9 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int m
         *pTimer = NULL;
     }
 
-    if(!sUtilTimerInit)
+    if(!iUTL_TimerLifecycleCanCreate())
     {
-        IENT_LOG_ERROR("uninitialized\n");
+        IENT_LOG_ERROR("timer subsystem unavailable or closing\n");
         return ENT_TMR_NOT_INITIALIZED;
     }
 
@@ -1079,6 +1147,15 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int m
         IENT_LOG_ERROR("pthread_create failed,error [%d]->[%s]\n",errno,strerror(errno));
         free(timerCtx);
         return ENT_TMR_THREAD_FAILED;
+    }
+
+    if(!iUTL_TimerLifecycleCanCreate())
+    {
+        timerCtx->isEnable = false;
+        pthread_join(timerCtx->timerThread, NULL);
+        free(timerCtx);
+        IENT_LOG_WARN("timer create aborted because close started\n");
+        return ENT_TMR_NOT_INITIALIZED;
     }
 
     UTL_LockEnter(sTimerCtx.dllLock);
@@ -1111,7 +1188,7 @@ ENT_PUBLIC MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
         return ENT_TMR_BAD_ARGUMENT;
     }
 
-    if(!sUtilTimerInit)
+    if(!iUTL_TimerLifecycleCanDelete())
     {
         IENT_LOG_ERROR("uninitialized\n");
         return ENT_TMR_NOT_INITIALIZED;
