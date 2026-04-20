@@ -7,6 +7,9 @@ set(CMAKE_C_EXTENSIONS ON)
 option(ENT_ENABLE_PGSQL "Enable PostgreSQL backend" ON)
 option(ENT_BUILD_EXAMPLES "Build example programs" ON)
 
+set(ENT_RUNTIME_COMPONENT runtime)
+set(ENT_DEVEL_COMPONENT devel)
+
 if(MSVC)
     add_compile_options(/utf-8)
 endif()
@@ -76,6 +79,8 @@ install(FILES
           ${ENT_MYSQL_RUNTIME}
         DESTINATION
           ${CMAKE_INSTALL_BINDIR}
+        COMPONENT
+          ${ENT_RUNTIME_COMPONENT}
           )
 endif()
 if(ENT_SQLITE_RUNTIME)
@@ -83,6 +88,8 @@ install(FILES
           ${ENT_SQLITE_RUNTIME}
         DESTINATION
           ${CMAKE_INSTALL_BINDIR}
+        COMPONENT
+          ${ENT_RUNTIME_COMPONENT}
           )
 endif()
 endif()
@@ -104,6 +111,7 @@ install(
     FILE entTargets.cmake
     NAMESPACE ent::
     DESTINATION ${INSTALL_CMAKEDIR}
+    COMPONENT ${ENT_DEVEL_COMPONENT}
 )
 
 install(
@@ -111,6 +119,7 @@ install(
         "${CMAKE_CURRENT_BINARY_DIR}/entConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/entConfigVersion.cmake"
     DESTINATION ${INSTALL_CMAKEDIR}
+    COMPONENT ${ENT_DEVEL_COMPONENT}
 )
 
 include(InstallRequiredSystemLibraries)
