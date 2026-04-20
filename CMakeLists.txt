@@ -5,6 +5,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON)
 
 option(ENT_ENABLE_PGSQL "Enable PostgreSQL backend" ON)
+option(ENT_BUILD_EXAMPLES "Build example programs" ON)
 
 if(MSVC)
     add_compile_options(/utf-8)
@@ -19,6 +20,7 @@ message(STATUS "Build type set to ${CMAKE_BUILD_TYPE}")
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
+include(CTest)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY
     ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY
@@ -61,10 +63,12 @@ endif()
 
 # defines targets and sources
 add_subdirectory(comm)
-add_subdirectory(example)
-# enable testing and define tests
-enable_testing()
-add_subdirectory(test)
+if(ENT_BUILD_EXAMPLES)
+    add_subdirectory(example)
+endif()
+if(BUILD_TESTING)
+    add_subdirectory(test)
+endif()
 
 if(WIN32)
 if(ENT_MYSQL_RUNTIME)
@@ -108,7 +112,6 @@ install(
         "${CMAKE_CURRENT_BINARY_DIR}/entConfigVersion.cmake"
     DESTINATION ${INSTALL_CMAKEDIR}
 )
-
 
 include(InstallRequiredSystemLibraries)
 include(CMakeCPack.cmake)
