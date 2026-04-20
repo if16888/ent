@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <stdint.h>
 
 #include "ient_comm.h"
 #include "ient_runtime.h"
@@ -11,6 +12,7 @@
 static UTL_CV s_last_cv = NULL;
 static UTL_LOCK s_last_lock = NULL;
 static int s_wait_calls = 0;
+static int s_log_init_calls = 0;
 static int s_log_close_handle_calls = 0;
 static int s_log_close_calls = 0;
 static int s_lock_close_calls = 0;
@@ -31,6 +33,9 @@ static int s_mlockall_calls = 0;
 static int s_munlockall_result = 0;
 static int s_munlockall_errno = 0;
 static int s_munlockall_calls = 0;
+static uintptr_t s_next_log_handle = 0x1000;
+static uintptr_t s_next_lock_handle = 0x2000;
+static uintptr_t s_next_cv_handle = 0x3000;
 static ENT_LOG s_ent_log_at_lock_init = NULL;
 static const char* s_last_log_init_handle_module = NULL;
 static const char* s_last_log_init_handle_path = NULL;
@@ -81,6 +86,7 @@ static void reset_log_failures(void)
 {
     s_fail_log_init = 0;
     s_fail_log_init_handle_call = 0;
+    s_log_init_calls = 0;
     s_log_init_handle_calls = 0;
     s_fail_log_set_option_call = 0;
     s_log_set_option_calls = 0;
@@ -104,6 +110,9 @@ static void reset_log_failures(void)
     s_munlockall_result = 0;
     s_munlockall_errno = 0;
     s_munlockall_calls = 0;
+    s_next_log_handle = 0x1000;
+    s_next_lock_handle = 0x2000;
+    s_next_cv_handle = 0x3000;
 }
 
 static int expect_true(int condition, const char* message)
@@ -142,6 +151,7 @@ int munlockall(void)
 
 MSG_ID_T ENT_LogInit(void)
 {
+    s_log_init_calls++;
     if(s_fail_log_init != 0)
     {
         return s_fail_log_init;
@@ -177,7 +187,8 @@ MSG_ID_T ENT_LogInitHandle(ENT_LOG* pLogHandle, const char* moduleName, const ch
     }
     if(pLogHandle != NULL)
     {
-        *pLogHandle = (ENT_LOG)0x10;
+        *pLogHandle = (ENT_LOG)(uintptr_t)s_next_log_handle;
+        s_next_log_handle += 0x10;
     }
     return 0;
 }
@@ -256,7 +267,8 @@ MSG_ID_T UTL_LockInit(UTL_LOCK* lock, const char* name)
     }
     if(lock != NULL)
     {
-        *lock = (UTL_LOCK)0x20;
+        *lock = (UTL_LOCK)(uintptr_t)s_next_lock_handle;
+        s_next_lock_handle += 0x10;
     }
     return 0;
 }
@@ -305,7 +317,8 @@ MSG_ID_T UTL_CVInit(UTL_CV* cv, const char* name)
     (void)name;
     if(cv != NULL)
     {
-        *cv = (UTL_CV)0x30;
+        *cv = (UTL_CV)(uintptr_t)s_next_cv_handle;
+        s_next_cv_handle += 0x10;
     }
     return 0;
 }
@@ -702,9 +715,7 @@ static int test_ent_init_realtime_mode_can_degrade_to_normal(void)
     }
 #endif
 
-    int closeStatus = ENT_Close();
-
-    return expect_true(closeStatus == ENT_SYS_NORMAL, "ENT_Close should succeed after realtime degrade initialization");
+    return expect_true(ENT_Close() == ENT_SYS_NORMAL, "ENT_Close should succeed after realtime degrade initialization");
 }
 
 static int test_ent_set_rt_attributes_rejects_uninitialized_context(void)
@@ -811,6 +822,166 @@ static int test_runtime_instance_uses_isolated_context(void)
                        "ENT_RuntimeClose should leave the global runtime context untouched");
 }
 
+static int test_runtime_instances_can_run_and_close_independently(void)
+{
+    ENT_RUNTIME runtimeA = NULL;
+    ENT_RUNTIME runtimeB = NULL;
+    UTL_CV runtimeACv = NULL;
+    UTL_CV runtimeBCv = NULL;
+    UTL_LOCK runtimeALock = NULL;
+    UTL_LOCK runtimeBLock = NULL;
+    int failed = 0;
+
+    memset(&gEntCtx, 0, sizeof(gEntCtx));
+    reset_close_counters();
+    reset_log_failures();
+    reset_wait_capture();
+
+    if(expect_true(ENT_RuntimeInit(&runtimeA, "demo_a", "/tmp/demo_a", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
+                   "ENT_RuntimeInit should initialize runtime A") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(ENT_RuntimeInit(&runtimeB, "demo_b", "/tmp/demo_b", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
+                   "ENT_RuntimeInit should initialize runtime B") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(s_log_init_calls == 1,
+                   "Multiple runtime instances should share one logging service initialization") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(gEntCtx.isInit == false,
+                   "Initializing isolated runtimes should not initialize the global runtime context") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(ENT_RuntimeRun(runtimeA) == ENT_SYS_NORMAL,
+                   "ENT_RuntimeRun should succeed for runtime A") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+    runtimeACv = s_last_cv;
+    runtimeALock = s_last_lock;
+
+    if(expect_true(runtimeACv != NULL && runtimeALock != NULL,
+                   "Runtime A should use non-null lock/CV handles") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(ENT_RuntimeRun(runtimeB) == ENT_SYS_NORMAL,
+                   "ENT_RuntimeRun should succeed for runtime B") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+    runtimeBCv = s_last_cv;
+    runtimeBLock = s_last_lock;
+
+    if(expect_true(runtimeBCv != NULL && runtimeBLock != NULL,
+                   "Runtime B should use non-null lock/CV handles") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(runtimeACv != runtimeBCv && runtimeALock != runtimeBLock,
+                   "Distinct runtime instances should use distinct lock/CV handles") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(ENT_RuntimeClose(runtimeA) == ENT_SYS_NORMAL,
+                   "Closing runtime A should succeed while runtime B remains active") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+    runtimeA = NULL;
+
+    if(expect_true(s_log_close_calls == 0,
+                   "Closing one runtime instance should not close the shared logging service") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(s_log_close_handle_calls == 1,
+                   "Closing one runtime instance should close only its own entity log handle") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    reset_wait_capture();
+    if(expect_true(ENT_RuntimeRun(runtimeB) == ENT_SYS_NORMAL,
+                   "Runtime B should remain runnable after runtime A is closed") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(s_last_cv == runtimeBCv && s_last_lock == runtimeBLock,
+                   "Runtime B should preserve its own lock/CV handles after runtime A is closed") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(ENT_RuntimeClose(runtimeB) == ENT_SYS_NORMAL,
+                   "Closing runtime B should succeed") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+    runtimeB = NULL;
+
+    if(expect_true(s_log_close_calls == 1,
+                   "Closing the final runtime instance should close the shared logging service exactly once") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(s_log_close_handle_calls == 2,
+                   "Each runtime instance should close exactly one entity log handle") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(gEntCtx.isInit == false,
+                   "Closing isolated runtimes should leave the global runtime context untouched") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+CLEANUP:
+    if(runtimeA != NULL)
+    {
+        ENT_RuntimeClose(runtimeA);
+    }
+    if(runtimeB != NULL)
+    {
+        ENT_RuntimeClose(runtimeB);
+    }
+
+    return failed;
+}
+
 int main(void)
 {
     int failures = 0;
@@ -828,6 +999,7 @@ int main(void)
     failures += test_ent_set_rt_attributes_allows_noop_after_init();
     failures += test_ent_set_rt_attributes_rejects_normal_mode();
     failures += test_runtime_instance_uses_isolated_context();
+    failures += test_runtime_instances_can_run_and_close_independently();
 
     if(failures != 0)
     {
