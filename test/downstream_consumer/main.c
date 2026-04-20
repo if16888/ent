@@ -3,7 +3,7 @@
 #include "ent_init.h"
 #include "ent_msg.h"
 
-autostatic int print_backend_matrix(void)
+static int print_backend_matrix(void)
 {
     printf("ENT_ENABLE_SQLITE=%d\n", (int)ENT_ENABLE_SQLITE);
     printf("ENT_ENABLE_MYSQL=%d\n", (int)ENT_ENABLE_MYSQL);
