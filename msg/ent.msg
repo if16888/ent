@@ -85,6 +85,7 @@ LOCK_FAILED      err 8  thread lock operation failed
 # UTHD: utility lock / cv service
 # ----------------------------------------------------------------------------
 submodule UTHD 4
+WAIT_TIMEOUT     ok  1  condition wait timeout
 INVALID_ARGUMENT err 1  invalid lock or condition-variable argument
 ALLOC_FAILED     err 2  allocate lock or condition-variable context failed
 INIT_FAILED      err 3  initialize lock or condition-variable object failed
@@ -93,6 +94,7 @@ RWMODE_REQUIRED  err 5  rw lock requires explicit mode
 WAIT_FAILED      err 6  condition wait failed
 UNSUPPORTED_LOCK err 7  condition wait does not support this lock type
 CLOCK_FAILED     err 8  clock operation failed
+LOCK_FAILED      err 9  lock operation failed
 
 # ----------------------------------------------------------------------------
 # SOCK: socket service
