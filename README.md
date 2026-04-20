@@ -15,7 +15,7 @@
 - `ctest` 功能测试
 - 性能冒烟测试
 - 安装后下游 `find_package(ent CONFIG REQUIRED)` 消费验证
-- Release 阶段按平台 / 架构打包 SDK 产物
+- Release 阶段按平台 / 架构打包 runtime / devel 产物
 
 ---
 
@@ -118,6 +118,13 @@ cmake --install build-install --config Release --prefix "$PWD/.local-install"
 
 安装后会导出 CMake package，可供下游通过 `find_package(ent CONFIG REQUIRED)` 使用。
 
+如果你只想安装运行时，或只想安装开发包，也可以按组件安装：
+
+```bash
+cmake --install build-install --prefix "$PWD/.local-runtime" --component runtime
+cmake --install build-install --prefix "$PWD/.local-devel" --component devel
+```
+
 ---
 
 ## 5. 下游项目使用方式
@@ -202,23 +209,93 @@ Windows：
 
 ## 8. Release 产物
 
-Release workflow 现在会按平台 / 架构打包 SDK：
+Release workflow 现在会按平台 / 架构打包两类文件：
 
-- Linux: `ent-<tag>-linux-x86_64-sdk.tar.gz`
-- Windows: `ent-<tag>-windows-win32-sdk.zip`
+### Linux
 
-打包内容来自 `cmake --install` 的安装树，因此会包含：
+- `ent-<tag>-linux-x86_64-runtime.tar.gz`
+- `ent-<tag>-linux-x86_64-devel.tar.gz`
 
-- `include/`
-- `lib/`
-- `bin/`（如有运行时文件）
-- `CMake package files`
+### Windows
 
-这样下游可以直接解压后使用 `CMAKE_PREFIX_PATH` 指向安装目录。
+- `ent-<tag>-windows-win32-runtime.zip`
+- `ent-<tag>-windows-win32-devel.zip`
+
+其中：
+
+- `runtime`：运行时文件，例如共享库、DLL、运行时依赖 DLL
+- `devel`：头文件、静态库 / 导入库、CMake package 文件
+
+这样使用方可以按需获取：
+
+- 只部署运行环境时，拿 `runtime`
+- 需要二次开发 / 编译接入时，拿 `devel`
 
 ---
 
-## 9. 当前测试覆盖概览
+## 9. 多实例 runtime 使用示例
+
+`ent` 现在支持通过 `ENT_RUNTIME` 句柄管理多个隔离的 runtime 实例。典型流程如下：
+
+```c
+#include "ent_init.h"
+#include "ent_log.h"
+#include "ent_msg.h"
+
+int main(void)
+{
+    ENT_RUNTIME runtimeA = NULL;
+    ENT_RUNTIME runtimeB = NULL;
+    MSG_ID_T sts = 0;
+
+    sts = ENT_RuntimeInit(&runtimeA, "node_a", "./work_a", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E);
+    if(sts != ENT_SYS_NORMAL)
+    {
+        return 1;
+    }
+
+    sts = ENT_RuntimeInit(&runtimeB, "node_b", "./work_b", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E);
+    if(sts != ENT_SYS_NORMAL)
+    {
+        ENT_RuntimeClose(runtimeA);
+        return 1;
+    }
+
+    /* 可选：对单个 runtime 设置 RT 属性 */
+    sts = ENT_RuntimeSetRtAttributes(runtimeA, -1, ENT_RT_POLICY_OTHER_E, 0);
+    if(sts != ENT_SYS_NORMAL && sts != ENT_RT_NOTRT)
+    {
+        ENT_RuntimeClose(runtimeB);
+        ENT_RuntimeClose(runtimeA);
+        return 1;
+    }
+
+    /* 实际项目中通常在各自线程中运行 */
+    ENT_RuntimeRun(runtimeA);
+    ENT_RuntimeRun(runtimeB);
+
+    ENT_RuntimeClose(runtimeB);
+    ENT_RuntimeClose(runtimeA);
+    return 0;
+}
+```
+
+建议遵循这几个原则：
+
+- 每个 `ENT_RUNTIME` 对应独立的 `name/workPath`
+- 失败路径下，只关闭已经成功初始化的实例
+- 不要把同一个 `ENT_RUNTIME` 句柄重复 close
+- 如果需要并发运行多个实例，建议在各自线程中调度 `ENT_RuntimeRun()`
+
+当前仓库测试已覆盖：
+
+- 多实例独立初始化
+- 一个实例关闭后另一个仍可继续运行
+- 第二个实例初始化失败不会破坏第一个实例
+
+---
+
+## 10. 当前测试覆盖概览
 
 已接入 `ctest` 的测试目标包括：
 
@@ -243,9 +320,16 @@ Release workflow 现在会按平台 / 架构打包 SDK：
 - SQL 注入场景
 - 参数化数据库接口的安全行为
 
+另外 `test_ent_init` 已补充多实例覆盖，包括：
+
+- 双实例独立初始化 / 运行 / 关闭
+- 第二实例在 lock 初始化阶段失败
+- 第二实例在 log option 设置阶段失败
+- 已成功实例在另一实例失败后仍可继续运行和关闭
+
 ---
 
-## 10. PostgreSQL / MySQL / SQLite 说明
+## 11. PostgreSQL / MySQL / SQLite 说明
 
 - SQLite / MySQL / PostgreSQL 都是**按构建结果启用**，不是运行时热插拔。
 - PostgreSQL 现在有显式顶层开关 `ENT_ENABLE_PGSQL`。
@@ -255,7 +339,7 @@ Release workflow 现在会按平台 / 架构打包 SDK：
 
 ---
 
-## 11. Lua 说明
+## 12. Lua 说明
 
 Lua 后端默认关闭：
 
@@ -273,9 +357,9 @@ cmake -S . -B build -DENT_ENABLE_LUA=ON -DENT_LUA_LINK_MODE=static
 
 ---
 
-## 12. 兼容性说明
+## 13. 兼容性说明
 
-老 README 中保留过较早期的 VS 工程使用痕迹；当前推荐方式已经统一到 **CMake + CI 脚本 + 安装后下游消费验证 + SDK 打包**。
+老 README 中保留过较早期的 VS 工程使用痕迹；当前推荐方式已经统一到 **CMake + CI 脚本 + 安装后下游消费验证 + runtime/devel 打包**。
 
 如果你要把 `ent` 当作对外发布的 SDK 来用，建议优先采用本 README 中的：
 
@@ -283,4 +367,5 @@ cmake -S . -B build -DENT_ENABLE_LUA=ON -DENT_LUA_LINK_MODE=static
 - `cmake --install`
 - `find_package(ent CONFIG REQUIRED)`
 - `ent::ent` / `ent::ent_s` 目标链接
+- runtime / devel 分离分发
 - 与目标位宽一致的第三方库集合（Win32 全链路 32 位 / x64 全链路 64 位）
