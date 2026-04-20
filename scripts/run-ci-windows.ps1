@@ -32,7 +32,7 @@ function Run-Test {
     Push-Location $BuildDir
     try {
         ctest -C Release --output-on-failure `
-            -R "test_ent_init|test_utl_dll|test_utl_thread|test_ent_thread|test_utl_tpool|test_utl_timer|test_utl_socket|test_ent_db|test_ent_log|test_security"
+            -R "test_ent_init|test_utl_dll|test_utl_thread|test_utl_lock_cv|test_ent_thread|test_utl_tpool|test_utl_timer|test_utl_socket|test_ent_db|test_ent_log|test_security"
     }
     finally {
         Pop-Location
