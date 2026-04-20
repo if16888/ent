@@ -4,6 +4,9 @@ $Stage = if ($args.Length -gt 0) { $args[0] } else { "all" }
 $BuildDir = if ($env:BUILD_DIR) { $env:BUILD_DIR } else { "build-ci" }
 $Platform = if ($env:WINDOWS_CMAKE_PLATFORM) { $env:WINDOWS_CMAKE_PLATFORM } else { "Win32" }
 $DisablePostgreSQL = if ($env:WINDOWS_DISABLE_PGSQL) { $env:WINDOWS_DISABLE_PGSQL } else { "" }
+$InstallDir = if ($env:INSTALL_DIR) { $env:INSTALL_DIR } else { Join-Path $BuildDir "install" }
+$DownstreamBuildDir = if ($env:DOWNSTREAM_BUILD_DIR) { $env:DOWNSTREAM_BUILD_DIR } else { Join-Path $BuildDir "downstream-consumer" }
+$DownstreamSourceDir = if ($env:DOWNSTREAM_SOURCE_DIR) { $env:DOWNSTREAM_SOURCE_DIR } else { "test/downstream_consumer" }
 
 function Run-Configure {
     $CmakeArgs = @(
@@ -34,6 +37,15 @@ function Run-Test {
     finally {
         Pop-Location
     }
+}
+
+function Run-InstallConsumer {
+    $PrefixPath = (Resolve-Path $InstallDir).Path
+
+    cmake --install $BuildDir --config Release --prefix $InstallDir
+    cmake -S $DownstreamSourceDir -B $DownstreamBuildDir -A $Platform -DCMAKE_PREFIX_PATH=$PrefixPath
+    cmake --build $DownstreamBuildDir --config Release
+    & ".\$DownstreamBuildDir\Release\ent_downstream_consumer.exe"
 }
 
 function Invoke-PerfBinary {
@@ -91,11 +103,13 @@ switch ($Stage) {
     "configure" { Run-Configure }
     "build" { Run-Build }
     "test" { Run-Test }
+    "install-consumer" { Run-InstallConsumer }
     "perf" { Run-Perf }
     "all" {
         Run-Configure
         Run-Build
         Run-Test
+        Run-InstallConsumer
         Run-Perf
     }
     default {
