@@ -3,6 +3,9 @@ set -euo pipefail
 
 stage="${1:-all}"
 build_dir="${BUILD_DIR:-build-ci}"
+install_dir="${INSTALL_DIR:-${build_dir}/install}"
+downstream_build_dir="${DOWNSTREAM_BUILD_DIR:-${build_dir}/downstream-consumer}"
+downstream_source_dir="${DOWNSTREAM_SOURCE_DIR:-test/downstream_consumer}"
 
 run_perf_binary() {
   local name="$1"
@@ -47,6 +50,29 @@ run_test() {
   )
 }
 
+run_install_consumer() {
+  local -a consumer_args
+
+  cmake --install "${build_dir}" --prefix "${install_dir}"
+
+  consumer_args=(
+    -S "${downstream_source_dir}"
+    -B "${downstream_build_dir}"
+    -DCMAKE_PREFIX_PATH="$(pwd)/${install_dir}"
+    -DCMAKE_BUILD_TYPE=Release
+  )
+
+  if command -v ninja >/dev/null 2>&1; then
+    consumer_args+=(-G Ninja)
+  else
+    consumer_args+=(-G "Unix Makefiles")
+  fi
+
+  cmake "${consumer_args[@]}"
+  cmake --build "${downstream_build_dir}"
+  "./${downstream_build_dir}/ent_downstream_consumer"
+}
+
 run_perf() {
   run_perf_binary "perf_utl_socket" "./${build_dir}/bin/perf_utl_socket"
   run_perf_binary "perf_utl_timer" "./${build_dir}/bin/perf_utl_timer"
@@ -65,6 +91,9 @@ case "${stage}" in
   test)
     run_test
     ;;
+  install-consumer)
+    run_install_consumer
+    ;;
   perf)
     run_perf
     ;;
@@ -72,6 +101,7 @@ case "${stage}" in
     run_configure
     run_build
     run_test
+    run_install_consumer
     run_perf
     ;;
   *)
