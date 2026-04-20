@@ -153,6 +153,24 @@ endif()
 add_test(NAME test_ent_thread COMMAND test_ent_thread)
 
 add_executable(
+  test_ent_thread_failures
+  test_ent_thread_failures.c
+)
+
+target_include_directories(
+  test_ent_thread_failures
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../comm
+)
+
+if(APPLE OR UNIX)
+  target_link_libraries(test_ent_thread_failures PRIVATE pthread)
+endif()
+
+add_test(NAME test_ent_thread_failures COMMAND test_ent_thread_failures)
+
+add_executable(
   test_utl_tpool
   test_utl_tpool.c
   ../comm/utl_tpool.c
