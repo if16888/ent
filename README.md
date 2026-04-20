@@ -280,6 +280,85 @@ int main(void)
 }
 ```
 
+### 9.1 `ENT_RUNTIME` 的作用
+
+`ENT_RUNTIME` 的核心作用是：
+
+**把原来全局唯一的运行时上下文，变成“每个实例各自一份上下文”的显式句柄。**
+
+也就是说：
+
+- `ENT_Init / ENT_Run / ENT_Close` 更偏向**单实例 / 全局实例**模式
+- `ENT_RuntimeInit / ENT_RuntimeRun / ENT_RuntimeClose` 则是**多实例 / 显式实例句柄**模式
+
+可以把它理解成下面这个差异：
+
+```text
+单实例模式
+-----------
+process
+  └── gEntCtx
+       ├── entName
+       ├── workPath
+       ├── logPath
+       ├── entLock
+       ├── entCV
+       └── init / rt state
+
+多实例模式
+-----------
+process
+  ├── runtimeA -> ENT_CTX_A
+  │      ├── entName = node_a
+  │      ├── workPath = ./work_a
+  │      ├── logPath
+  │      ├── entLock
+  │      ├── entCV
+  │      └── init / rt state
+  │
+  └── runtimeB -> ENT_CTX_B
+         ├── entName = node_b
+         ├── workPath = ./work_b
+         ├── logPath
+         ├── entLock
+         ├── entCV
+         └── init / rt state
+```
+
+这意味着在同一个进程里，你可以：
+
+- 同时持有多个 runtime
+- 给每个 runtime 不同的 `name / workPath / logPath`
+- 分别初始化、运行、关闭它们
+- 避免一个实例的失败或关闭直接覆盖另一个实例的上下文
+
+### 9.2 什么时候应该用 `ENT_RUNTIME`
+
+更适合用多实例接口的场景包括：
+
+- 一个进程里同时管理多个逻辑节点 / 站点 / 对象
+- 把 `ent` 当作 SDK 嵌入到更大的宿主程序中
+- 测试 / 仿真 / 多租户场景下，希望不同实例各自持有独立状态
+
+### 9.3 它的边界
+
+`ENT_RUNTIME` 隔离的是**实例状态**，不是把库里所有东西都做成完全物理隔离。
+
+当前实现更准确的理解是：
+
+- `ENT_RUNTIME` 负责隔离每个实例自己的 `ENT_CTX`
+- 某些基础设施仍然可能由库内部统一管理，例如部分日志服务或公共子系统
+
+因此，多实例设计既要保证：
+
+- A、B 两个 runtime 的上下文互不覆盖
+
+也要保证：
+
+- 共享基础设施不会因为某一个实例失败或关闭被误关
+
+这也是为什么仓库里现在专门补了多实例失败路径和关闭顺序测试。
+
 建议遵循这几个原则：
 
 - 每个 `ENT_RUNTIME` 对应独立的 `name/workPath`
