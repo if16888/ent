@@ -38,13 +38,16 @@ jobs:
       - name: Performance Smoke
         run: ./scripts/run-ci-linux.sh perf
 
-      - name: Upload build outputs
+      - name: Package SDK
+        run: |
+          cmake --install build --prefix build/package-root
+          tar -C build/package-root -czf ent-${GITHUB_REF_NAME}-linux-x86_64-sdk.tar.gz .
+
+      - name: Upload SDK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-linux-build
-          path: |
-            build/bin/*
-            build/lib/*
+          name: release-linux-sdk
+          path: ent-${{ github.ref_name }}-linux-x86_64-sdk.tar.gz
           if-no-files-found: error
 
   build-windows:
@@ -78,13 +81,17 @@ jobs:
         shell: pwsh
         run: .\scripts\run-ci-windows.ps1 perf
 
-      - name: Upload build outputs
+      - name: Package SDK
+        shell: pwsh
+        run: |
+          cmake --install build --config Release --prefix build/package-root
+          Compress-Archive -Path build/package-root\* -DestinationPath ent-${env:GITHUB_REF_NAME}-windows-win32-sdk.zip -Force
+
+      - name: Upload SDK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-windows-build
-          path: |
-            build/bin/Release/*
-            build/lib/Release/*
+          name: release-windows-sdk
+          path: ent-${{ github.ref_name }}-windows-win32-sdk.zip
           if-no-files-found: error
 
   publish:
