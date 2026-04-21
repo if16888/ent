@@ -186,3 +186,4 @@ PARAM_COUNT   err 10 invalid database parameter count
 PREPARE_FAILED err 11 prepare database statement failed
 BIND_FAILED   err 12 bind database statement parameter failed
 EXEC_FAILED   err 13 execute prepared database statement failed
+IN_USE        err 14 database handle or service is still in use
