@@ -44,15 +44,10 @@ volatile static bool    sDbMutexInit = false;
  *
  * NAME        :defSqlResultCb
  *
- * DESCRIPTION :   
- *                 
- *                   
+ * DESCRIPTION :
  *
  * COMPLETION
  * STATUS      :  void
- *                           
- *
- *                            
  *
  *-----------------------------------------------------------------------------
  */
@@ -65,27 +60,168 @@ static void defSqlResultCb(char** fields,char** rowRes,long long rowNum,int colu
     }
     int rowIdx = 0;
     int colIdx = 0;
-    
+
     for(colIdx = 0; colIdx<columnNum; colIdx++)
     {
         printf("%s ",fields[colIdx]);
-    } 
+    }
     printf("\n");
-    
+
     for(rowIdx = 0; rowIdx < rowNum; rowIdx++)
     {
         for(colIdx = 0; colIdx<columnNum; colIdx++)
         {
             printf("%s ",rowRes[rowIdx*columnNum+colIdx]);
-        } 
+        }
         printf("\n");
     }
+    (void)data;
 }
 
 static MSG_ID_T iENT_DbBackendUnsupported(DB_TYPE dbType)
 {
     IENT_LOG_ERROR("Database backend [%d] is not enabled in this build.\n",dbType);
     return ENT_DBS_UNSUPPORTED;
+}
+
+static void iENT_DbGlobalLock(void)
+{
+#ifdef WIN32
+    EnterCriticalSection(&sDbMutex);
+#else
+    pthread_mutex_lock(&sDbMutex);
+#endif
+}
+
+static void iENT_DbGlobalUnlock(void)
+{
+#ifdef WIN32
+    LeaveCriticalSection(&sDbMutex);
+#else
+    pthread_mutex_unlock(&sDbMutex);
+#endif
+}
+
+static void iENT_DbHandleLock(DB_CFG* dbCfg)
+{
+#ifdef WIN32
+    EnterCriticalSection(&dbCfg->cs);
+#else
+    pthread_mutex_lock(&dbCfg->cs);
+#endif
+}
+
+static void iENT_DbHandleUnlock(DB_CFG* dbCfg)
+{
+#ifdef WIN32
+    LeaveCriticalSection(&dbCfg->cs);
+#else
+    pthread_mutex_unlock(&dbCfg->cs);
+#endif
+}
+
+static MSG_ID_T iENT_DbLifecycleInit(DB_CFG* dbCfg)
+{
+    if(dbCfg == NULL)
+    {
+        return ENT_DBS_BAD_ARGUMENT;
+    }
+#ifdef WIN32
+    InitializeCriticalSection(&dbCfg->lifecycleCs);
+    InitializeConditionVariable(&dbCfg->lifecycleCv);
+    return ENT_SYS_NORMAL;
+#else
+    if(pthread_mutex_init(&dbCfg->lifecycleCs, NULL) != 0)
+    {
+        IENT_LOG_ERROR("pthread_mutex_init failed for DB lifecycle lock.\n");
+        return ENT_UTHD_INIT_FAILED;
+    }
+    if(pthread_cond_init(&dbCfg->lifecycleCv, NULL) != 0)
+    {
+        IENT_LOG_ERROR("pthread_cond_init failed for DB lifecycle cv.\n");
+        pthread_mutex_destroy(&dbCfg->lifecycleCs);
+        return ENT_UTHD_INIT_FAILED;
+    }
+    return ENT_SYS_NORMAL;
+#endif
+}
+
+static void iENT_DbLifecycleDestroy(DB_CFG* dbCfg)
+{
+    if(dbCfg == NULL)
+    {
+        return;
+    }
+#ifdef WIN32
+    DeleteCriticalSection(&dbCfg->lifecycleCs);
+#else
+    pthread_cond_destroy(&dbCfg->lifecycleCv);
+    pthread_mutex_destroy(&dbCfg->lifecycleCs);
+#endif
+}
+
+static void iENT_DbLifecycleLock(DB_CFG* dbCfg)
+{
+#ifdef WIN32
+    EnterCriticalSection(&dbCfg->lifecycleCs);
+#else
+    pthread_mutex_lock(&dbCfg->lifecycleCs);
+#endif
+}
+
+static void iENT_DbLifecycleUnlock(DB_CFG* dbCfg)
+{
+#ifdef WIN32
+    LeaveCriticalSection(&dbCfg->lifecycleCs);
+#else
+    pthread_mutex_unlock(&dbCfg->lifecycleCs);
+#endif
+}
+
+static void iENT_DbLifecycleWait(DB_CFG* dbCfg)
+{
+#ifdef WIN32
+    SleepConditionVariableCS(&dbCfg->lifecycleCv, &dbCfg->lifecycleCs, INFINITE);
+#else
+    pthread_cond_wait(&dbCfg->lifecycleCv, &dbCfg->lifecycleCs);
+#endif
+}
+
+static void iENT_DbLifecycleWakeAll(DB_CFG* dbCfg)
+{
+#ifdef WIN32
+    WakeAllConditionVariable(&dbCfg->lifecycleCv);
+#else
+    pthread_cond_broadcast(&dbCfg->lifecycleCv);
+#endif
+}
+
+static void iENT_DbFreeConfigStrings(DB_CFG* dbCfg)
+{
+    if(dbCfg == NULL)
+    {
+        return;
+    }
+    if(dbCfg->host != NULL)
+    {
+        free(dbCfg->host);
+        dbCfg->host = NULL;
+    }
+    if(dbCfg->database != NULL)
+    {
+        free(dbCfg->database);
+        dbCfg->database = NULL;
+    }
+    if(dbCfg->userName != NULL)
+    {
+        free(dbCfg->userName);
+        dbCfg->userName = NULL;
+    }
+    if(dbCfg->passwd != NULL)
+    {
+        free(dbCfg->passwd);
+        dbCfg->passwd = NULL;
+    }
 }
 
 static MSG_ID_T iENT_DbValidateHandle(DB_HANDLE dbHandle,
@@ -164,19 +300,102 @@ static MSG_ID_T iENT_DbOpenLocked(DB_CFG* dbCfg)
             return ENT_DBS_BAD_HANDLE;
     }
 }
+
+static MSG_ID_T iENT_DbEnterHandleOp(DB_HANDLE dbHandle, DB_CFG** dbCfgOut)
+{
+    MSG_ID_T sts;
+    DB_CFG* dbCfg = NULL;
+
+    if(dbCfgOut != NULL)
+    {
+        *dbCfgOut = NULL;
+    }
+
+    if(sDbMutexInit == false)
+    {
+        IENT_LOG_ERROR("Uninitialized,please call ENT_DbInit.\n");
+        return ENT_DBS_NOT_INITIALIZED;
+    }
+
+    iENT_DbGlobalLock();
+    sts = iENT_DbValidateHandle(dbHandle, &dbCfg, true);
+    if(sts < 0)
+    {
+        iENT_DbGlobalUnlock();
+        return sts;
+    }
+
+    iENT_DbLifecycleLock(dbCfg);
+    if(dbCfg->closing)
+    {
+        iENT_DbLifecycleUnlock(dbCfg);
+        iENT_DbGlobalUnlock();
+        IENT_LOG_WARN("Database handle is closing.\n");
+        return ENT_DBS_IN_USE;
+    }
+    dbCfg->activeOps++;
+    iENT_DbLifecycleUnlock(dbCfg);
+    iENT_DbGlobalUnlock();
+
+    if(dbCfgOut != NULL)
+    {
+        *dbCfgOut = dbCfg;
+    }
+    return ENT_SYS_NORMAL;
+}
+
+static void iENT_DbLeaveHandleOp(DB_CFG* dbCfg)
+{
+    if(dbCfg == NULL)
+    {
+        return;
+    }
+
+    iENT_DbLifecycleLock(dbCfg);
+    if(dbCfg->activeOps > 0)
+    {
+        dbCfg->activeOps--;
+    }
+    if(dbCfg->closing && dbCfg->activeOps == 0)
+    {
+        iENT_DbLifecycleWakeAll(dbCfg);
+    }
+    iENT_DbLifecycleUnlock(dbCfg);
+}
+
+static MSG_ID_T iENT_DbReplaceString(char** target, const char* value)
+{
+    char* newValue = NULL;
+
+    if(target == NULL)
+    {
+        return ENT_DBS_BAD_ARGUMENT;
+    }
+
+    if(value == NULL)
+    {
+        return ENT_SYS_NORMAL;
+    }
+
+    newValue = strdup(value);
+    if(newValue == NULL)
+    {
+        IENT_LOG_ERROR("Database string duplication failed.\n");
+        return ENT_DBS_ALLOC_FAILED;
+    }
+
+    if(*target != NULL)
+    {
+        free(*target);
+    }
+    *target = newValue;
+    return ENT_SYS_NORMAL;
+}
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :iENT_DbReInit
  *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  void
- *                           
- *
- *                            
+ * DESCRIPTION :
  *
  *-----------------------------------------------------------------------------
  */
@@ -188,76 +407,169 @@ MSG_ID_T  iENT_DbReInit(DB_HANDLE dbHandle,
                      const char* passwd,
                      int  port)
 {
-    MSG_ID_T sts=ENT_SYS_NORMAL;
-    DB_CFG* dbCfg = (DB_CFG*)dbHandle;
-    if(dbCfg==NULL || dbCfg->sTag!=ENTDB_S_TAG || dbCfg->eTag != ENTDB_E_TAG)
+    MSG_ID_T sts = ENT_SYS_NORMAL;
+    DB_CFG* dbCfg = NULL;
+
+    char* newHost = NULL;
+    char* newDatabase = NULL;
+    char* newUser = NULL;
+    char* newPasswd = NULL;
+
+    if(sDbMutexInit == false)
     {
-        IENT_LOG_ERROR("Database handle is invalid.\n");
-        return ENT_DBS_BAD_HANDLE;
+        IENT_LOG_ERROR("Uninitialized,please call ENT_DbInit.\n");
+        return ENT_DBS_NOT_INITIALIZED;
+    }
+
+    iENT_DbGlobalLock();
+    sts = iENT_DbValidateHandle(dbHandle, &dbCfg, true);
+    if(sts < 0)
+    {
+        iENT_DbGlobalUnlock();
+        return sts;
     }
 
     if(dbType != dbCfg->dbType)
     {
+        iENT_DbGlobalUnlock();
         IENT_LOG_ERROR("Database handle reinit dbType failed.\n");
         return ENT_DBS_BAD_ARGUMENT;
     }
-    
-    if(host)
+
+    iENT_DbLifecycleLock(dbCfg);
+    if(dbCfg->closing || dbCfg->activeOps > 0)
     {
-        if(dbCfg->host)
-        {
-            free(dbCfg->host);
-            dbCfg->host = NULL;
-        }
-        dbCfg->host = strdup(host);
+        iENT_DbLifecycleUnlock(dbCfg);
+        iENT_DbGlobalUnlock();
+        IENT_LOG_WARN("Database handle is in use during reinit.\n");
+        return ENT_DBS_IN_USE;
     }
-    if(database)
+
+    if(host != NULL)
     {
-        if(dbCfg->database)
+        newHost = strdup(host);
+        if(newHost == NULL)
         {
-            free(dbCfg->database);
-            dbCfg->database = NULL;
+            sts = ENT_DBS_ALLOC_FAILED;
+            goto END_OF_ROUTINE;
         }
-        dbCfg->database = strdup(database);
     }
-    if(user)
+    if(database != NULL)
     {
-        if(dbCfg->userName)
+        newDatabase = strdup(database);
+        if(newDatabase == NULL)
         {
-            free(dbCfg->userName);
-            dbCfg->userName = NULL;
+            sts = ENT_DBS_ALLOC_FAILED;
+            goto END_OF_ROUTINE;
         }
-        dbCfg->userName = strdup(user);
-     }
-    if(passwd)
-    {
-        if(dbCfg->passwd)
-        {
-            free(dbCfg->passwd);
-            dbCfg->passwd = NULL;
-        }
-        dbCfg->passwd = strdup(passwd);
     }
-    dbCfg->portNo = port;
+    if(user != NULL)
+    {
+        newUser = strdup(user);
+        if(newUser == NULL)
+        {
+            sts = ENT_DBS_ALLOC_FAILED;
+            goto END_OF_ROUTINE;
+        }
+    }
+    if(passwd != NULL)
+    {
+        newPasswd = strdup(passwd);
+        if(newPasswd == NULL)
+        {
+            sts = ENT_DBS_ALLOC_FAILED;
+            goto END_OF_ROUTINE;
+        }
+    }
+
     if(dbCfg->isOpen)
     {
-        ENT_DbCloseHandle(dbCfg);
+        switch(dbCfg->dbType)
+        {
+            case SQLITE_TYPE:
+#if ENT_ENABLE_SQLITE
+                sts = ENT_DbSqliteClose(dbCfg);
+#else
+                sts = iENT_DbBackendUnsupported(SQLITE_TYPE);
+#endif
+                break;
+            case MYSQL_TYPE:
+#if ENT_ENABLE_MYSQL
+                sts = ENT_DbMySQLClose(dbCfg);
+#else
+                sts = iENT_DbBackendUnsupported(MYSQL_TYPE);
+#endif
+                break;
+            case PGSQL_TYPE:
+#if ENT_ENABLE_PGSQL
+                sts = ENT_DbPgSQLClose(dbCfg);
+#else
+                sts = iENT_DbBackendUnsupported(PGSQL_TYPE);
+#endif
+                break;
+            default:
+                sts = ENT_DBS_BAD_HANDLE;
+                break;
+        }
+        if(sts < 0 && sts != ENT_DBS_UNSUPPORTED)
+        {
+            goto END_OF_ROUTINE;
+        }
     }
-    return sts;   
+
+    if(host != NULL)
+    {
+        free(dbCfg->host);
+        dbCfg->host = newHost;
+        newHost = NULL;
+    }
+    if(database != NULL)
+    {
+        free(dbCfg->database);
+        dbCfg->database = newDatabase;
+        newDatabase = NULL;
+    }
+    if(user != NULL)
+    {
+        free(dbCfg->userName);
+        dbCfg->userName = newUser;
+        newUser = NULL;
+    }
+    if(passwd != NULL)
+    {
+        free(dbCfg->passwd);
+        dbCfg->passwd = newPasswd;
+        newPasswd = NULL;
+    }
+    dbCfg->portNo = port;
+    sts = ENT_SYS_NORMAL;
+
+END_OF_ROUTINE:
+    if(newHost != NULL)
+    {
+        free(newHost);
+    }
+    if(newDatabase != NULL)
+    {
+        free(newDatabase);
+    }
+    if(newUser != NULL)
+    {
+        free(newUser);
+    }
+    if(newPasswd != NULL)
+    {
+        free(newPasswd);
+    }
+    iENT_DbLifecycleUnlock(dbCfg);
+    iENT_DbGlobalUnlock();
+    return sts;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :ENT_DbInit
  *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
+ * DESCRIPTION :
  *
  *-----------------------------------------------------------------------------
  */
@@ -280,15 +592,7 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInit()
  *
  * NAME        :ENT_DbClose
  *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
+ * DESCRIPTION :
  *
  *-----------------------------------------------------------------------------
  */
@@ -297,6 +601,14 @@ ENT_PUBLIC MSG_ID_T  ENT_DbClose()
     if(sDbMutexInit == false)
     {
         return ENT_SYS_CLOSE_UNINITIALIZED;
+    }
+
+    iENT_DbGlobalLock();
+    if(sDbNum > 0)
+    {
+        iENT_DbGlobalUnlock();
+        IENT_LOG_WARN("Database service still has [%ld] live handle(s).\n", sDbNum);
+        return ENT_DBS_IN_USE;
     }
 #ifdef WIN32
     DeleteCriticalSection(&sDbMutex);
@@ -311,15 +623,7 @@ ENT_PUBLIC MSG_ID_T  ENT_DbClose()
  *
  * NAME        :ENT_DbInitHandle
  *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
+ * DESCRIPTION :
  *
  *-----------------------------------------------------------------------------
  */
@@ -338,26 +642,26 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
         IENT_LOG_ERROR("Uninitialized,please call ENT_DbInit.\n");
         return ENT_DBS_NOT_INITIALIZED;
     }
-    
+
     if(pdbHandle==NULL)
     {
         IENT_LOG_ERROR("Database handle is null\n");
         return ENT_DBS_BAD_ARGUMENT;
-    }    
-    
-    
+    }
+
     dbCfg = (DB_CFG*)*pdbHandle;
-    
+
     if(dbCfg!=NULL && dbCfg->sTag==ENTDB_S_TAG && dbCfg->eTag == ENTDB_E_TAG)
     {
         sts=ENT_DbCloseHandle(dbCfg);
+        if(sts < 0)
+        {
+            *pdbHandle = NULL;
+            return sts;
+        }
     }
-    
-#ifdef WIN32
-    EnterCriticalSection(&sDbMutex);
-#else
-    pthread_mutex_lock(&sDbMutex);
-#endif
+
+    iENT_DbGlobalLock();
 
     switch(dbType)
     {
@@ -374,59 +678,126 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
             memset(dbCfg,0,sizeof(DB_CFG));
             dbCfg->dbType = dbType;
             if(host)
+            {
                 dbCfg->host = strdup(host);
+                if(dbCfg->host == NULL)
+                {
+                    sts = ENT_DBS_ALLOC_FAILED;
+                    goto END_OF_ROUTINE;
+                }
+            }
             if(database)
+            {
                 dbCfg->database = strdup(database);
+                if(dbCfg->database == NULL)
+                {
+                    sts = ENT_DBS_ALLOC_FAILED;
+                    goto END_OF_ROUTINE;
+                }
+            }
             if(user)
+            {
                 dbCfg->userName = strdup(user);
+                if(dbCfg->userName == NULL)
+                {
+                    sts = ENT_DBS_ALLOC_FAILED;
+                    goto END_OF_ROUTINE;
+                }
+            }
             if(passwd)
+            {
                 dbCfg->passwd = strdup(passwd);
+                if(dbCfg->passwd == NULL)
+                {
+                    sts = ENT_DBS_ALLOC_FAILED;
+                    goto END_OF_ROUTINE;
+                }
+            }
             dbCfg->portNo = port;
             break;
-            
+
         default:
             *pdbHandle = NULL;
             IENT_LOG_WARN("Database Type is not supported,[%d]\n",dbType);
             sts = ENT_DBS_UNSUPPORTED;
             goto END_OF_ROUTINE;
-            break; 
     }
 #ifdef WIN32
     InitializeCriticalSection(&dbCfg->cs);
 #else
-    pthread_mutex_init(&dbCfg->cs,NULL);
+    if(pthread_mutex_init(&dbCfg->cs,NULL) != 0)
+    {
+        sts = ENT_UTHD_INIT_FAILED;
+        goto END_OF_ROUTINE;
+    }
 #endif
+    sts = iENT_DbLifecycleInit(dbCfg);
+    if(sts < 0)
+    {
+#ifndef WIN32
+        pthread_mutex_destroy(&dbCfg->cs);
+#else
+        DeleteCriticalSection(&dbCfg->cs);
+#endif
+        goto END_OF_ROUTINE;
+    }
     dbCfg->isInit = true;
+    dbCfg->isOpen = false;
+    dbCfg->closing = false;
+    dbCfg->activeOps = 0;
     dbCfg->sTag = ENTDB_S_TAG;
     dbCfg->eTag = ENTDB_E_TAG;
-    *pdbHandle = dbCfg; 
-    sDbNum++;  
+    *pdbHandle = dbCfg;
+    sDbNum++;
 
-END_OF_ROUTINE: 
-#ifdef WIN32   
-    LeaveCriticalSection(&sDbMutex);
-#else
-    pthread_mutex_unlock(&sDbMutex);
-#endif
+END_OF_ROUTINE:
+    if(sts < 0 && dbCfg != NULL)
+    {
+        iENT_DbFreeConfigStrings(dbCfg);
+        free(dbCfg);
+        if(pdbHandle != NULL)
+        {
+            *pdbHandle = NULL;
+        }
+    }
+    iENT_DbGlobalUnlock();
     return sts;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :ENT_DbOpen
  *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
+ * DESCRIPTION :
  *
  *-----------------------------------------------------------------------------
  */
 ENT_PUBLIC MSG_ID_T ENT_DbOpen(DB_HANDLE dbHandle)
+{
+    MSG_ID_T sts=ENT_SYS_NORMAL;
+    DB_CFG*  dbCfg=NULL;
+
+    sts = iENT_DbEnterHandleOp(dbHandle, &dbCfg);
+    if(sts < 0)
+    {
+        return sts;
+    }
+
+    iENT_DbHandleLock(dbCfg);
+    sts = iENT_DbOpenLocked(dbCfg);
+    iENT_DbHandleUnlock(dbCfg);
+
+    iENT_DbLeaveHandleOp(dbCfg);
+    return sts;
+}
+/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
+ *
+ * NAME        :ENT_DbCloseHandle
+ *
+ * DESCRIPTION :
+ *
+ *-----------------------------------------------------------------------------
+ */
+ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE dbHandle)
 {
     MSG_ID_T sts=ENT_SYS_NORMAL;
     DB_CFG*  dbCfg=NULL;
@@ -436,66 +807,28 @@ ENT_PUBLIC MSG_ID_T ENT_DbOpen(DB_HANDLE dbHandle)
         return ENT_DBS_NOT_INITIALIZED;
     }
 
-    sts = iENT_DbValidateHandle(dbHandle, &dbCfg, true);
-    if(sts < 0)
-    {
-        return sts;
-    }
-
-#ifdef WIN32
-    EnterCriticalSection(&dbCfg->cs);   
-#else
-    pthread_mutex_lock(&dbCfg->cs);
-#endif
-
-    sts = iENT_DbOpenLocked(dbCfg);
-
-END_OF_ROUTINE:
-#ifdef WIN32
-    LeaveCriticalSection(&dbCfg->cs);
-#else
-    pthread_mutex_unlock(&dbCfg->cs);
-#endif
-
-    return sts;
-}
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :ENT_DbCloseHandle
- *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
- *
- *-----------------------------------------------------------------------------
- */
-ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE dbHandle)
-{
-    MSG_ID_T sts=ENT_SYS_NORMAL;   
-    DB_CFG*  dbCfg=NULL;
-    if(sDbMutexInit==false)
-    {
-        IENT_LOG_ERROR("Uninitialized,please call ENT_DbInit.\n");
-        return ENT_DBS_NOT_INITIALIZED;
-    }
-
+    iENT_DbGlobalLock();
     sts = iENT_DbValidateHandle(dbHandle, &dbCfg, false);
     if(sts < 0)
     {
+        iENT_DbGlobalUnlock();
         return sts;
     }
 
-#ifdef WIN32
-    EnterCriticalSection(&sDbMutex);   
-#else
-    pthread_mutex_lock(&sDbMutex);
-#endif    
+    iENT_DbLifecycleLock(dbCfg);
+    if(dbCfg->closing)
+    {
+        iENT_DbLifecycleUnlock(dbCfg);
+        iENT_DbGlobalUnlock();
+        return ENT_DBS_IN_USE;
+    }
+    dbCfg->closing = true;
+    while(dbCfg->activeOps > 0)
+    {
+        iENT_DbLifecycleWait(dbCfg);
+    }
+    dbCfg->isInit = false;
+    iENT_DbLifecycleUnlock(dbCfg);
 
     switch(dbCfg->dbType)
     {
@@ -506,7 +839,7 @@ ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE dbHandle)
             sts = iENT_DbBackendUnsupported(SQLITE_TYPE);
 #endif
             break;
-            
+
         case MYSQL_TYPE:
 #if ENT_ENABLE_MYSQL
             sts = ENT_DbMySQLClose(dbCfg);
@@ -525,33 +858,31 @@ ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE dbHandle)
             sts = ENT_DBS_BAD_HANDLE;
             break;
     }
-    memset(dbCfg,0,sizeof(DB_CFG));
-    if(dbCfg)
-    {
-        free(dbCfg);
-    }
-    
+
+    iENT_DbFreeConfigStrings(dbCfg);
 #ifdef WIN32
-    LeaveCriticalSection(&sDbMutex); 
+    DeleteCriticalSection(&dbCfg->cs);
 #else
-    pthread_mutex_unlock(&sDbMutex);
+    pthread_mutex_destroy(&dbCfg->cs);
 #endif
-          
+    if(sDbNum > 0)
+    {
+        sDbNum--;
+    }
+    dbCfg->sTag = 0;
+    dbCfg->eTag = 0;
+
+    iENT_DbGlobalUnlock();
+
+    iENT_DbLifecycleDestroy(dbCfg);
+    free(dbCfg);
     return sts;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :ENT_DbRead
  *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
+ * DESCRIPTION :
  *
  *-----------------------------------------------------------------------------
  */
@@ -566,28 +897,20 @@ ENT_PUBLIC MSG_ID_T ENT_DbRead(DB_HANDLE dbHandle,const char* sql,SqlResultCB sq
         return ENT_DBS_BAD_ARGUMENT;
     }
 
-    sts = iENT_DbValidateHandle(dbHandle, &dbCfg, true);
+    sts = iENT_DbEnterHandleOp(dbHandle, &dbCfg);
     if(sts < 0)
     {
         return sts;
     }
 
-#ifdef WIN32
-    EnterCriticalSection(&dbCfg->cs);   
-#else
-    pthread_mutex_lock(&dbCfg->cs);
-#endif
-
+    iENT_DbHandleLock(dbCfg);
     if(dbCfg->isOpen==false)
     {
         sts = iENT_DbOpenLocked(dbCfg);
         if(sts<0)
         {
-#ifdef WIN32
-            LeaveCriticalSection(&dbCfg->cs);
-#else
-            pthread_mutex_unlock(&dbCfg->cs);
-#endif
+            iENT_DbHandleUnlock(dbCfg);
+            iENT_DbLeaveHandleOp(dbCfg);
             IENT_LOG_ERROR("ENT_DbOpen failed.\n");
             return sts;
         }
@@ -602,7 +925,7 @@ ENT_PUBLIC MSG_ID_T ENT_DbRead(DB_HANDLE dbHandle,const char* sql,SqlResultCB sq
             sts = iENT_DbBackendUnsupported(MYSQL_TYPE);
 #endif
             break;
-            
+
         case SQLITE_TYPE:
 #if ENT_ENABLE_SQLITE
             sts = ENT_DbSqliteRead(dbCfg->dbInstance.sqlite,sql,sqlCb,userData);
@@ -621,27 +944,16 @@ ENT_PUBLIC MSG_ID_T ENT_DbRead(DB_HANDLE dbHandle,const char* sql,SqlResultCB sq
             sts = ENT_DBS_BAD_HANDLE;
             break;
     }
-#ifdef WIN32
-    LeaveCriticalSection(&dbCfg->cs);
-#else
-    pthread_mutex_unlock(&dbCfg->cs);
-#endif
- 
+    iENT_DbHandleUnlock(dbCfg);
+    iENT_DbLeaveHandleOp(dbCfg);
+
     return sts;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :ENT_DbWrite
  *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
+ * DESCRIPTION :
  *
  *-----------------------------------------------------------------------------
  */
@@ -656,33 +968,25 @@ ENT_PUBLIC MSG_ID_T ENT_DbWrite(DB_HANDLE dbHandle,const char* sql,SqlResultCB s
         return ENT_DBS_BAD_ARGUMENT;
     }
 
-    sts = iENT_DbValidateHandle(dbHandle, &dbCfg, true);
+    sts = iENT_DbEnterHandleOp(dbHandle, &dbCfg);
     if(sts < 0)
     {
         return sts;
     }
 
-#ifdef WIN32
-    EnterCriticalSection(&dbCfg->cs);   
-#else
-    pthread_mutex_lock(&dbCfg->cs);
-#endif
-
+    iENT_DbHandleLock(dbCfg);
     if(dbCfg->isOpen==false)
     {
         sts = iENT_DbOpenLocked(dbCfg);
         if(sts<0)
         {
-#ifdef WIN32
-            LeaveCriticalSection(&dbCfg->cs);
-#else
-            pthread_mutex_unlock(&dbCfg->cs);
-#endif
+            iENT_DbHandleUnlock(dbCfg);
+            iENT_DbLeaveHandleOp(dbCfg);
             IENT_LOG_ERROR("ENT_DbOpen failed.\n");
             return sts;
         }
     }
-     
+
     switch(dbCfg->dbType)
     {
         case MYSQL_TYPE:
@@ -692,7 +996,7 @@ ENT_PUBLIC MSG_ID_T ENT_DbWrite(DB_HANDLE dbHandle,const char* sql,SqlResultCB s
             sts = iENT_DbBackendUnsupported(MYSQL_TYPE);
 #endif
             break;
-            
+
         case SQLITE_TYPE:
 #if ENT_ENABLE_SQLITE
             sts = ENT_DbSqliteWrite(dbCfg->dbInstance.sqlite,sql,sqlCb,userData);
@@ -711,11 +1015,8 @@ ENT_PUBLIC MSG_ID_T ENT_DbWrite(DB_HANDLE dbHandle,const char* sql,SqlResultCB s
             sts = ENT_DBS_BAD_HANDLE;
             break;
     }
-#ifdef WIN32
-    LeaveCriticalSection(&dbCfg->cs);
-#else
-    pthread_mutex_unlock(&dbCfg->cs);
-#endif
+    iENT_DbHandleUnlock(dbCfg);
+    iENT_DbLeaveHandleOp(dbCfg);
 
     return sts;
 }
@@ -736,28 +1037,20 @@ ENT_PUBLIC MSG_ID_T ENT_DbReadParams(DB_HANDLE dbHandle,
         return ENT_DBS_BAD_ARGUMENT;
     }
 
-    sts = iENT_DbValidateHandle(dbHandle, &dbCfg, true);
+    sts = iENT_DbEnterHandleOp(dbHandle, &dbCfg);
     if(sts < 0)
     {
         return sts;
     }
 
-#ifdef WIN32
-    EnterCriticalSection(&dbCfg->cs);
-#else
-    pthread_mutex_lock(&dbCfg->cs);
-#endif
-
+    iENT_DbHandleLock(dbCfg);
     if(dbCfg->isOpen==false)
     {
         sts = iENT_DbOpenLocked(dbCfg);
         if(sts<0)
         {
-#ifdef WIN32
-            LeaveCriticalSection(&dbCfg->cs);
-#else
-            pthread_mutex_unlock(&dbCfg->cs);
-#endif
+            iENT_DbHandleUnlock(dbCfg);
+            iENT_DbLeaveHandleOp(dbCfg);
             IENT_LOG_ERROR("ENT_DbOpen failed.\n");
             return sts;
         }
@@ -791,12 +1084,8 @@ ENT_PUBLIC MSG_ID_T ENT_DbReadParams(DB_HANDLE dbHandle,
             break;
     }
 
-#ifdef WIN32
-    LeaveCriticalSection(&dbCfg->cs);
-#else
-    pthread_mutex_unlock(&dbCfg->cs);
-#endif
-
+    iENT_DbHandleUnlock(dbCfg);
+    iENT_DbLeaveHandleOp(dbCfg);
     return sts;
 }
 
@@ -816,28 +1105,20 @@ ENT_PUBLIC MSG_ID_T ENT_DbWriteParams(DB_HANDLE dbHandle,
         return ENT_DBS_BAD_ARGUMENT;
     }
 
-    sts = iENT_DbValidateHandle(dbHandle, &dbCfg, true);
+    sts = iENT_DbEnterHandleOp(dbHandle, &dbCfg);
     if(sts < 0)
     {
         return sts;
     }
 
-#ifdef WIN32
-    EnterCriticalSection(&dbCfg->cs);
-#else
-    pthread_mutex_lock(&dbCfg->cs);
-#endif
-
+    iENT_DbHandleLock(dbCfg);
     if(dbCfg->isOpen==false)
     {
         sts = iENT_DbOpenLocked(dbCfg);
         if(sts<0)
         {
-#ifdef WIN32
-            LeaveCriticalSection(&dbCfg->cs);
-#else
-            pthread_mutex_unlock(&dbCfg->cs);
-#endif
+            iENT_DbHandleUnlock(dbCfg);
+            iENT_DbLeaveHandleOp(dbCfg);
             IENT_LOG_ERROR("ENT_DbOpen failed.\n");
             return sts;
         }
@@ -871,11 +1152,7 @@ ENT_PUBLIC MSG_ID_T ENT_DbWriteParams(DB_HANDLE dbHandle,
             break;
     }
 
-#ifdef WIN32
-    LeaveCriticalSection(&dbCfg->cs);
-#else
-    pthread_mutex_unlock(&dbCfg->cs);
-#endif
-
+    iENT_DbHandleUnlock(dbCfg);
+    iENT_DbLeaveHandleOp(dbCfg);
     return sts;
 }
