@@ -54,6 +54,7 @@ static void defSqlResultCb(char** fields,char** rowRes,long long rowNum,int colu
         }
         printf("\n");
     }
+    (void)data;
 }
 
 #if ENT_ENABLE_PGSQL
@@ -76,25 +77,10 @@ static void iENT_DbPgSQLFreeBoundParams(char** paramValues,
         }
     }
 
-    if(paramValues != NULL)
-    {
-        free(paramValues);
-    }
-
-    if(paramStorage != NULL)
-    {
-        free(paramStorage);
-    }
-
-    if(paramLengths != NULL)
-    {
-        free(paramLengths);
-    }
-
-    if(paramFormats != NULL)
-    {
-        free(paramFormats);
-    }
+    free(paramValues);
+    free(paramStorage);
+    free(paramLengths);
+    free(paramFormats);
 }
 
 static size_t iENT_DbPgSQLCountDigits(size_t value)
@@ -614,16 +600,23 @@ static MSG_ID_T iENT_DbPgSQLCollectRows(PGconn* pgConn, PGresult* res, SqlResult
     memset(fields, 0, fieldsCount * sizeof(char*));
     memset(rowRes, 0, rowCount * sizeof(char*));
 
-    for(int i = 0; i < cols; i++)
     {
-        fields[i] = (char*)PQfname(res, i);
+        int i;
+        for(i = 0; i < cols; i++)
+        {
+            fields[i] = (char*)PQfname(res, i);
+        }
     }
 
-    for(int r = 0; r < rows; r++)
     {
-        for(int c = 0; c < cols; c++)
+        int r;
+        for(r = 0; r < rows; r++)
         {
-            rowRes[r * cols + c] = (char*)PQgetvalue(res, r, c);
+            int c;
+            for(c = 0; c < cols; c++)
+            {
+                rowRes[r * cols + c] = (char*)PQgetvalue(res, r, c);
+            }
         }
     }
 
@@ -854,18 +847,6 @@ MSG_ID_T ENT_DbPgSQLClose(DB_HANDLE dbHandle)
         dbCfg->dbInstance.pgsql = NULL;
     }
     dbCfg->isOpen = false;
-
-    if(dbCfg->host) free(dbCfg->host);
-    if(dbCfg->database) free(dbCfg->database);
-    if(dbCfg->userName) free(dbCfg->userName);
-    if(dbCfg->passwd) free(dbCfg->passwd);
-
-#ifdef WIN32
-    DeleteCriticalSection(&dbCfg->cs);
-#else
-    pthread_mutex_destroy(&dbCfg->cs);
-#endif
-    sDbNum--;
     return ENT_SYS_NORMAL;
 #else
     (void)dbHandle;
