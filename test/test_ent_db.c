@@ -264,6 +264,56 @@ static int test_db_api_rejects_null_handles(void)
                        "ENT_DbClose should close the DB service after NULL-handle validation");
 }
 
+static int test_db_close_rejects_live_handles(void)
+{
+    char db_path[512];
+    DB_HANDLE db_handle = NULL;
+    MSG_ID_T init_sts = 0;
+
+    memset(db_path, 0, sizeof(db_path));
+    if(prepare_temp_db_path(db_path, sizeof(db_path)) != 0)
+    {
+        return 1;
+    }
+
+    init_sts = reset_db_service();
+    if(expect_true(init_sts == ENT_SYS_NORMAL || init_sts == ENT_SYS_ALREADY_INITIALIZED,
+                   "ENT_DbInit should initialize the DB service before live-handle close validation") != 0)
+    {
+        cleanup_temp_db_path(db_path);
+        return 1;
+    }
+
+    if(expect_true(ENT_DbInitHandle(&db_handle, SQLITE_TYPE, NULL, db_path, NULL, NULL, 0) == 0,
+                   "ENT_DbInitHandle should create a SQLite handle for live-handle close validation") != 0)
+    {
+        ENT_DbClose();
+        cleanup_temp_db_path(db_path);
+        return 1;
+    }
+
+    if(expect_true(ENT_DbClose() == ENT_DBS_IN_USE,
+                   "ENT_DbClose should refuse to tear down the DB service while handles are still live") != 0)
+    {
+        ENT_DbCloseHandle(db_handle);
+        ENT_DbClose();
+        cleanup_temp_db_path(db_path);
+        return 1;
+    }
+
+    if(expect_true(ENT_DbCloseHandle(db_handle) == 0,
+                   "ENT_DbCloseHandle should close the live SQLite handle after service-close rejection") != 0)
+    {
+        ENT_DbClose();
+        cleanup_temp_db_path(db_path);
+        return 1;
+    }
+
+    cleanup_temp_db_path(db_path);
+    return expect_true(ENT_DbClose() == 0,
+                       "ENT_DbClose should succeed after all live handles are closed");
+}
+
 static int test_sqlite_open_rejects_missing_database_path(void)
 {
     DB_HANDLE db_handle = NULL;
@@ -762,6 +812,11 @@ int main(void)
     }
 
     if(test_db_api_rejects_null_handles() != 0)
+    {
+        return 1;
+    }
+
+    if(test_db_close_rejects_live_handles() != 0)
     {
         return 1;
     }
