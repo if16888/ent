@@ -13,6 +13,14 @@
 #include "ent_db.h"
 #include "ent_msg.h"
 
+MSG_ID_T iENT_DbReInit(DB_HANDLE dbHandle,
+                       DB_TYPE dbType,
+                       const char* host,
+                       const char* database,
+                       const char* user,
+                       const char* passwd,
+                       int port);
+
 ENT_CTX gEntCtx;
 
 typedef struct DB_READ_CAPTURE {
@@ -689,6 +697,157 @@ CLEANUP_NO_DB:
     return rc;
 }
 
+static int test_db_reinit_rejects_active_read(void)
+{
+    char db_path[512];
+    DB_HANDLE db_handle = NULL;
+    DB_CLOSE_WAIT_PROBE probe;
+    DB_READ_THREAD_CTX read_ctx;
+    MSG_ID_T init_sts = 0;
+    int rc = 0;
+
+    memset(db_path, 0, sizeof(db_path));
+    memset(&probe, 0, sizeof(probe));
+    memset(&read_ctx, 0, sizeof(read_ctx));
+
+    if(prepare_temp_db_path(db_path, sizeof(db_path)) != 0)
+    {
+        return 1;
+    }
+
+    if(test_event_init(&probe.callback_entered) != 0 ||
+       test_event_init(&probe.callback_release) != 0 ||
+       test_event_init(&probe.close_started) != 0)
+    {
+        test_event_destroy(&probe.callback_entered);
+        test_event_destroy(&probe.callback_release);
+        test_event_destroy(&probe.close_started);
+        cleanup_temp_db_path(db_path);
+        return 1;
+    }
+
+    init_sts = reset_db_service();
+    if(expect_true(init_sts == ENT_SYS_NORMAL || init_sts == ENT_SYS_ALREADY_INITIALIZED,
+                   "ENT_DbInit should initialize the DB service before concurrent reinit testing") != 0)
+    {
+        rc = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(ENT_DbInitHandle(&db_handle, SQLITE_TYPE, NULL, db_path, NULL, NULL, 0) == 0,
+                   "ENT_DbInitHandle should create a SQLite handle for concurrent reinit testing") != 0)
+    {
+        rc = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(ENT_DbWrite(db_handle, "CREATE TABLE test_user(id INTEGER PRIMARY KEY, name TEXT NOT NULL);", NULL, NULL) == 0,
+                   "ENT_DbWrite should create a SQLite table for concurrent reinit testing") != 0)
+    {
+        rc = 1;
+        goto HANDLE_CLEANUP;
+    }
+
+    if(expect_true(ENT_DbWrite(db_handle, "INSERT INTO test_user(name) VALUES('mallory');", NULL, NULL) == 0,
+                   "ENT_DbWrite should insert a SQLite row for concurrent reinit testing") != 0)
+    {
+        rc = 1;
+        goto HANDLE_CLEANUP;
+    }
+
+    read_ctx.db_handle = db_handle;
+    read_ctx.probe = &probe;
+    read_ctx.status = ENT_DBS_RESULT_FAILED;
+
+#ifdef WIN32
+    {
+        HANDLE read_thread = CreateThread(NULL, 0, db_read_thread_proc, &read_ctx, 0, NULL);
+        if(expect_true(read_thread != NULL,
+                       "read helper thread should start for concurrent reinit testing") != 0)
+        {
+            rc = 1;
+            goto HANDLE_CLEANUP;
+        }
+
+        test_event_wait(&probe.callback_entered);
+
+        if(expect_true(iENT_DbReInit(db_handle, SQLITE_TYPE, NULL, db_path, NULL, NULL, 0) == ENT_DBS_IN_USE,
+                       "iENT_DbReInit should reject a handle that is busy with an active read") != 0)
+        {
+            test_event_signal(&probe.callback_release);
+            WaitForSingleObject(read_thread, INFINITE);
+            CloseHandle(read_thread);
+            rc = 1;
+            goto HANDLE_CLEANUP;
+        }
+
+        test_event_signal(&probe.callback_release);
+        WaitForSingleObject(read_thread, INFINITE);
+        CloseHandle(read_thread);
+    }
+#else
+    {
+        pthread_t read_thread;
+        if(expect_true(pthread_create(&read_thread, NULL, db_read_thread_proc, &read_ctx) == 0,
+                       "read helper thread should start for concurrent reinit testing") != 0)
+        {
+            rc = 1;
+            goto HANDLE_CLEANUP;
+        }
+
+        test_event_wait(&probe.callback_entered);
+
+        if(expect_true(iENT_DbReInit(db_handle, SQLITE_TYPE, NULL, db_path, NULL, NULL, 0) == ENT_DBS_IN_USE,
+                       "iENT_DbReInit should reject a handle that is busy with an active read") != 0)
+        {
+            test_event_signal(&probe.callback_release);
+            pthread_join(read_thread, NULL);
+            rc = 1;
+            goto HANDLE_CLEANUP;
+        }
+
+        test_event_signal(&probe.callback_release);
+        pthread_join(read_thread, NULL);
+    }
+#endif
+
+    if(expect_true(read_ctx.status == ENT_SYS_NORMAL,
+                   "ENT_DbRead should complete successfully after reinit rejection testing") != 0)
+    {
+        rc = 1;
+        goto HANDLE_CLEANUP;
+    }
+
+    if(expect_true(probe.callback_calls == 1,
+                   "blocking read callback should run exactly once during concurrent reinit testing") != 0)
+    {
+        rc = 1;
+        goto HANDLE_CLEANUP;
+    }
+
+HANDLE_CLEANUP:
+    if(db_handle != NULL)
+    {
+        if(expect_true(ENT_DbCloseHandle(db_handle) == 0,
+                       "ENT_DbCloseHandle should close the SQLite handle after concurrent reinit testing") != 0)
+        {
+            rc = 1;
+        }
+    }
+CLEANUP:
+    test_event_signal(&probe.callback_release);
+    cleanup_temp_db_path(db_path);
+    if(expect_true(ENT_DbClose() == 0,
+                   "ENT_DbClose should close the DB service after concurrent reinit testing") != 0)
+    {
+        rc = 1;
+    }
+    test_event_destroy(&probe.callback_entered);
+    test_event_destroy(&probe.callback_release);
+    test_event_destroy(&probe.close_started);
+    return rc;
+}
+
 static int test_sqlite_open_rejects_missing_database_path(void)
 {
     DB_HANDLE db_handle = NULL;
@@ -1197,6 +1356,11 @@ int main(void)
     }
 
     if(test_db_close_handle_waits_for_active_read() != 0)
+    {
+        return 1;
+    }
+
+    if(test_db_reinit_rejects_active_read() != 0)
     {
         return 1;
     }
