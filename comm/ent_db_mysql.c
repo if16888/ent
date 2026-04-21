@@ -54,6 +54,7 @@ static void defSqlResultCb(char** fields,char** rowRes,long long rowNum,int colu
         }
         printf("\n");
     }
+    (void)data;
 }
 
 #if ENT_ENABLE_MYSQL
@@ -631,10 +632,12 @@ MSG_ID_T ENT_DbMySQLInit(DB_HANDLE dbHandle)
     {
         IENT_LOG_WARN("mysql_options failed,message:[%s]\n",mysql_error(db));
     }
-    bool reconnect = 1;
-    if(mysql_options(db, MYSQL_OPT_RECONNECT, &reconnect))
     {
-        IENT_LOG_WARN("mysql_options failed,message:[%s]\n",mysql_error(db));
+        bool reconnect = 1;
+        if(mysql_options(db, MYSQL_OPT_RECONNECT, &reconnect))
+        {
+            IENT_LOG_WARN("mysql_options failed,message:[%s]\n",mysql_error(db));
+        }
     }
 
     if (mysql_real_connect(db,
@@ -688,6 +691,7 @@ MSG_ID_T ENT_DbMySQLRead(MYSQL* dbHandle,const char* query,SqlResultCB userCb,vo
     if (fields == NULL)
     {
         IENT_LOG_ERROR("malloc size [%d] failed\n",num_fields*(int)sizeof(char*));
+        mysql_free_result(result);
         return ENT_DBS_ALLOC_FAILED;
     }
     memset(fields,0,num_fields*sizeof(char*));
@@ -696,6 +700,7 @@ MSG_ID_T ENT_DbMySQLRead(MYSQL* dbHandle,const char* query,SqlResultCB userCb,vo
     {
         free(fields);
         fields = NULL;
+        mysql_free_result(result);
         IENT_LOG_ERROR("malloc size [%d] failed\n",num_fields*(int)num_rows*(int)sizeof(char*));
         return ENT_DBS_ALLOC_FAILED;
     }
@@ -705,16 +710,19 @@ MSG_ID_T ENT_DbMySQLRead(MYSQL* dbHandle,const char* query,SqlResultCB userCb,vo
     MYSQL_FIELD* field;
     long long    rowIdx = 0;
 
-    int colIdx = 0;
-    while((field = mysql_fetch_field(result)))
     {
-        fields[colIdx] = field->name;
-        colIdx++;
+        int colIdx = 0;
+        while((field = mysql_fetch_field(result)))
+        {
+            fields[colIdx] = field->name;
+            colIdx++;
+        }
     }
 
     while ((row = mysql_fetch_row(result)))
     {
-        for(int i = 0; i < num_fields; i++)
+        int i;
+        for(i = 0; i < num_fields; i++)
         {
             rows[rowIdx*num_fields+i] = row[i];
         }
@@ -830,22 +838,6 @@ MSG_ID_T ENT_DbMySQLClose(DB_HANDLE dbHandle)
         dbCfg->dbInstance.mysql = NULL;
     }
     dbCfg->isOpen = false;
-    if(dbCfg->host)
-        free(dbCfg->host);
-    if(dbCfg->database)
-        free(dbCfg->database);
-    if(dbCfg->userName)
-        free(dbCfg->userName);
-    if(dbCfg->passwd)
-        free(dbCfg->passwd);
-
-#ifdef WIN32
-    DeleteCriticalSection(&dbCfg->cs);
-#else
-    pthread_mutex_destroy(&dbCfg->cs);
-#endif
-
-    sDbNum--;
     return ENT_SYS_NORMAL;
 #else
     (void)dbHandle;
