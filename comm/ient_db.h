@@ -69,10 +69,16 @@ typedef struct DB_CFG
     bool isInit;
 #ifdef WIN32
     CRITICAL_SECTION cs;
+    CRITICAL_SECTION lifecycleCs;
+    CONDITION_VARIABLE lifecycleCv;
 #else
     pthread_mutex_t cs;
+    pthread_mutex_t lifecycleCs;
+    pthread_cond_t lifecycleCv;
 #endif
     bool isOpen;
+    bool closing;
+    long activeOps;
     union
     {
 #if ENT_ENABLE_SQLITE
