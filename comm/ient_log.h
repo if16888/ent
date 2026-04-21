@@ -38,6 +38,14 @@
 #define ENTLOG_TAG     (0x6AFEFE6A)
 #define ENTLOG_CTX_TAG (0x6AFEFE6B)
 
+typedef enum ENT_LOG_HANDLE_STATE_TAG
+{
+    ENT_LOG_HANDLE_CREATED_E = 0,
+    ENT_LOG_HANDLE_ACTIVE_E  = 1,
+    ENT_LOG_HANDLE_CLOSING_E = 2,
+    ENT_LOG_HANDLE_CLOSED_E  = 3
+} ENT_LOG_HANDLE_STATE_E;
+
 typedef struct ENT_LOG_MSG_NODE_TAG
 {
     struct ENT_LOG_MSG_NODE_TAG* next;
@@ -62,7 +70,7 @@ typedef struct ENT_LOG_CTX_INTERNAL_TAG
     CONDITION_VARIABLE closeCv;
     CONDITION_VARIABLE bufferCv;
     HANDLE            bufferThread;
-    volatile LONG     closing;
+    volatile LONG     handleState;
     volatile LONG     activeWriters;
     volatile LONG     isDebugFast;
     volatile LONG     isBufferFast;
@@ -71,7 +79,7 @@ typedef struct ENT_LOG_CTX_INTERNAL_TAG
     pthread_cond_t    closeCv;
     pthread_cond_t    bufferCv;
     pthread_t         bufferThread;
-    volatile int      closing;
+    volatile int      handleState;
     volatile int      activeWriters;
     volatile int      isDebugFast;
     volatile int      isBufferFast;
@@ -114,8 +122,9 @@ MSG_ID_T      iENT_LogPathCheck(const char* path);
 MSG_ID_T      iENT_LogGetCtx(ENT_LOG_CTX_INTERNAL** logCtx, ENT_LOG logHandle);
 MSG_ID_T      iENT_LogAcquireWriter(ENT_LOG_CTX_INTERNAL** logCtx, ENT_LOG logHandle);
 void          iENT_LogReleaseWriter(ENT_LOG_CTX_INTERNAL* log);
+ENT_LOG_HANDLE_STATE_E iENT_LogStateGet(const ENT_LOG_CTX_INTERNAL* log);
+void          iENT_LogStateSet(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_HANDLE_STATE_E state);
 int           iENT_LogIsClosing(const ENT_LOG_CTX_INTERNAL* log);
-void          iENT_LogSetClosing(ENT_LOG_CTX_INTERNAL* log);
 int           iENT_LogActiveGet(const ENT_LOG_CTX_INTERNAL* log);
 void          iENT_LogActiveInc(ENT_LOG_CTX_INTERNAL* log);
 int           iENT_LogActiveDec(ENT_LOG_CTX_INTERNAL* log);
