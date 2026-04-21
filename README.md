@@ -420,9 +420,22 @@ process
 
 如果把 `ent` 的 DB 模块当作**高并发 / 公共库接口**来用，建议按下面的语义理解，而不是把它当成“随时可重配、随时可硬关”的轻量封装。
 
-#### 句柄生命周期
+#### 句柄生命周期状态机
 
-每个 `DB_HANDLE` 现在都带有独立的生命周期状态，主路径包括：
+每个 `DB_HANDLE` 现在都有显式生命周期状态机：
+
+- `ENT_DB_HANDLE_CREATED_E`
+- `ENT_DB_HANDLE_ACTIVE_E`
+- `ENT_DB_HANDLE_CLOSING_E`
+- `ENT_DB_HANDLE_CLOSED_E`
+
+对外可以这样理解：
+
+- `ACTIVE`：允许 `open/read/write/readParams/writeParams`
+- `CLOSING`：拒绝新的 DB 操作进入，并等待在途操作退出
+- `CLOSED`：句柄已经失效，不可再复用
+
+主路径包括：
 
 - `ENT_DbOpen`
 - `ENT_DbRead`
@@ -442,7 +455,7 @@ process
 
 `ENT_DbCloseHandle()` 不再是“立即 free 句柄”的语义，而是：
 
-1. 标记 handle 进入 closing 状态
+1. 把 handle 状态切到 `CLOSING`
 2. 拒绝新的 DB 操作进入
 3. 等待当前已进入的活跃操作退出
 4. 再关闭连接并释放资源
@@ -453,6 +466,19 @@ process
 - 另一个线程调用 `ENT_DbCloseHandle()`
 
 那么 close 会等待在途请求结束，而不是直接抢先释放句柄。
+
+当 handle 已经处于 `CLOSING` 时：
+
+- 新的 `ENT_DbOpen`
+- 新的 `ENT_DbRead`
+- 新的 `ENT_DbReadParams`
+- 第二次 `ENT_DbCloseHandle`
+
+都会返回：
+
+- `ENT_DBS_IN_USE`
+
+当 `ENT_DbCloseHandle()` 已经成功完成后，句柄就变成**无效句柄**，不能再继续复用。
 
 #### `ENT_DbClose()` 的语义
 
@@ -479,7 +505,7 @@ process
 如果当前 handle 正在：
 
 - 执行活跃 read/write
-- 或已经进入 closing
+- 或已经进入 `CLOSING`
 
 则 `iENT_DbReInit()` 会返回：
 
@@ -515,11 +541,13 @@ process
 - 先关所有 handle，再关 DB service
 - 默认优先使用参数化接口
 - 多线程共享同一 handle 时，明确由上层约束谁负责生命周期收尾
+- `ENT_DbCloseHandle()` 成功返回后，句柄立即视为失效句柄，不能继续复用
 
 当前测试已覆盖的生命周期风险点包括：
 
 - `ENT_DbClose()` 在仍有 live handle 时必须返回 `ENT_DBS_IN_USE`
 - `ENT_DbCloseHandle()` 在 active read 未退出时必须等待
+- 句柄进入 `CLOSING` 后，新的 `open/read/readParams/close` 必须返回 `ENT_DBS_IN_USE`
 - `iENT_DbReInit()` 在 active read 未退出时必须返回 `ENT_DBS_IN_USE`
 
 ---
