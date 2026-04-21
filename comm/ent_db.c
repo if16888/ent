@@ -84,6 +84,23 @@ static MSG_ID_T iENT_DbBackendUnsupported(DB_TYPE dbType)
     return ENT_DBS_UNSUPPORTED;
 }
 
+static const char* iENT_DbHandleStateName(DB_HANDLE_STATE_E state)
+{
+    switch(state)
+    {
+        case ENT_DB_HANDLE_CREATED_E:
+            return "created";
+        case ENT_DB_HANDLE_ACTIVE_E:
+            return "active";
+        case ENT_DB_HANDLE_CLOSING_E:
+            return "closing";
+        case ENT_DB_HANDLE_CLOSED_E:
+            return "closed";
+        default:
+            return "unknown";
+    }
+}
+
 static void iENT_DbGlobalLock(void)
 {
 #ifdef WIN32
@@ -326,12 +343,14 @@ static MSG_ID_T iENT_DbEnterHandleOp(DB_HANDLE dbHandle, DB_CFG** dbCfgOut)
     }
 
     iENT_DbLifecycleLock(dbCfg);
-    if(dbCfg->closing)
+    if(dbCfg->handleState != ENT_DB_HANDLE_ACTIVE_E)
     {
+        DB_HANDLE_STATE_E state = dbCfg->handleState;
         iENT_DbLifecycleUnlock(dbCfg);
         iENT_DbGlobalUnlock();
-        IENT_LOG_WARN("Database handle is closing.\n");
-        return ENT_DBS_IN_USE;
+        IENT_LOG_WARN("Database handle is not available for operation, state[%s].\n",
+                      iENT_DbHandleStateName(state));
+        return (state == ENT_DB_HANDLE_CLOSING_E) ? ENT_DBS_IN_USE : ENT_DBS_BAD_HANDLE;
     }
     dbCfg->activeOps++;
     iENT_DbLifecycleUnlock(dbCfg);
@@ -356,7 +375,7 @@ static void iENT_DbLeaveHandleOp(DB_CFG* dbCfg)
     {
         dbCfg->activeOps--;
     }
-    if(dbCfg->closing && dbCfg->activeOps == 0)
+    if(dbCfg->handleState == ENT_DB_HANDLE_CLOSING_E && dbCfg->activeOps == 0)
     {
         iENT_DbLifecycleWakeAll(dbCfg);
     }
@@ -408,12 +427,15 @@ MSG_ID_T  iENT_DbReInit(DB_HANDLE dbHandle,
     }
 
     iENT_DbLifecycleLock(dbCfg);
-    if(dbCfg->closing || dbCfg->activeOps > 0)
+    if(dbCfg->handleState != ENT_DB_HANDLE_ACTIVE_E || dbCfg->activeOps > 0)
     {
+        DB_HANDLE_STATE_E state = dbCfg->handleState;
         iENT_DbLifecycleUnlock(dbCfg);
         iENT_DbGlobalUnlock();
-        IENT_LOG_WARN("Database handle is in use during reinit.\n");
-        return ENT_DBS_IN_USE;
+        IENT_LOG_WARN("Database handle cannot reinit in state[%s] with activeOps[%ld].\n",
+                      iENT_DbHandleStateName(state),
+                      dbCfg->activeOps);
+        return (state == ENT_DB_HANDLE_CLOSING_E || dbCfg->activeOps > 0) ? ENT_DBS_IN_USE : ENT_DBS_BAD_HANDLE;
     }
 
     if(host != NULL)
@@ -649,6 +671,7 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
             }
             memset(dbCfg,0,sizeof(DB_CFG));
             dbCfg->dbType = dbType;
+            dbCfg->handleState = ENT_DB_HANDLE_CREATED_E;
             if(host)
             {
                 dbCfg->host = strdup(host);
@@ -715,7 +738,7 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
     }
     dbCfg->isInit = true;
     dbCfg->isOpen = false;
-    dbCfg->closing = false;
+    dbCfg->handleState = ENT_DB_HANDLE_ACTIVE_E;
     dbCfg->activeOps = 0;
     dbCfg->sTag = ENTDB_S_TAG;
     dbCfg->eTag = ENTDB_E_TAG;
@@ -788,13 +811,21 @@ ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE dbHandle)
     }
 
     iENT_DbLifecycleLock(dbCfg);
-    if(dbCfg->closing)
+    if(dbCfg->handleState == ENT_DB_HANDLE_CLOSING_E)
     {
         iENT_DbLifecycleUnlock(dbCfg);
         iENT_DbGlobalUnlock();
         return ENT_DBS_IN_USE;
     }
-    dbCfg->closing = true;
+    if(dbCfg->handleState != ENT_DB_HANDLE_ACTIVE_E)
+    {
+        DB_HANDLE_STATE_E state = dbCfg->handleState;
+        iENT_DbLifecycleUnlock(dbCfg);
+        iENT_DbGlobalUnlock();
+        IENT_LOG_WARN("Database handle cannot close in state[%s].\n", iENT_DbHandleStateName(state));
+        return ENT_DBS_BAD_HANDLE;
+    }
+    dbCfg->handleState = ENT_DB_HANDLE_CLOSING_E;
     while(dbCfg->activeOps > 0)
     {
         iENT_DbLifecycleWait(dbCfg);
@@ -831,6 +862,9 @@ ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE dbHandle)
             break;
     }
 
+    iENT_DbLifecycleLock(dbCfg);
+    dbCfg->handleState = ENT_DB_HANDLE_CLOSED_E;
+    iENT_DbLifecycleUnlock(dbCfg);
     iENT_DbFreeConfigStrings(dbCfg);
 #ifdef WIN32
     DeleteCriticalSection(&dbCfg->cs);
