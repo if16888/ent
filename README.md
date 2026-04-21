@@ -416,6 +416,112 @@ process
   - `WINDOWS_DISABLE_PGSQL=ON`
 - 静态库 `ent_s` 已显式传播系统库和数据库库依赖，便于下游静态链接。
 
+### 11.1 DB 并发与生命周期语义
+
+如果把 `ent` 的 DB 模块当作**高并发 / 公共库接口**来用，建议按下面的语义理解，而不是把它当成“随时可重配、随时可硬关”的轻量封装。
+
+#### 句柄生命周期
+
+每个 `DB_HANDLE` 现在都带有独立的生命周期状态，主路径包括：
+
+- `ENT_DbOpen`
+- `ENT_DbRead`
+- `ENT_DbWrite`
+- `ENT_DbReadParams`
+- `ENT_DbWriteParams`
+- `ENT_DbCloseHandle`
+- `iENT_DbReInit`
+
+其中：
+
+- 读写 / open 会登记活跃操作
+- `ENT_DbCloseHandle()` 会先禁止新请求进入，再等待在途请求退出，然后才真正关闭后端连接并释放句柄
+- `iENT_DbReInit()` 在句柄忙时不会在线热切换配置，而是直接拒绝
+
+#### `ENT_DbCloseHandle()` 的语义
+
+`ENT_DbCloseHandle()` 不再是“立即 free 句柄”的语义，而是：
+
+1. 标记 handle 进入 closing 状态
+2. 拒绝新的 DB 操作进入
+3. 等待当前已进入的活跃操作退出
+4. 再关闭连接并释放资源
+
+这意味着：
+
+- 如果一个线程正在 `ENT_DbRead()` / `ENT_DbWrite()`
+- 另一个线程调用 `ENT_DbCloseHandle()`
+
+那么 close 会等待在途请求结束，而不是直接抢先释放句柄。
+
+#### `ENT_DbClose()` 的语义
+
+`ENT_DbClose()` 关闭的是**DB 服务层**，不是单个 handle。
+
+如果当前仍然存在 live handle，`ENT_DbClose()` 会返回：
+
+- `ENT_DBS_IN_USE`
+
+也就是说，推荐顺序是：
+
+1. 先关闭所有 `DB_HANDLE`
+2. 再调用 `ENT_DbClose()` 关闭 DB 服务
+
+而不是反过来。
+
+#### `iENT_DbReInit()` 的语义
+
+`iENT_DbReInit()` 现在更适合理解为：
+
+- 初始化期 / 停机期接口
+- 非忙状态下的重配置接口
+
+如果当前 handle 正在：
+
+- 执行活跃 read/write
+- 或已经进入 closing
+
+则 `iENT_DbReInit()` 会返回：
+
+- `ENT_DBS_IN_USE`
+
+因此它**不是**一个可随意在线热切换连接配置的接口。
+
+#### 推荐的 API 使用方式
+
+从安全和长期维护角度，推荐默认优先使用：
+
+- `ENT_DbReadParams`
+- `ENT_DbWriteParams`
+
+而不是直接把外部输入拼到：
+
+- `ENT_DbRead`
+- `ENT_DbWrite`
+
+中。
+
+也就是说：
+
+- raw SQL API 更适合固定 SQL、内部受控场景
+- 带外部输入的查询 / 写入，优先走参数化接口
+
+#### 推荐使用原则
+
+如果你把 `ent` DB 模块作为公共组件使用，建议遵循这些原则：
+
+- 不要在业务线程仍在使用 handle 时强行 close
+- 不要把 `iENT_DbReInit()` 当成运行期热切换接口
+- 先关所有 handle，再关 DB service
+- 默认优先使用参数化接口
+- 多线程共享同一 handle 时，明确由上层约束谁负责生命周期收尾
+
+当前测试已覆盖的生命周期风险点包括：
+
+- `ENT_DbClose()` 在仍有 live handle 时必须返回 `ENT_DBS_IN_USE`
+- `ENT_DbCloseHandle()` 在 active read 未退出时必须等待
+- `iENT_DbReInit()` 在 active read 未退出时必须返回 `ENT_DBS_IN_USE`
+
 ---
 
 ## 12. Lua 说明
