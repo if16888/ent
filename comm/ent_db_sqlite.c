@@ -60,6 +60,7 @@ MSG_ID_T ENT_DbSqliteInit(DB_HANDLE dbHandle)
     {
         IENT_LOG_ERROR("Can't open database:[%s]\n", sqlite3_errmsg(dbCfg->dbInstance.sqlite));
         sqlite3_close(dbCfg->dbInstance.sqlite);
+        dbCfg->dbInstance.sqlite = NULL;
         return ENT_DBS_OPEN_FAILED;
     }
     dbCfg->isOpen = true;
@@ -92,23 +93,6 @@ MSG_ID_T ENT_DbSqliteClose(DB_HANDLE dbHandle)
         dbCfg->dbInstance.sqlite = NULL;
     }
     dbCfg->isOpen = false;
-
-    if(dbCfg->host)
-        free(dbCfg->host);
-    if(dbCfg->database)
-        free(dbCfg->database);
-    if(dbCfg->userName)
-        free(dbCfg->userName);
-    if(dbCfg->passwd)
-        free(dbCfg->passwd);
-
-#ifdef WIN32
-    DeleteCriticalSection(&dbCfg->cs);
-#else
-    pthread_mutex_destroy(&dbCfg->cs);
-#endif
-
-    sDbNum--;
     return ENT_SYS_NORMAL;
 #endif
 }
