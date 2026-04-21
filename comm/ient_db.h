@@ -57,6 +57,14 @@
 #define ENTDB_S_TAG (0xEADBEB90)
 #define ENTDB_E_TAG (0xEB90EADB)
 
+typedef enum DB_HANDLE_STATE_TAG
+{
+    ENT_DB_HANDLE_CREATED_E = 0,
+    ENT_DB_HANDLE_ACTIVE_E  = 1,
+    ENT_DB_HANDLE_CLOSING_E = 2,
+    ENT_DB_HANDLE_CLOSED_E  = 3
+} DB_HANDLE_STATE_E;
+
 typedef struct DB_CFG
 {
     unsigned int sTag;
@@ -77,7 +85,7 @@ typedef struct DB_CFG
     pthread_cond_t lifecycleCv;
 #endif
     bool isOpen;
-    bool closing;
+    DB_HANDLE_STATE_E handleState;
     long activeOps;
     union
     {
