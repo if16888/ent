@@ -502,6 +502,8 @@ static int test_db_close_handle_waits_for_active_read(void)
     DB_CLOSE_WAIT_PROBE probe;
     DB_READ_THREAD_CTX read_ctx;
     DB_CLOSE_THREAD_CTX close_ctx;
+    DB_READ_CAPTURE capture;
+    ENT_DB_PARAM read_param;
     MSG_ID_T init_sts = 0;
     int rc = 0;
 
@@ -509,6 +511,10 @@ static int test_db_close_handle_waits_for_active_read(void)
     memset(&probe, 0, sizeof(probe));
     memset(&read_ctx, 0, sizeof(read_ctx));
     memset(&close_ctx, 0, sizeof(close_ctx));
+    memset(&capture, 0, sizeof(capture));
+    memset(&read_param, 0, sizeof(read_param));
+    read_param.type = ENT_DB_PARAM_INT_E;
+    read_param.value.i32 = 1;
 
     if(prepare_temp_db_path(db_path, sizeof(db_path)) != 0)
     {
@@ -600,6 +606,58 @@ static int test_db_close_handle_waits_for_active_read(void)
             rc = 1;
             goto CLEANUP;
         }
+        if(expect_true(ENT_DbOpen(db_handle) == ENT_DBS_IN_USE,
+                       "ENT_DbOpen should reject a handle that is already closing") != 0)
+        {
+            test_event_signal(&probe.callback_release);
+            WaitForSingleObject(read_thread, INFINITE);
+            WaitForSingleObject(close_thread, INFINITE);
+            CloseHandle(read_thread);
+            CloseHandle(close_thread);
+            rc = 1;
+            goto CLEANUP;
+        }
+        if(expect_true(ENT_DbRead(db_handle,
+                                  "SELECT name FROM test_user WHERE id = 1;",
+                                  capture_single_name_row,
+                                  &capture) == ENT_DBS_IN_USE,
+                       "ENT_DbRead should reject a handle that is already closing") != 0)
+        {
+            test_event_signal(&probe.callback_release);
+            WaitForSingleObject(read_thread, INFINITE);
+            WaitForSingleObject(close_thread, INFINITE);
+            CloseHandle(read_thread);
+            CloseHandle(close_thread);
+            rc = 1;
+            goto CLEANUP;
+        }
+        if(expect_true(ENT_DbReadParams(db_handle,
+                                        "SELECT name FROM test_user WHERE id = ?;",
+                                        &read_param,
+                                        1,
+                                        capture_single_name_row,
+                                        &capture) == ENT_DBS_IN_USE,
+                       "ENT_DbReadParams should reject a handle that is already closing") != 0)
+        {
+            test_event_signal(&probe.callback_release);
+            WaitForSingleObject(read_thread, INFINITE);
+            WaitForSingleObject(close_thread, INFINITE);
+            CloseHandle(read_thread);
+            CloseHandle(close_thread);
+            rc = 1;
+            goto CLEANUP;
+        }
+        if(expect_true(ENT_DbCloseHandle(db_handle) == ENT_DBS_IN_USE,
+                       "A second ENT_DbCloseHandle should report the handle as already closing") != 0)
+        {
+            test_event_signal(&probe.callback_release);
+            WaitForSingleObject(read_thread, INFINITE);
+            WaitForSingleObject(close_thread, INFINITE);
+            CloseHandle(read_thread);
+            CloseHandle(close_thread);
+            rc = 1;
+            goto CLEANUP;
+        }
 
         test_event_signal(&probe.callback_release);
         WaitForSingleObject(read_thread, INFINITE);
@@ -633,6 +691,50 @@ static int test_db_close_handle_waits_for_active_read(void)
         test_sleep_ms(50);
         if(expect_true(probe.close_finished == 0,
                        "ENT_DbCloseHandle should wait while an active read callback is still running") != 0)
+        {
+            test_event_signal(&probe.callback_release);
+            pthread_join(read_thread, NULL);
+            pthread_join(close_thread, NULL);
+            rc = 1;
+            goto CLEANUP;
+        }
+        if(expect_true(ENT_DbOpen(db_handle) == ENT_DBS_IN_USE,
+                       "ENT_DbOpen should reject a handle that is already closing") != 0)
+        {
+            test_event_signal(&probe.callback_release);
+            pthread_join(read_thread, NULL);
+            pthread_join(close_thread, NULL);
+            rc = 1;
+            goto CLEANUP;
+        }
+        if(expect_true(ENT_DbRead(db_handle,
+                                  "SELECT name FROM test_user WHERE id = 1;",
+                                  capture_single_name_row,
+                                  &capture) == ENT_DBS_IN_USE,
+                       "ENT_DbRead should reject a handle that is already closing") != 0)
+        {
+            test_event_signal(&probe.callback_release);
+            pthread_join(read_thread, NULL);
+            pthread_join(close_thread, NULL);
+            rc = 1;
+            goto CLEANUP;
+        }
+        if(expect_true(ENT_DbReadParams(db_handle,
+                                        "SELECT name FROM test_user WHERE id = ?;",
+                                        &read_param,
+                                        1,
+                                        capture_single_name_row,
+                                        &capture) == ENT_DBS_IN_USE,
+                       "ENT_DbReadParams should reject a handle that is already closing") != 0)
+        {
+            test_event_signal(&probe.callback_release);
+            pthread_join(read_thread, NULL);
+            pthread_join(close_thread, NULL);
+            rc = 1;
+            goto CLEANUP;
+        }
+        if(expect_true(ENT_DbCloseHandle(db_handle) == ENT_DBS_IN_USE,
+                       "A second ENT_DbCloseHandle should report the handle as already closing") != 0)
         {
             test_event_signal(&probe.callback_release);
             pthread_join(read_thread, NULL);
