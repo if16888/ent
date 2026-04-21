@@ -4,6 +4,7 @@
 #ifdef WIN32
 #include <windows.h>
 #else
+#include <pthread.h>
 #include <unistd.h>
 #endif
 
@@ -20,6 +21,37 @@ typedef struct DB_READ_CAPTURE {
     int column_num;
     char name[32];
 } DB_READ_CAPTURE;
+
+typedef struct TEST_EVENT {
+#ifdef WIN32
+    CRITICAL_SECTION lock;
+    CONDITION_VARIABLE cv;
+#else
+    pthread_mutex_t lock;
+    pthread_cond_t cv;
+#endif
+    int signaled;
+} TEST_EVENT;
+
+typedef struct DB_CLOSE_WAIT_PROBE {
+    TEST_EVENT callback_entered;
+    TEST_EVENT callback_release;
+    TEST_EVENT close_started;
+    volatile int callback_calls;
+    volatile int close_finished;
+} DB_CLOSE_WAIT_PROBE;
+
+typedef struct DB_READ_THREAD_CTX {
+    DB_HANDLE db_handle;
+    DB_CLOSE_WAIT_PROBE* probe;
+    MSG_ID_T status;
+} DB_READ_THREAD_CTX;
+
+typedef struct DB_CLOSE_THREAD_CTX {
+    DB_HANDLE db_handle;
+    DB_CLOSE_WAIT_PROBE* probe;
+    MSG_ID_T status;
+} DB_CLOSE_THREAD_CTX;
 
 static int expect_true(int condition, const char* message)
 {
@@ -106,6 +138,96 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle, const char* format, ...)
     return 0;
 }
 
+static void test_sleep_ms(int ms)
+{
+#ifdef WIN32
+    Sleep((DWORD)ms);
+#else
+    usleep((useconds_t)ms * 1000U);
+#endif
+}
+
+static int test_event_init(TEST_EVENT* ev)
+{
+    if(ev == NULL)
+    {
+        return 1;
+    }
+#ifdef WIN32
+    InitializeCriticalSection(&ev->lock);
+    InitializeConditionVariable(&ev->cv);
+#else
+    if(pthread_mutex_init(&ev->lock, NULL) != 0)
+    {
+        return 1;
+    }
+    if(pthread_cond_init(&ev->cv, NULL) != 0)
+    {
+        pthread_mutex_destroy(&ev->lock);
+        return 1;
+    }
+#endif
+    ev->signaled = 0;
+    return 0;
+}
+
+static void test_event_destroy(TEST_EVENT* ev)
+{
+    if(ev == NULL)
+    {
+        return;
+    }
+#ifdef WIN32
+    DeleteCriticalSection(&ev->lock);
+#else
+    pthread_cond_destroy(&ev->cv);
+    pthread_mutex_destroy(&ev->lock);
+#endif
+    ev->signaled = 0;
+}
+
+static void test_event_signal(TEST_EVENT* ev)
+{
+    if(ev == NULL)
+    {
+        return;
+    }
+#ifdef WIN32
+    EnterCriticalSection(&ev->lock);
+    ev->signaled = 1;
+    WakeAllConditionVariable(&ev->cv);
+    LeaveCriticalSection(&ev->lock);
+#else
+    pthread_mutex_lock(&ev->lock);
+    ev->signaled = 1;
+    pthread_cond_broadcast(&ev->cv);
+    pthread_mutex_unlock(&ev->lock);
+#endif
+}
+
+static void test_event_wait(TEST_EVENT* ev)
+{
+    if(ev == NULL)
+    {
+        return;
+    }
+#ifdef WIN32
+    EnterCriticalSection(&ev->lock);
+    while(!ev->signaled)
+    {
+        SleepConditionVariableCS(&ev->cv, &ev->lock, INFINITE);
+    }
+    LeaveCriticalSection(&ev->lock);
+#else
+    pthread_mutex_lock(&ev->lock);
+    while(!ev->signaled)
+    {
+        pthread_cond_wait(&ev->cv, &ev->lock);
+    }
+    pthread_mutex_unlock(&ev->lock);
+#endif
+}
+
 static int prepare_temp_db_path(char* db_path, size_t db_path_len)
 {
 #ifdef WIN32
@@ -188,6 +310,57 @@ static void capture_single_name_row(char** fields, char** row_res, long long row
             snprintf(capture->name, sizeof(capture->name), "%s", row_res[column_idx]);
         }
     }
+}
+
+static void blocking_read_callback(char** fields, char** row_res, long long row_num, int column_num, void* user_data)
+{
+    DB_CLOSE_WAIT_PROBE* probe = (DB_CLOSE_WAIT_PROBE*)user_data;
+    (void)fields;
+    (void)row_res;
+    (void)row_num;
+    (void)column_num;
+    if(probe == NULL)
+    {
+        return;
+    }
+    probe->callback_calls++;
+    test_event_signal(&probe->callback_entered);
+    test_event_wait(&probe->callback_release);
+}
+
+#ifdef WIN32
+static DWORD WINAPI db_read_thread_proc(LPVOID data)
+#else
+static void* db_read_thread_proc(void* data)
+#endif
+{
+    DB_READ_THREAD_CTX* ctx = (DB_READ_THREAD_CTX*)data;
+    ctx->status = ENT_DbRead(ctx->db_handle,
+                             "SELECT name FROM test_user WHERE id = 1;",
+                             blocking_read_callback,
+                             ctx->probe);
+#ifdef WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
+#ifdef WIN32
+static DWORD WINAPI db_close_thread_proc(LPVOID data)
+#else
+static void* db_close_thread_proc(void* data)
+#endif
+{
+    DB_CLOSE_THREAD_CTX* ctx = (DB_CLOSE_THREAD_CTX*)data;
+    test_event_signal(&ctx->probe->close_started);
+    ctx->status = ENT_DbCloseHandle(ctx->db_handle);
+    ctx->probe->close_finished = 1;
+#ifdef WIN32
+    return 0;
+#else
+    return NULL;
+#endif
 }
 
 static int reset_db_service(void)
@@ -312,6 +485,208 @@ static int test_db_close_rejects_live_handles(void)
     cleanup_temp_db_path(db_path);
     return expect_true(ENT_DbClose() == 0,
                        "ENT_DbClose should succeed after all live handles are closed");
+}
+
+static int test_db_close_handle_waits_for_active_read(void)
+{
+    char db_path[512];
+    DB_HANDLE db_handle = NULL;
+    DB_CLOSE_WAIT_PROBE probe;
+    DB_READ_THREAD_CTX read_ctx;
+    DB_CLOSE_THREAD_CTX close_ctx;
+    MSG_ID_T init_sts = 0;
+    int rc = 0;
+
+    memset(db_path, 0, sizeof(db_path));
+    memset(&probe, 0, sizeof(probe));
+    memset(&read_ctx, 0, sizeof(read_ctx));
+    memset(&close_ctx, 0, sizeof(close_ctx));
+
+    if(prepare_temp_db_path(db_path, sizeof(db_path)) != 0)
+    {
+        return 1;
+    }
+
+    if(test_event_init(&probe.callback_entered) != 0 ||
+       test_event_init(&probe.callback_release) != 0 ||
+       test_event_init(&probe.close_started) != 0)
+    {
+        test_event_destroy(&probe.callback_entered);
+        test_event_destroy(&probe.callback_release);
+        test_event_destroy(&probe.close_started);
+        cleanup_temp_db_path(db_path);
+        return 1;
+    }
+
+    init_sts = reset_db_service();
+    if(expect_true(init_sts == ENT_SYS_NORMAL || init_sts == ENT_SYS_ALREADY_INITIALIZED,
+                   "ENT_DbInit should initialize the DB service before concurrent close testing") != 0)
+    {
+        rc = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(ENT_DbInitHandle(&db_handle, SQLITE_TYPE, NULL, db_path, NULL, NULL, 0) == 0,
+                   "ENT_DbInitHandle should create a SQLite handle for concurrent close testing") != 0)
+    {
+        rc = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(ENT_DbWrite(db_handle, "CREATE TABLE test_user(id INTEGER PRIMARY KEY, name TEXT NOT NULL);", NULL, NULL) == 0,
+                   "ENT_DbWrite should create a SQLite table for concurrent close testing") != 0)
+    {
+        rc = 1;
+        goto HANDLE_CLEANUP;
+    }
+
+    if(expect_true(ENT_DbWrite(db_handle, "INSERT INTO test_user(name) VALUES('eve');", NULL, NULL) == 0,
+                   "ENT_DbWrite should insert a SQLite row for concurrent close testing") != 0)
+    {
+        rc = 1;
+        goto HANDLE_CLEANUP;
+    }
+
+    read_ctx.db_handle = db_handle;
+    read_ctx.probe = &probe;
+    read_ctx.status = ENT_DBS_RESULT_FAILED;
+
+    close_ctx.db_handle = db_handle;
+    close_ctx.probe = &probe;
+    close_ctx.status = ENT_DBS_RESULT_FAILED;
+
+#ifdef WIN32
+    {
+        HANDLE read_thread = CreateThread(NULL, 0, db_read_thread_proc, &read_ctx, 0, NULL);
+        HANDLE close_thread = NULL;
+        if(expect_true(read_thread != NULL,
+                       "read helper thread should start for concurrent close testing") != 0)
+        {
+            rc = 1;
+            goto HANDLE_CLEANUP;
+        }
+
+        test_event_wait(&probe.callback_entered);
+
+        close_thread = CreateThread(NULL, 0, db_close_thread_proc, &close_ctx, 0, NULL);
+        if(expect_true(close_thread != NULL,
+                       "close helper thread should start for concurrent close testing") != 0)
+        {
+            test_event_signal(&probe.callback_release);
+            WaitForSingleObject(read_thread, INFINITE);
+            CloseHandle(read_thread);
+            rc = 1;
+            goto HANDLE_CLEANUP;
+        }
+
+        test_event_wait(&probe.close_started);
+        test_sleep_ms(50);
+        if(expect_true(probe.close_finished == 0,
+                       "ENT_DbCloseHandle should wait while an active read callback is still running") != 0)
+        {
+            test_event_signal(&probe.callback_release);
+            WaitForSingleObject(read_thread, INFINITE);
+            WaitForSingleObject(close_thread, INFINITE);
+            CloseHandle(read_thread);
+            CloseHandle(close_thread);
+            rc = 1;
+            goto CLEANUP;
+        }
+
+        test_event_signal(&probe.callback_release);
+        WaitForSingleObject(read_thread, INFINITE);
+        WaitForSingleObject(close_thread, INFINITE);
+        CloseHandle(read_thread);
+        CloseHandle(close_thread);
+    }
+#else
+    {
+        pthread_t read_thread;
+        pthread_t close_thread;
+        if(expect_true(pthread_create(&read_thread, NULL, db_read_thread_proc, &read_ctx) == 0,
+                       "read helper thread should start for concurrent close testing") != 0)
+        {
+            rc = 1;
+            goto HANDLE_CLEANUP;
+        }
+
+        test_event_wait(&probe.callback_entered);
+
+        if(expect_true(pthread_create(&close_thread, NULL, db_close_thread_proc, &close_ctx) == 0,
+                       "close helper thread should start for concurrent close testing") != 0)
+        {
+            test_event_signal(&probe.callback_release);
+            pthread_join(read_thread, NULL);
+            rc = 1;
+            goto HANDLE_CLEANUP;
+        }
+
+        test_event_wait(&probe.close_started);
+        test_sleep_ms(50);
+        if(expect_true(probe.close_finished == 0,
+                       "ENT_DbCloseHandle should wait while an active read callback is still running") != 0)
+        {
+            test_event_signal(&probe.callback_release);
+            pthread_join(read_thread, NULL);
+            pthread_join(close_thread, NULL);
+            rc = 1;
+            goto CLEANUP;
+        }
+
+        test_event_signal(&probe.callback_release);
+        pthread_join(read_thread, NULL);
+        pthread_join(close_thread, NULL);
+    }
+#endif
+
+    if(expect_true(read_ctx.status == ENT_SYS_NORMAL,
+                   "ENT_DbRead should complete successfully after the blocked callback is released") != 0)
+    {
+        rc = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(close_ctx.status == ENT_SYS_NORMAL,
+                   "ENT_DbCloseHandle should complete successfully after the active read finishes") != 0)
+    {
+        rc = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(probe.callback_calls == 1,
+                   "blocking read callback should run exactly once during concurrent close testing") != 0)
+    {
+        rc = 1;
+        goto CLEANUP;
+    }
+
+    cleanup_temp_db_path(db_path);
+    if(expect_true(ENT_DbClose() == 0,
+                   "ENT_DbClose should succeed after concurrent close testing") != 0)
+    {
+        rc = 1;
+        goto CLEANUP_NO_DB;
+    }
+
+    test_event_destroy(&probe.callback_entered);
+    test_event_destroy(&probe.callback_release);
+    test_event_destroy(&probe.close_started);
+    return 0;
+
+HANDLE_CLEANUP:
+    if(db_handle != NULL)
+    {
+        ENT_DbCloseHandle(db_handle);
+    }
+CLEANUP:
+    test_event_signal(&probe.callback_release);
+    cleanup_temp_db_path(db_path);
+    ENT_DbClose();
+CLEANUP_NO_DB:
+    test_event_destroy(&probe.callback_entered);
+    test_event_destroy(&probe.callback_release);
+    test_event_destroy(&probe.close_started);
+    return rc;
 }
 
 static int test_sqlite_open_rejects_missing_database_path(void)
@@ -817,6 +1192,11 @@ int main(void)
     }
 
     if(test_db_close_rejects_live_handles() != 0)
+    {
+        return 1;
+    }
+
+    if(test_db_close_handle_waits_for_active_read() != 0)
     {
         return 1;
     }
