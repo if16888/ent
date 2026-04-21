@@ -362,35 +362,6 @@ static void iENT_DbLeaveHandleOp(DB_CFG* dbCfg)
     }
     iENT_DbLifecycleUnlock(dbCfg);
 }
-
-static MSG_ID_T iENT_DbReplaceString(char** target, const char* value)
-{
-    char* newValue = NULL;
-
-    if(target == NULL)
-    {
-        return ENT_DBS_BAD_ARGUMENT;
-    }
-
-    if(value == NULL)
-    {
-        return ENT_SYS_NORMAL;
-    }
-
-    newValue = strdup(value);
-    if(newValue == NULL)
-    {
-        IENT_LOG_ERROR("Database string duplication failed.\n");
-        return ENT_DBS_ALLOC_FAILED;
-    }
-
-    if(*target != NULL)
-    {
-        free(*target);
-    }
-    *target = newValue;
-    return ENT_SYS_NORMAL;
-}
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :iENT_DbReInit
@@ -610,13 +581,14 @@ ENT_PUBLIC MSG_ID_T  ENT_DbClose()
         IENT_LOG_WARN("Database service still has [%ld] live handle(s).\n", sDbNum);
         return ENT_DBS_IN_USE;
     }
+    sDbMutexInit = false;
+    iENT_DbGlobalUnlock();
 #ifdef WIN32
     DeleteCriticalSection(&sDbMutex);
 #else
     pthread_mutex_destroy(&sDbMutex);
 #endif
     IENT_LOG_PRINT("DeleteCriticalSection.\n");
-    sDbMutexInit = false;
     return ENT_SYS_NORMAL;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
