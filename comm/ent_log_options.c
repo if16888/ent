@@ -56,6 +56,11 @@ MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const voi
 #else
     pthread_mutex_lock(&log->cs);
 #endif
+    if(iENT_LogStateGet(log) != ENT_LOG_HANDLE_ACTIVE_E)
+    {
+        sts = -3;
+        goto END_OF_ROUTINE;
+    }
 
     switch(option)
     {
@@ -65,33 +70,36 @@ MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const voi
             break;
 
         case ENT_LOG_PATH_E:
-            if(log->logPath)
-            {
-                free(log->logPath);
-                log->logPath = NULL;
-            }
-            log->logPath = strdup((const char*)arg);
-            if(log->logPath == NULL)
+        {
+            char* newPath = NULL;
+            const char* newPathArg = (const char*)arg;
+
+            newPath = strdup(newPathArg);
+            if(newPath == NULL)
             {
                 sts = -3;
                 fprintf(stderr, "Func [%s] Line [%d],strdup failed.\n", "ENT_LogSetOption", __LINE__);
                 goto END_OF_ROUTINE;
             }
-            len = strlen(log->logPath);
-            if(len > 0 && (log->logPath[len - 1] == '\\' || log->logPath[len - 1] == '/'))
+            len = strlen(newPath);
+            if(len > 0 && (newPath[len - 1] == '\\' || newPath[len - 1] == '/'))
             {
-                log->logPath[len - 1] = '\0';
+                newPath[len - 1] = '\0';
             }
-            sts = iENT_LogPathCheck(log->logPath);
+            sts = iENT_LogPathCheck(newPath);
             if(sts < 0)
             {
-                if(log->logPath)
-                {
-                    free(log->logPath);
-                    log->logPath = NULL;
-                }
+                free(newPath);
+                goto END_OF_ROUTINE;
             }
+            if(log->logPath)
+            {
+                free(log->logPath);
+                log->logPath = NULL;
+            }
+            log->logPath = newPath;
             break;
+        }
 
         case ENT_LOG_MAX_E:
         {

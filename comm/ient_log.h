@@ -124,7 +124,6 @@ MSG_ID_T      iENT_LogAcquireWriter(ENT_LOG_CTX_INTERNAL** logCtx, ENT_LOG logHa
 void          iENT_LogReleaseWriter(ENT_LOG_CTX_INTERNAL* log);
 ENT_LOG_HANDLE_STATE_E iENT_LogStateGet(const ENT_LOG_CTX_INTERNAL* log);
 void          iENT_LogStateSet(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_HANDLE_STATE_E state);
-int           iENT_LogIsClosing(const ENT_LOG_CTX_INTERNAL* log);
 int           iENT_LogActiveGet(const ENT_LOG_CTX_INTERNAL* log);
 void          iENT_LogActiveInc(ENT_LOG_CTX_INTERNAL* log);
 int           iENT_LogActiveDec(ENT_LOG_CTX_INTERNAL* log);

@@ -3,7 +3,9 @@
 #include <string.h>
 #include <time.h>
 
-#ifndef WIN32
+#ifdef WIN32
+#include <Windows.h>
+#else
 #include <pthread.h>
 #include <dirent.h>
 #include <errno.h>
@@ -14,6 +16,7 @@
 #endif
 
 #include "ent_log.h"
+#include "ient_log.h"
 #include "ient_comm.h"
 #include "ient_runtime.h"
 
@@ -92,6 +95,114 @@ static int make_temp_dir(char* buffer, size_t size)
     return mkdtemp(buffer) == NULL ? -1 : 0;
 }
 #endif
+
+typedef struct TEST_EVENT_TAG
+{
+#ifdef WIN32
+    HANDLE event;
+#else
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    int signaled;
+#endif
+} TEST_EVENT;
+
+static int test_event_init(TEST_EVENT* e)
+{
+#ifdef WIN32
+    e->event = CreateEventA(NULL, TRUE, FALSE, NULL);
+    return e->event == NULL ? -1 : 0;
+#else
+    if(pthread_mutex_init(&e->mutex, NULL) != 0)
+    {
+        return -1;
+    }
+    if(pthread_cond_init(&e->cond, NULL) != 0)
+    {
+        pthread_mutex_destroy(&e->mutex);
+        return -1;
+    }
+    e->signaled = 0;
+    return 0;
+#endif
+}
+
+static void test_event_signal(TEST_EVENT* e)
+{
+#ifdef WIN32
+    SetEvent(e->event);
+#else
+    pthread_mutex_lock(&e->mutex);
+    e->signaled = 1;
+    pthread_cond_broadcast(&e->cond);
+    pthread_mutex_unlock(&e->mutex);
+#endif
+}
+
+static int test_event_wait(TEST_EVENT* e, int timeoutMs)
+{
+#ifdef WIN32
+    DWORD rc = WaitForSingleObject(e->event, timeoutMs < 0 ? INFINITE : (DWORD)timeoutMs);
+    return rc == WAIT_OBJECT_0 ? 0 : -1;
+#else
+    int rc = 0;
+    struct timespec ts;
+    struct timeval tv;
+    if(timeoutMs < 0)
+    {
+        pthread_mutex_lock(&e->mutex);
+        while(!e->signaled)
+        {
+            pthread_cond_wait(&e->cond, &e->mutex);
+        }
+        pthread_mutex_unlock(&e->mutex);
+        return 0;
+    }
+    gettimeofday(&tv, NULL);
+    ts.tv_sec = tv.tv_sec + timeoutMs / 1000;
+    ts.tv_nsec = (tv.tv_usec * 1000) + (timeoutMs % 1000) * 1000000L;
+    if(ts.tv_nsec >= 1000000000L)
+    {
+        ts.tv_sec++;
+        ts.tv_nsec -= 1000000000L;
+    }
+    pthread_mutex_lock(&e->mutex);
+    while(!e->signaled)
+    {
+        rc = pthread_cond_timedwait(&e->cond, &e->mutex, &ts);
+        if(rc == ETIMEDOUT)
+        {
+            pthread_mutex_unlock(&e->mutex);
+            return -1;
+        }
+    }
+    pthread_mutex_unlock(&e->mutex);
+    return 0;
+#endif
+}
+
+static void test_event_destroy(TEST_EVENT* e)
+{
+#ifdef WIN32
+    if(e->event != NULL)
+    {
+        CloseHandle(e->event);
+        e->event = NULL;
+    }
+#else
+    pthread_cond_destroy(&e->cond);
+    pthread_mutex_destroy(&e->mutex);
+#endif
+}
+
+static void test_sleep_ms(int ms)
+{
+#ifdef WIN32
+    Sleep((DWORD)ms);
+#else
+    usleep((useconds_t)ms * 1000);
+#endif
+}
 
 static void format_log_file_path(char* buffer, size_t size, const char* dir, const char* moduleName)
 {
@@ -384,6 +495,188 @@ static int test_default_log_handle_lifecycle(void)
     }
 
     return expect_true(ENT_LogClose() == 0, "ENT_LogClose should shut down the log subsystem");
+}
+
+static int test_log_service_close_rejects_live_handle(void)
+{
+    ENT_LOG logHandle = NULL;
+
+    if(expect_true(ENT_LogInit() == 0, "ENT_LogInit should initialize before service-close checks") != 0)
+    {
+        return 1;
+    }
+    if(expect_true(ENT_LogInitHandle(&logHandle, "SvcCloseModule", ".") == 0,
+                   "ENT_LogInitHandle should create a handle for service-close checks") != 0)
+    {
+        ENT_LogClose();
+        return 1;
+    }
+    if(expect_true(ENT_LogClose() == -3,
+                   "ENT_LogClose should reject shutdown while live handles exist") != 0)
+    {
+        ENT_LogCloseHandle(logHandle);
+        ENT_LogClose();
+        return 1;
+    }
+    if(expect_true(ENT_LogCloseHandle(logHandle) == 0,
+                   "ENT_LogCloseHandle should close live handle before service close") != 0)
+    {
+        ENT_LogClose();
+        return 1;
+    }
+    return expect_true(ENT_LogClose() == 0, "ENT_LogClose should succeed after all handles close");
+}
+
+typedef struct TEST_CLOSE_THREAD_CTX_TAG
+{
+    ENT_LOG logHandle;
+    TEST_EVENT done;
+    MSG_ID_T closeRc;
+} TEST_CLOSE_THREAD_CTX;
+
+#ifdef WIN32
+static DWORD WINAPI close_handle_thread_proc(LPVOID data)
+#else
+static void* close_handle_thread_proc(void* data)
+#endif
+{
+    TEST_CLOSE_THREAD_CTX* ctx = (TEST_CLOSE_THREAD_CTX*)data;
+    ctx->closeRc = ENT_LogCloseHandle(ctx->logHandle);
+    test_event_signal(&ctx->done);
+#ifdef WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
+static int test_log_close_handle_blocks_until_active_writer_released(void)
+{
+    ENT_LOG logHandle = NULL;
+    ENT_LOG_CTX_INTERNAL* writerCtx = NULL;
+    TEST_CLOSE_THREAD_CTX closeCtx;
+    ENT_LOG_LEV_E level = LOG_LEV_INFO_E;
+    MSG_ID_T sts = 0;
+    int rc = 1;
+#ifdef WIN32
+    HANDLE th = NULL;
+#else
+    pthread_t th;
+#endif
+
+    memset(&closeCtx, 0, sizeof(closeCtx));
+
+    if(expect_true(ENT_LogInit() == 0, "ENT_LogInit should initialize before close/writer race checks") != 0)
+    {
+        return 1;
+    }
+    if(expect_true(ENT_LogInitHandle(&logHandle, "CloseWaitModule", ".") == 0,
+                   "ENT_LogInitHandle should create handle for close/writer race checks") != 0)
+    {
+        ENT_LogClose();
+        return 1;
+    }
+    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_LEVEL_E, &level) == 0,
+                   "ENT_LogSetOption should set level before close/writer race checks") != 0)
+    {
+        ENT_LogCloseHandle(logHandle);
+        ENT_LogClose();
+        return 1;
+    }
+    sts = iENT_LogAcquireWriter(&writerCtx, logHandle);
+    if(expect_true(sts == 0, "iENT_LogAcquireWriter should acquire active writer slot for race checks") != 0)
+    {
+        ENT_LogCloseHandle(logHandle);
+        ENT_LogClose();
+        return 1;
+    }
+    if(expect_true(test_event_init(&closeCtx.done) == 0, "test_event_init should initialize done event") != 0)
+    {
+        iENT_LogReleaseWriter(writerCtx);
+        ENT_LogCloseHandle(logHandle);
+        ENT_LogClose();
+        return 1;
+    }
+    closeCtx.logHandle = logHandle;
+#ifdef WIN32
+    th = CreateThread(NULL, 0, close_handle_thread_proc, &closeCtx, 0, NULL);
+    if(expect_true(th != NULL, "CreateThread should start close worker") != 0)
+#else
+    if(expect_true(pthread_create(&th, NULL, close_handle_thread_proc, &closeCtx) == 0,
+                   "pthread_create should start close worker") != 0)
+#endif
+    {
+        test_event_destroy(&closeCtx.done);
+        iENT_LogReleaseWriter(writerCtx);
+        ENT_LogCloseHandle(logHandle);
+        ENT_LogClose();
+        return 1;
+    }
+
+    test_sleep_ms(50);
+    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_LEVEL_E, &level) == -3,
+                   "ENT_LogSetOption should reject updates while handle is closing") != 0)
+    {
+        iENT_LogReleaseWriter(writerCtx);
+        goto join_cleanup;
+    }
+    if(expect_true(ENT_LogPrint(logHandle, "should reject while closing\n") == -3,
+                   "ENT_LogPrint should reject new writes while handle is closing") != 0)
+    {
+        iENT_LogReleaseWriter(writerCtx);
+        goto join_cleanup;
+    }
+    if(expect_true(ENT_LogCloseHandle(logHandle) == -3,
+                   "ENT_LogCloseHandle second close should report busy while closing") != 0)
+    {
+        iENT_LogReleaseWriter(writerCtx);
+        goto join_cleanup;
+    }
+    if(expect_true(test_event_wait(&closeCtx.done, 100) != 0,
+                   "ENT_LogCloseHandle should wait until active writer is released") != 0)
+    {
+        iENT_LogReleaseWriter(writerCtx);
+        goto join_cleanup;
+    }
+
+    iENT_LogReleaseWriter(writerCtx);
+    writerCtx = NULL;
+    if(expect_true(test_event_wait(&closeCtx.done, 2000) == 0,
+                   "ENT_LogCloseHandle should finish after writer release") != 0)
+    {
+        goto join_cleanup;
+    }
+    if(expect_true(closeCtx.closeRc == 0, "close worker should report successful handle close") != 0)
+    {
+        goto join_cleanup;
+    }
+    if(expect_true(ENT_LogClose() == 0, "ENT_LogClose should succeed after race-test handle closes") != 0)
+    {
+        goto join_cleanup;
+    }
+    rc = 0;
+
+join_cleanup:
+#ifdef WIN32
+    if(th != NULL)
+    {
+        WaitForSingleObject(th, INFINITE);
+        CloseHandle(th);
+    }
+#else
+    pthread_join(th, NULL);
+#endif
+    if(writerCtx != NULL)
+    {
+        iENT_LogReleaseWriter(writerCtx);
+    }
+    if(logHandle != NULL && closeCtx.closeRc != 0)
+    {
+        ENT_LogCloseHandle(logHandle);
+        ENT_LogClose();
+    }
+    test_event_destroy(&closeCtx.done);
+    return rc;
 }
 
 static int test_log_close_rejects_invalid_handle(void)
@@ -1102,6 +1395,8 @@ int main(void)
     failures += test_log_rejects_uninitialized_calls();
     failures += test_explicit_context_isolated_from_default();
     failures += test_default_log_handle_lifecycle();
+    failures += test_log_service_close_rejects_live_handle();
+    failures += test_log_close_handle_blocks_until_active_writer_released();
     failures += test_log_close_rejects_invalid_handle();
     failures += test_log_set_option_validates_arguments();
     failures += test_log_path_option_trims_trailing_separator_and_writes_file();
