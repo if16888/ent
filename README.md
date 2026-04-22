@@ -611,6 +611,11 @@ process
 - `-2`：invalid handle / invalid context
 - `-3`：busy / in-use / closing 状态冲突
 
+<<<<<<< codex/refactor-log-module-and-improve-testing-h4doz4
+当前代码中通过 `ENT_LOG_RC_*` 宏来表达以上语义，这组宏目前定义在 `inc/ent_log.h`（尚未切入 `msg/ent.msg` 生成链路）。
+
+=======
+>>>>>>> master
 ---
 
 ## 12. Lua 说明

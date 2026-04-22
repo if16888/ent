@@ -38,6 +38,9 @@
 #define ENTLOG_TAG     (0x6AFEFE6A)
 #define ENTLOG_CTX_TAG (0x6AFEFE6B)
 
+<<<<<<< codex/refactor-log-module-and-improve-testing-h4doz4
+/* ENT_LOG_RC_* return codes are defined in public header inc/ent_log.h. */
+=======
 /*
  * Log module return-code semantics (legacy numeric style):
  *   0  : success
@@ -51,6 +54,7 @@
 #define ENT_LOG_RC_ERROR          ((MSG_ID_T)-1)
 #define ENT_LOG_RC_INVALID_HANDLE ((MSG_ID_T)-2)
 #define ENT_LOG_RC_IN_USE         ((MSG_ID_T)-3)
+>>>>>>> master
 
 typedef enum ENT_LOG_HANDLE_STATE_TAG
 {
