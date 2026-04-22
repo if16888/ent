@@ -460,6 +460,7 @@ MSG_ID_T iENT_LogClose(void)
 #endif
         return -3;
     }
+    sLogMutexInit = false;
 #ifdef WIN32
     LeaveCriticalSection(&sLogMutex);
     DeleteCriticalSection(&sLogMutex);
@@ -469,7 +470,6 @@ MSG_ID_T iENT_LogClose(void)
 #endif
 
     fprintf(stderr, "Func [%s] Line [%d],sucessful.\n", "ENT_LogClose", __LINE__);
-    sLogMutexInit = false;
     return 0;
 }
 

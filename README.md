@@ -590,6 +590,8 @@ process
 1. 先关闭所有日志句柄（包括默认句柄和私有句柄）
 2. 再调用 `ENT_LogClose()` 关闭日志服务
 
+`ENT_LogClose()` 只负责 service 级别资源收口，不会替代 `ENT_LogCloseHandle()` 去强行回收仍在使用中的句柄。
+
 #### closing 状态下的拒绝行为
 
 日志句柄进入 `CLOSING` 后：
