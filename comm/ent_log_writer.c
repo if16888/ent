@@ -55,7 +55,7 @@ static MSG_ID_T iENT_LogRollCheck(ENT_LOG logHandle, time_t nowTime)
     }
 
     if(log->nextCreate > nowTime)
-        return 1;
+        return ENT_LOG_RC_NON_FATAL;
 
     if(log->logFp == NULL || log->nextCreate + 86400 < nowTime)
     {
@@ -152,7 +152,7 @@ MSG_ID_T iENT_LogFormatMessage(const char* format,
 
     if(format == NULL || stackBuf == NULL || stackBufLen == 0 || msgBuf == NULL || msgLen == NULL)
     {
-        return -1;
+        return ENT_LOG_RC_ERROR;
     }
 
     va_copy(writeArgs, va_args);
@@ -177,13 +177,13 @@ MSG_ID_T iENT_LogFormatMessage(const char* format,
         requiredLen = _vscprintf(format, sizeArgs);
         va_end(sizeArgs);
 #else
-        return -1;
+        return ENT_LOG_RC_ERROR;
 #endif
     }
 
     if(requiredLen < 0)
     {
-        return -1;
+        return ENT_LOG_RC_ERROR;
     }
 
     if((size_t)requiredLen + 1 > stackBufLen)
@@ -191,7 +191,7 @@ MSG_ID_T iENT_LogFormatMessage(const char* format,
         targetBuf = (char*)malloc((size_t)requiredLen + 1);
         if(targetBuf == NULL)
         {
-            return -1;
+            return ENT_LOG_RC_ERROR;
         }
     }
 
@@ -203,7 +203,7 @@ MSG_ID_T iENT_LogFormatMessage(const char* format,
         {
             free(targetBuf);
         }
-        return -1;
+        return ENT_LOG_RC_ERROR;
     }
     va_end(writeArgs);
 
@@ -356,7 +356,7 @@ MSG_ID_T iENT_LogFormatPrefix(ENT_LOG_LEV_E logLevel,
 
     if(prefixBuf == NULL || prefixLen == NULL || rollTime == NULL)
     {
-        return -1;
+        return ENT_LOG_RC_ERROR;
     }
 
     _ftime(&nowTmb);
@@ -381,7 +381,7 @@ MSG_ID_T iENT_LogFormatPrefix(ENT_LOG_LEV_E logLevel,
 
     if(prefixBuf == NULL || prefixLen == NULL || rollTime == NULL)
     {
-        return -1;
+        return ENT_LOG_RC_ERROR;
     }
 
     gettimeofday(&nowTmv, NULL);
@@ -403,7 +403,7 @@ MSG_ID_T iENT_LogFormatPrefix(ENT_LOG_LEV_E logLevel,
 
     if(writeLen < 0 || (size_t)writeLen >= prefixBufLen)
     {
-        return -1;
+        return ENT_LOG_RC_ERROR;
     }
 
     *prefixLen = (size_t)writeLen;
@@ -612,12 +612,12 @@ MSG_ID_T iENT_LogStartBufferThread(ENT_LOG_CTX_INTERNAL* log)
     log->bufferThread = CreateThread(NULL, 0, iENT_LogBufferThreadMain, log, 0, NULL);
     if(log->bufferThread == NULL)
     {
-        sts = -3;
+        sts = ENT_LOG_RC_IN_USE;
     }
 #else
     if(pthread_create(&log->bufferThread, NULL, iENT_LogBufferThreadMain, log) != 0)
     {
-        sts = -3;
+        sts = ENT_LOG_RC_IN_USE;
     }
 #endif
 
@@ -695,12 +695,12 @@ MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX_INTERNAL* log,
 
     if(log == NULL || msg == NULL || msgLen == 0)
     {
-        return -1;
+        return ENT_LOG_RC_ERROR;
     }
 
     if(!iENT_LogFastFlagGet(&log->isBufferFast))
     {
-        return 1;
+        return ENT_LOG_RC_NON_FATAL;
     }
 
     usePool = msgLen <= 1024;
@@ -717,7 +717,7 @@ MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX_INTERNAL* log,
 #else
         pthread_mutex_unlock(&log->cs);
 #endif
-        return 1;
+        return ENT_LOG_RC_NON_FATAL;
     }
 
     if(usePool && log->poolFreeHead != NULL)
@@ -748,7 +748,7 @@ MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX_INTERNAL* log,
         }
         if(node == NULL)
         {
-            return -1;
+            return ENT_LOG_RC_ERROR;
         }
     }
 
@@ -783,7 +783,7 @@ MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX_INTERNAL* log,
         {
             free(node);
         }
-        return 1;
+        return ENT_LOG_RC_NON_FATAL;
     }
 
     if(log->bufferTail != NULL)
@@ -874,7 +874,7 @@ MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_LEV_E logLevel, const
 
     if(iENT_LogFormatMessage(format, va_args, stackBuf, sizeof(stackBuf), &msgBuf, &msgLen) < 0)
     {
-        return -1;
+        return ENT_LOG_RC_ERROR;
     }
 
     if(iENT_LogFormatPrefix(logLevel, prefixBuf, sizeof(prefixBuf), &prefixLen, &rollTime) < 0)
@@ -883,7 +883,7 @@ MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_LEV_E logLevel, const
         {
             free(msgBuf);
         }
-        return -1;
+        return ENT_LOG_RC_ERROR;
     }
 
     lineLen = prefixLen + msgLen;
@@ -896,7 +896,7 @@ MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_LEV_E logLevel, const
             {
                 free(msgBuf);
             }
-            return -1;
+            return ENT_LOG_RC_ERROR;
         }
     }
     memcpy(lineBuf, prefixBuf, prefixLen);

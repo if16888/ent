@@ -38,6 +38,20 @@
 #define ENTLOG_TAG     (0x6AFEFE6A)
 #define ENTLOG_CTX_TAG (0x6AFEFE6B)
 
+/*
+ * Log module return-code semantics (legacy numeric style):
+ *   0  : success
+ *   1  : non-fatal/no-op (already initialized/opened, filtered-out write, etc.)
+ *  -1  : generic failure (uninitialized service, bad argument, or runtime failure)
+ *  -2  : invalid handle/context
+ *  -3  : in-use / busy / closing state conflict
+ */
+#define ENT_LOG_RC_OK             ((MSG_ID_T)0)
+#define ENT_LOG_RC_NON_FATAL      ((MSG_ID_T)1)
+#define ENT_LOG_RC_ERROR          ((MSG_ID_T)-1)
+#define ENT_LOG_RC_INVALID_HANDLE ((MSG_ID_T)-2)
+#define ENT_LOG_RC_IN_USE         ((MSG_ID_T)-3)
+
 typedef enum ENT_LOG_HANDLE_STATE_TAG
 {
     ENT_LOG_HANDLE_CREATED_E = 0,

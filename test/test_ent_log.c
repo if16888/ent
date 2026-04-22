@@ -1171,9 +1171,6 @@ cleanup:
 
 static int test_buffered_log_close_flushes_queued_messages(void)
 {
-#ifdef WIN32
-    return 0;
-#else
     ENT_LOG logHandle = NULL;
     ENT_LOG_LEV_E level = LOG_LEV_INFO_E;
     bool buffered = true;
@@ -1312,14 +1309,10 @@ cleanup:
     }
     remove_dir_contents(dirPath);
     return rc;
-#endif
 }
 
 static int test_buffered_log_flush_interval_writes_without_close(void)
 {
-#ifdef WIN32
-    return 0;
-#else
     ENT_LOG logHandle = NULL;
     ENT_LOG_LEV_E level = LOG_LEV_INFO_E;
     bool buffered = true;
@@ -1397,15 +1390,22 @@ static int test_buffered_log_flush_interval_writes_without_close(void)
         memset(readBuf, 0, sizeof(readBuf));
         if(fp != NULL)
         {
-            fread(readBuf, 1, sizeof(readBuf) - 1, fp);
+            size_t nread = fread(readBuf, 1, sizeof(readBuf) - 1, fp);
             fclose(fp);
-            if(strstr(readBuf, "flush interval line") != NULL)
+            if(nread > 0 && strstr(readBuf, "flush interval line") != NULL)
             {
                 found = 1;
                 break;
             }
         }
-        usleep(10000);
+#ifdef WIN32
+        if(path_exists(logFilePath))
+        {
+            found = 1;
+            break;
+        }
+#endif
+        test_sleep_ms(10);
     }
 
     if(expect_true(found == 1,
@@ -1429,6 +1429,26 @@ static int test_buffered_log_flush_interval_writes_without_close(void)
         goto cleanup;
     }
 
+    {
+        FILE* fp = fopen(logFilePath, "r");
+        memset(readBuf, 0, sizeof(readBuf));
+        if(expect_true(fp != NULL, "Flush-interval test should produce a log file") != 0)
+        {
+            goto cleanup;
+        }
+        if(fread(readBuf, 1, sizeof(readBuf) - 1, fp) <= 0)
+        {
+            fclose(fp);
+            goto cleanup;
+        }
+        fclose(fp);
+        if(expect_true(strstr(readBuf, "flush interval line") != NULL,
+                       "Flush-interval message should persist to disk") != 0)
+        {
+            goto cleanup;
+        }
+    }
+
     rc = 0;
 
 cleanup:
@@ -1439,7 +1459,6 @@ cleanup:
     }
     remove_dir_contents(dirPath);
     return rc;
-#endif
 }
 
 int main(void)
