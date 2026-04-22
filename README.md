@@ -590,6 +590,8 @@ process
 1. 先关闭所有日志句柄（包括默认句柄和私有句柄）
 2. 再调用 `ENT_LogClose()` 关闭日志服务
 
+`ENT_LogClose()` 只负责 service 级别资源收口，不会替代 `ENT_LogCloseHandle()` 去强行回收仍在使用中的句柄。
+
 #### closing 状态下的拒绝行为
 
 日志句柄进入 `CLOSING` 后：
@@ -598,6 +600,18 @@ process
 - 新配置（`ENT_LogSetOption`）会被拒绝
 
 这可以避免 close 期间出现“边写边销毁”或“先释放旧配置后新配置校验失败”导致的状态破坏。
+
+#### 当前日志返回值语义（legacy）
+
+日志模块当前仍使用 `0 / 1 / -1 / -2 / -3` 这组历史返回值，语义统一如下：
+
+- `0`：成功
+- `1`：非失败状态（例如 already initialized/already open，或日志级别过滤导致 no-op）
+- `-1`：通用失败（参数错误、未初始化、或运行期失败）
+- `-2`：invalid handle / invalid context
+- `-3`：busy / in-use / closing 状态冲突
+
+当前代码中通过 `ENT_LOG_RC_*` 宏来表达以上语义，这组宏目前定义在 `inc/ent_log.h`（尚未切入 `msg/ent.msg` 生成链路）。
 
 ---
 

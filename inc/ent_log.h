@@ -24,6 +24,20 @@
 typedef void*  ENT_LOG;
 typedef struct ENT_LOG_CTX_TAG*  ENT_LOG_CTX;
 
+/*
+ * Public log return-code semantics (current legacy style):
+ *   0  success
+ *   1  non-fatal/no-op (already initialized/opened, log filtered by level, etc.)
+ *  -1  generic failure (bad argument / uninitialized / runtime error)
+ *  -2  invalid handle or invalid context
+ *  -3  busy/in-use/closing state conflict
+ */
+#define ENT_LOG_RC_OK             ((MSG_ID_T)0)
+#define ENT_LOG_RC_NON_FATAL      ((MSG_ID_T)1)
+#define ENT_LOG_RC_ERROR          ((MSG_ID_T)-1)
+#define ENT_LOG_RC_INVALID_HANDLE ((MSG_ID_T)-2)
+#define ENT_LOG_RC_IN_USE         ((MSG_ID_T)-3)
+
 typedef enum
 {
     ENT_LOG_DEBUG_E = 0x01,

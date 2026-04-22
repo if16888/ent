@@ -38,6 +38,8 @@
 #define ENTLOG_TAG     (0x6AFEFE6A)
 #define ENTLOG_CTX_TAG (0x6AFEFE6B)
 
+/* ENT_LOG_RC_* return codes are defined in public header inc/ent_log.h. */
+
 typedef enum ENT_LOG_HANDLE_STATE_TAG
 {
     ENT_LOG_HANDLE_CREATED_E = 0,

@@ -55,6 +55,17 @@ jobs:
         shell: pwsh
         run: .\scripts\run-ci-windows.ps1 build
 
+      - name: Run test_ent_log (Windows explicit)
+        shell: pwsh
+        run: |
+          Push-Location build
+          try {
+            ctest -C Release --output-on-failure -R "^test_ent_log$"
+          }
+          finally {
+            Pop-Location
+          }
+
       - name: Test
         shell: pwsh
         run: .\scripts\run-ci-windows.ps1 test
