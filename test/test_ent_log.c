@@ -5,6 +5,7 @@
 
 #ifdef WIN32
 #include <Windows.h>
+#include <direct.h>
 #else
 #include <pthread.h>
 #include <dirent.h>
@@ -23,6 +24,11 @@
 /* The log implementation is now split across core/writer/options/compat sources. */
 
 ENT_CTX gEntCtx;
+
+ENT_CTX* iENT_RuntimeActiveCtx(void)
+{
+    return &gEntCtx;
+}
 
 typedef struct TEST_BAD_LOG_CTX
 {
@@ -44,21 +50,49 @@ static int expect_true(int condition, const char* message)
 static int path_exists(const char* path)
 {
 #ifdef WIN32
-    FILE* fp = fopen(path, "r");
-    if(fp != NULL)
-    {
-        fclose(fp);
-        return 1;
-    }
-    return 0;
+    DWORD attrs = GetFileAttributesA(path);
+    return attrs != INVALID_FILE_ATTRIBUTES;
 #else
     return access(path, F_OK) == 0;
 #endif
 }
 
-#ifndef WIN32
 static void remove_dir_contents(const char* path)
 {
+#ifdef WIN32
+    WIN32_FIND_DATAA findData;
+    HANDLE findHandle = INVALID_HANDLE_VALUE;
+    char pattern[512];
+    char child[512];
+
+    snprintf(pattern, sizeof(pattern), "%s\\*", path);
+    findHandle = FindFirstFileA(pattern, &findData);
+    if(findHandle == INVALID_HANDLE_VALUE)
+    {
+        RemoveDirectoryA(path);
+        return;
+    }
+
+    do
+    {
+        if(strcmp(findData.cFileName, ".") == 0 || strcmp(findData.cFileName, "..") == 0)
+        {
+            continue;
+        }
+        snprintf(child, sizeof(child), "%s\\%s", path, findData.cFileName);
+        if(findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+        {
+            remove_dir_contents(child);
+        }
+        else
+        {
+            DeleteFileA(child);
+        }
+    } while(FindNextFileA(findHandle, &findData));
+
+    FindClose(findHandle);
+    RemoveDirectoryA(path);
+#else
     DIR* dir = opendir(path);
     struct dirent* entry = NULL;
     char child[512];
@@ -81,10 +115,37 @@ static void remove_dir_contents(const char* path)
 
     closedir(dir);
     rmdir(path);
+#endif
 }
 
 static int make_temp_dir(char* buffer, size_t size)
 {
+#ifdef WIN32
+    char tempPath[MAX_PATH];
+    char tempFile[MAX_PATH];
+
+    if(GetTempPathA(MAX_PATH, tempPath) == 0)
+    {
+        return -1;
+    }
+    if(GetTempFileNameA(tempPath, "ent", 0, tempFile) == 0)
+    {
+        return -1;
+    }
+    DeleteFileA(tempFile);
+    if(CreateDirectoryA(tempFile, NULL) == 0)
+    {
+        return -1;
+    }
+
+    if(strlen(tempFile) + 1 > size)
+    {
+        remove_dir_contents(tempFile);
+        return -1;
+    }
+    snprintf(buffer, size, "%s", tempFile);
+    return 0;
+#else
     const char* templateStr = "/tmp/ent_log_test_XXXXXX";
     if(size < strlen(templateStr) + 1)
     {
@@ -93,8 +154,8 @@ static int make_temp_dir(char* buffer, size_t size)
 
     snprintf(buffer, size, "%s", templateStr);
     return mkdtemp(buffer) == NULL ? -1 : 0;
-}
 #endif
+}
 
 typedef struct TEST_EVENT_TAG
 {
@@ -217,8 +278,9 @@ static void format_log_file_path(char* buffer, size_t size, const char* dir, con
 
     snprintf(buffer,
              size,
-             "%s/%s_%04d%02d%02d.log",
+             "%s%c%s_%04d%02d%02d.log",
              dir,
+             ENT_FILE_SEP[0],
              moduleName,
              nowTm.tm_year + 1900,
              nowTm.tm_mon + 1,
@@ -759,9 +821,6 @@ static int test_log_set_option_validates_arguments(void)
 
 static int test_log_path_option_trims_trailing_separator_and_writes_file(void)
 {
-#ifdef WIN32
-    return 0;
-#else
     ENT_LOG logHandle = NULL;
     char dirPath[256];
     char dirWithSlash[258];
@@ -776,7 +835,7 @@ static int test_log_path_option_trims_trailing_separator_and_writes_file(void)
         return 1;
     }
 
-    snprintf(dirWithSlash, sizeof(dirWithSlash), "%s/", dirPath);
+    snprintf(dirWithSlash, sizeof(dirWithSlash), "%s%s", dirPath, ENT_FILE_SEP);
     format_log_file_path(logFilePath, sizeof(logFilePath), dirPath, "PathModule");
 
     if(expect_true(ENT_LogInit() == 0, "ENT_LogInit should initialize before path-option testing") != 0)
@@ -856,14 +915,10 @@ static int test_log_path_option_trims_trailing_separator_and_writes_file(void)
 
     remove_dir_contents(dirPath);
     return 0;
-#endif
 }
 
 static int test_log_level_filters_debug_messages(void)
 {
-#ifdef WIN32
-    return 0;
-#else
     ENT_LOG logHandle = NULL;
     ENT_LOG_LEV_E level = LOG_LEV_WARN_E;
     char dirPath[256];
@@ -967,13 +1022,12 @@ static int test_log_level_filters_debug_messages(void)
 
     remove_dir_contents(dirPath);
     return 0;
-#endif
 }
 
 static int test_log_close_handle_waits_for_active_writers(void)
 {
 #ifdef WIN32
-    return 0;
+    return test_log_close_handle_blocks_until_active_writer_released();
 #else
     ENT_LOG logHandle = NULL;
     pthread_t writerThread;
@@ -1117,9 +1171,6 @@ cleanup:
 
 static int test_buffered_log_close_flushes_queued_messages(void)
 {
-#ifdef WIN32
-    return 0;
-#else
     ENT_LOG logHandle = NULL;
     ENT_LOG_LEV_E level = LOG_LEV_INFO_E;
     bool buffered = true;
@@ -1258,14 +1309,10 @@ cleanup:
     }
     remove_dir_contents(dirPath);
     return rc;
-#endif
 }
 
 static int test_buffered_log_flush_interval_writes_without_close(void)
 {
-#ifdef WIN32
-    return 0;
-#else
     ENT_LOG logHandle = NULL;
     ENT_LOG_LEV_E level = LOG_LEV_INFO_E;
     bool buffered = true;
@@ -1343,15 +1390,22 @@ static int test_buffered_log_flush_interval_writes_without_close(void)
         memset(readBuf, 0, sizeof(readBuf));
         if(fp != NULL)
         {
-            fread(readBuf, 1, sizeof(readBuf) - 1, fp);
+            size_t nread = fread(readBuf, 1, sizeof(readBuf) - 1, fp);
             fclose(fp);
-            if(strstr(readBuf, "flush interval line") != NULL)
+            if(nread > 0 && strstr(readBuf, "flush interval line") != NULL)
             {
                 found = 1;
                 break;
             }
         }
-        usleep(10000);
+#ifdef WIN32
+        if(path_exists(logFilePath))
+        {
+            found = 1;
+            break;
+        }
+#endif
+        test_sleep_ms(10);
     }
 
     if(expect_true(found == 1,
@@ -1375,6 +1429,26 @@ static int test_buffered_log_flush_interval_writes_without_close(void)
         goto cleanup;
     }
 
+    {
+        FILE* fp = fopen(logFilePath, "r");
+        memset(readBuf, 0, sizeof(readBuf));
+        if(expect_true(fp != NULL, "Flush-interval test should produce a log file") != 0)
+        {
+            goto cleanup;
+        }
+        if(fread(readBuf, 1, sizeof(readBuf) - 1, fp) <= 0)
+        {
+            fclose(fp);
+            goto cleanup;
+        }
+        fclose(fp);
+        if(expect_true(strstr(readBuf, "flush interval line") != NULL,
+                       "Flush-interval message should persist to disk") != 0)
+        {
+            goto cleanup;
+        }
+    }
+
     rc = 0;
 
 cleanup:
@@ -1385,7 +1459,6 @@ cleanup:
     }
     remove_dir_contents(dirPath);
     return rc;
-#endif
 }
 
 int main(void)
