@@ -100,31 +100,31 @@ ENT_PUBLIC MSG_ID_T  ENT_LogDebug(ENT_LOG logHandle,const char* format,...);
 
 #define ENT_LOG_FATAL(format,...) \
  do { \
-    ENT_LogFatal(NULL,"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,__VA_ARGS__);\
+    ENT_LogFatal(NULL,"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,##__VA_ARGS__);\
  }\
  while(0)
  
 #define ENT_LOG_ERROR(format,...) \
  do { \
-    ENT_LogError(NULL,"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,__VA_ARGS__);\
+    ENT_LogError(NULL,"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,##__VA_ARGS__);\
  }\
  while(0)
  
 #define ENT_LOG_WARN(format,...) \
  do { \
-    ENT_LogWarn(NULL,"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,__VA_ARGS__);\
+    ENT_LogWarn(NULL,"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,##__VA_ARGS__);\
  }\
  while(0)
  
 #define ENT_LOG_PRINT(format,...) \
  do { \
-    ENT_LogPrint(NULL,"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,__VA_ARGS__);\
+    ENT_LogPrint(NULL,"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,##__VA_ARGS__);\
  }\
  while(0)
  
 #define ENT_LOG_DEBUG(format,...) \
  do { \
-    ENT_LogDebug(NULL,"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,__VA_ARGS__);\
+    ENT_LogDebug(NULL,"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,##__VA_ARGS__);\
  }\
  while(0)
 #else

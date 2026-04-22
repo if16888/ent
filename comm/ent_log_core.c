@@ -117,7 +117,17 @@ MSG_ID_T iENT_LogPathCheck(const char* path)
         }
         else
         {
+            DWORD attrs = GetFileAttributesW(wPath);
             CloseHandle(hDir);
+            if(attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY))
+            {
+                fprintf(stderr,
+                        "Func [%s] Line [%d],path exists but is not a directory[%s]\n",
+                        "iENT_LogPathCheck",
+                        __LINE__,
+                        path);
+                return -1;
+            }
         }
     }
 #else
@@ -133,7 +143,19 @@ MSG_ID_T iENT_LogPathCheck(const char* path)
                         __LINE__,
                         path,
                         strerror(errno));
+                return -1;
             }
+            return 0;
+        }
+
+        if(!S_ISDIR(st.st_mode))
+        {
+            fprintf(stderr,
+                    "Func [%s] Line [%d],path exists but is not a directory [%s].\n",
+                    "iENT_LogPathCheck",
+                    __LINE__,
+                    path);
+            return -1;
         }
     }
 #endif
@@ -215,7 +237,7 @@ static MSG_ID_T iENT_LogInitCtx(ENT_LOG_CTX_INTERNAL* log,
         return -1;
     }
 #endif
-    log->closing = 0;
+    iENT_LogStateSet(log, ENT_LOG_HANDLE_CREATED_E);
     log->activeWriters = 0;
     log->bufferThreadStarted = false;
     log->bufferThreadStop = false;
@@ -236,24 +258,25 @@ static MSG_ID_T iENT_LogInitCtx(ENT_LOG_CTX_INTERNAL* log,
     log->logLevel = LOG_LEV_WARN_E;
     log->maxNum = DEF_MAX_NUM_LOG;
     log->tag = ENTLOG_TAG;
+    iENT_LogStateSet(log, ENT_LOG_HANDLE_ACTIVE_E);
     return 0;
 }
 
-MSG_ID_T iENT_LogIsClosing(const ENT_LOG_CTX_INTERNAL* log)
+ENT_LOG_HANDLE_STATE_E iENT_LogStateGet(const ENT_LOG_CTX_INTERNAL* log)
 {
 #ifdef WIN32
-    return InterlockedCompareExchange((volatile LONG*)&log->closing, 0, 0) != 0;
+    return (ENT_LOG_HANDLE_STATE_E)InterlockedCompareExchange((volatile LONG*)&log->handleState, 0, 0);
 #else
-    return __sync_val_compare_and_swap((volatile int*)&log->closing, 0, 0) != 0;
+    return (ENT_LOG_HANDLE_STATE_E)__sync_val_compare_and_swap((volatile int*)&log->handleState, 0, 0);
 #endif
 }
 
-void iENT_LogSetClosing(ENT_LOG_CTX_INTERNAL* log)
+void iENT_LogStateSet(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_HANDLE_STATE_E state)
 {
 #ifdef WIN32
-    InterlockedExchange(&log->closing, 1);
+    InterlockedExchange(&log->handleState, (LONG)state);
 #else
-    __sync_lock_test_and_set(&log->closing, 1);
+    __sync_lock_test_and_set(&log->handleState, (int)state);
 #endif
 }
 
@@ -363,7 +386,7 @@ MSG_ID_T iENT_LogAcquireWriter(ENT_LOG_CTX_INTERNAL** logCtx, ENT_LOG logHandle)
         }
     }
 
-    if(iENT_LogIsClosing(log))
+    if(iENT_LogStateGet(log) != ENT_LOG_HANDLE_ACTIVE_E)
     {
 #ifdef WIN32
         LeaveCriticalSection(&sLogMutex);
@@ -385,17 +408,17 @@ MSG_ID_T iENT_LogAcquireWriter(ENT_LOG_CTX_INTERNAL** logCtx, ENT_LOG logHandle)
 
 void iENT_LogReleaseWriter(ENT_LOG_CTX_INTERNAL* log)
 {
-    if(iENT_LogActiveDec(log) == 0 && iENT_LogIsClosing(log))
+    if(iENT_LogActiveDec(log) == 0 && iENT_LogStateGet(log) == ENT_LOG_HANDLE_CLOSING_E)
     {
 #ifdef WIN32
         EnterCriticalSection(&sLogMutex);
-        if(iENT_LogIsClosing(log) && iENT_LogActiveGet(log) == 0)
-        WakeAllConditionVariable(&log->closeCv);
+        if(iENT_LogStateGet(log) == ENT_LOG_HANDLE_CLOSING_E && iENT_LogActiveGet(log) == 0)
+            WakeAllConditionVariable(&log->closeCv);
         LeaveCriticalSection(&sLogMutex);
 #else
         pthread_mutex_lock(&sLogMutex);
-        if(iENT_LogIsClosing(log) && iENT_LogActiveGet(log) == 0)
-        pthread_cond_broadcast(&log->closeCv);
+        if(iENT_LogStateGet(log) == ENT_LOG_HANDLE_CLOSING_E && iENT_LogActiveGet(log) == 0)
+            pthread_cond_broadcast(&log->closeCv);
         pthread_mutex_unlock(&sLogMutex);
 #endif
     }
@@ -419,9 +442,29 @@ MSG_ID_T iENT_LogInit(void)
 
 MSG_ID_T iENT_LogClose(void)
 {
+    if(sLogMutexInit == false)
+    {
+        return -1;
+    }
 #ifdef WIN32
+    EnterCriticalSection(&sLogMutex);
+#else
+    pthread_mutex_lock(&sLogMutex);
+#endif
+    if(sLogNum > 0)
+    {
+#ifdef WIN32
+        LeaveCriticalSection(&sLogMutex);
+#else
+        pthread_mutex_unlock(&sLogMutex);
+#endif
+        return -3;
+    }
+#ifdef WIN32
+    LeaveCriticalSection(&sLogMutex);
     DeleteCriticalSection(&sLogMutex);
 #else
+    pthread_mutex_unlock(&sLogMutex);
     pthread_mutex_destroy(&sLogMutex);
 #endif
 
@@ -903,8 +946,18 @@ MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "iENT_LogCloseHandle", __LINE__);
         goto END_OF_ROUTINE;
     }
-    if(iENT_LogIsClosing(log) == 0)
-        iENT_LogSetClosing(log);
+    if(iENT_LogStateGet(log) == ENT_LOG_HANDLE_CLOSING_E)
+    {
+        sts = -3;
+        goto END_OF_ROUTINE;
+    }
+    if(iENT_LogStateGet(log) != ENT_LOG_HANDLE_ACTIVE_E)
+    {
+        sts = -2;
+        goto END_OF_ROUTINE;
+    }
+
+    iENT_LogStateSet(log, ENT_LOG_HANDLE_CLOSING_E);
     while(iENT_LogActiveGet(log) > 0)
     {
 #ifdef WIN32
@@ -927,6 +980,7 @@ MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
 
     log->isInit = false;
     log->logFp = NULL;
+    iENT_LogStateSet(log, ENT_LOG_HANDLE_CLOSED_E);
 #ifdef WIN32
     DeleteCriticalSection(&log->cs);
 #else
@@ -935,22 +989,23 @@ MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
     pthread_cond_destroy(&log->bufferCv);
 #endif
 
+    if(log->ownerCtx != NULL && log->ownerCtx->logHandle == logHandle)
+    {
+        log->ownerCtx->logHandle = NULL;
+    }
+    if(log->moduleName)
+    {
+        free(log->moduleName);
+        log->moduleName = NULL;
+    }
+    if(log->logPath)
+    {
+        free(log->logPath);
+        log->logPath = NULL;
+    }
+
     if(log != iENT_LogDefaultCtx())
     {
-        if(log->ownerCtx != NULL && log->ownerCtx->logHandle == logHandle)
-        {
-            log->ownerCtx->logHandle = NULL;
-        }
-        if(log->moduleName)
-        {
-            free(log->moduleName);
-            log->moduleName = NULL;
-        }
-        if(log->logPath)
-        {
-            free(log->logPath);
-            log->logPath = NULL;
-        }
         free(log);
     }
     sLogNum--;

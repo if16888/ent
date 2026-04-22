@@ -550,6 +550,55 @@ process
 - 句柄进入 `CLOSING` 后，新的 `open/read/readParams/close` 必须返回 `ENT_DBS_IN_USE`
 - `iENT_DbReInit()` 在 active read 未退出时必须返回 `ENT_DBS_IN_USE`
 
+### 11.2 Log 并发与生命周期语义
+
+日志模块现在也采用了显式句柄状态机，语义与 DB 模块保持一致的 service-level / handle-level 生命周期风格。
+
+#### 日志句柄状态机
+
+每个日志句柄都有明确状态：
+
+- `ENT_LOG_HANDLE_CREATED_E`
+- `ENT_LOG_HANDLE_ACTIVE_E`
+- `ENT_LOG_HANDLE_CLOSING_E`
+- `ENT_LOG_HANDLE_CLOSED_E`
+
+其中：
+
+- `ACTIVE`：允许写日志和更新配置
+- `CLOSING`：拒绝新的 writer 进入、拒绝新的配置更新，并等待在途 writer 退出
+- `CLOSED`：句柄失效，不可复用
+
+#### `ENT_LogCloseHandle()` 的语义
+
+`ENT_LogCloseHandle()` 现在是显式 close 流程：
+
+1. `ACTIVE -> CLOSING`
+2. 拒绝新 writer 进入
+3. 等待 active writer 归零
+4. 停止 buffer thread、flush/close 文件
+5. 释放句柄资源并进入 `CLOSED`
+
+如果第二次 close 命中 `CLOSING`，会返回 in-use/busy 风格错误（当前日志模块仍使用 `-3`）。
+
+#### `ENT_LogClose()` 的 service-level 语义
+
+`ENT_LogClose()` 关闭的是日志服务本身，不是单个句柄。
+
+当仍有 live log handle 时会拒绝关闭并返回 busy/in-use 风格错误（当前为 `-3`）。推荐顺序是：
+
+1. 先关闭所有日志句柄（包括默认句柄和私有句柄）
+2. 再调用 `ENT_LogClose()` 关闭日志服务
+
+#### closing 状态下的拒绝行为
+
+日志句柄进入 `CLOSING` 后：
+
+- 新写入（`raw/print/fatal/error/warn/debug`）会被拒绝
+- 新配置（`ENT_LogSetOption`）会被拒绝
+
+这可以避免 close 期间出现“边写边销毁”或“先释放旧配置后新配置校验失败”导致的状态破坏。
+
 ---
 
 ## 12. Lua 说明
