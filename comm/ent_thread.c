@@ -59,6 +59,38 @@ typedef struct ENT_TH_CTX
 }ENT_TH_CTX;
 
 #ifndef WIN32
+static clockid_t iENT_ThreadCondClockId(void)
+{
+#if defined(__linux__)
+    return CLOCK_MONOTONIC;
+#else
+    return CLOCK_REALTIME;
+#endif
+}
+
+static int iENT_ThreadCondInit(pthread_cond_t* cond)
+{
+#if defined(__linux__)
+    pthread_condattr_t attr;
+    int s = pthread_condattr_init(&attr);
+    if(s != 0)
+    {
+        return s;
+    }
+    s = pthread_condattr_setclock(&attr, iENT_ThreadCondClockId());
+    if(s != 0)
+    {
+        pthread_condattr_destroy(&attr);
+        return s;
+    }
+    s = pthread_cond_init(cond, &attr);
+    pthread_condattr_destroy(&attr);
+    return s;
+#else
+    return pthread_cond_init(cond, NULL);
+#endif
+}
+
 static void* iENT_ThreadProc(void* data)
 {
     THREAD_DB* thDb = (THREAD_DB*)data;
@@ -76,22 +108,6 @@ static void* iENT_ThreadProc(void* data)
 }
 #endif
 
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :ENT_ThreadInit
- *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
- *
- *-----------------------------------------------------------------------------
- */
 ENT_PUBLIC MSG_ID_T ENT_ThreadInit(ENT_THREAD* pthHandle)
 {   
     MSG_ID_T     sts=0;
@@ -121,22 +137,6 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadInit(ENT_THREAD* pthHandle)
     return ENT_SYS_NORMAL;
 }
 #ifdef WIN32
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :ENT_ThreadDetachCreate
- *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
- *
- *-----------------------------------------------------------------------------
- */
 ENT_PUBLIC MSG_ID_T ENT_ThreadDetachCreate(ENT_THREAD handle,PTHREAD_START_ROUTINE thProc,void* thData)
 {
     ENT_TH_CTX*  thCtx=NULL;
@@ -155,14 +155,7 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadDetachCreate(ENT_THREAD handle,PTHREAD_START_ROUTI
         return ENT_THRD_INVALID_HANDLE;
     }
 
-    tmpHandle = CreateThread(
-            NULL,
-            0,
-            thProc,
-            thData,
-            0,
-            &thId);
-     
+    tmpHandle = CreateThread(NULL,0,thProc,thData,0,&thId);
      if(tmpHandle == NULL)
      {
         IENT_LOG_ERROR("CreateThread failed,error code %u\n",GetLastError());
@@ -171,25 +164,9 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadDetachCreate(ENT_THREAD handle,PTHREAD_START_ROUTI
 
      CloseHandle(tmpHandle);
      IENT_LOG_PRINT("CreateThread sucessful,thread id is %d\n",thId);
-    
     return ENT_SYS_NORMAL;
 }
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :ENT_ThreadCreate
- *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
- *
- *-----------------------------------------------------------------------------
- */
+
 ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREAD_START_ROUTINE thProc,void* thData)
 {
     MSG_ID_T     sts=0;
@@ -219,14 +196,7 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
     }
     memset(tmp,0,sizeof(THREAD_DB));
     
-    tmpHandle = CreateThread(
-            NULL,
-            0,
-            thProc,
-            thData,
-            0,
-            &tmp->thId);
-     
+    tmpHandle = CreateThread(NULL,0,thProc,thData,0,&tmp->thId);
      if(tmpHandle == NULL)
      {
         IENT_LOG_ERROR("CreateThread failed,error code %u\n",GetLastError());
@@ -252,25 +222,9 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
      {
         *tid = tmp;
      }
-
     return ENT_SYS_NORMAL;
 }
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :ENT_ThreadWaitById
- *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
- *
- *-----------------------------------------------------------------------------
- */
+
 ENT_PUBLIC MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int ms)
 {
     MSG_ID_T     sts    = 0;
@@ -320,15 +274,12 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int 
             case WAIT_OBJECT_0: 
                 reSts = ENT_SYS_NORMAL;
                 break;
-
             case WAIT_TIMEOUT:
                 UTL_LockEnter(thCtx->dllLock);
                 UTL_DllInsHead(&thCtx->dllHeader,(DLL_D_HDR*)thDb);
                 *tid = thDb;
                 UTL_LockLeave(thCtx->dllLock);
                 return ENT_THRD_WAIT_TIMEOUT;
-                break;
-            
             case WAIT_FAILED:
                 IENT_LOG_ERROR("WaitForSingleObject ret [%d],err [%d]\n",ret,GetLastError());
                 UTL_LockEnter(thCtx->dllLock);
@@ -336,8 +287,6 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int 
                 *tid = thDb;
                 UTL_LockLeave(thCtx->dllLock);
                 return ENT_THRD_WAIT_FAILED;
-                break;
-
             default:
                 IENT_LOG_ERROR("WaitForSingleObject ret [%d],err [%d]\n",ret,GetLastError());
                 UTL_LockEnter(thCtx->dllLock);
@@ -347,7 +296,6 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int 
                 reSts = ENT_THRD_WAIT_FAILED;
                 break;
         }
-
         CloseHandle(thDb->thHandle);
         thDb->thHandle = NULL;
         thDb->thId = 0;
@@ -356,22 +304,7 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int 
     free(thDb);
     return reSts;
 }
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :ENT_ThreadClose
- *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
- *
- *-----------------------------------------------------------------------------
- */
+
 ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
 {
     MSG_ID_T     sts=0;
@@ -384,14 +317,12 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
         IENT_LOG_ERROR("handle is null\n");
         return ENT_THRD_INVALID_ARGUMENT;
     }
-    
     thCtx=(ENT_TH_CTX*)handle;
     if(thCtx->tag != ENT_TH_TAG)
     {
         IENT_LOG_ERROR("break handle\n");
         return ENT_THRD_INVALID_HANDLE;
     }
-
     while(1)
     {
         UTL_LockEnter(thCtx->dllLock);
@@ -401,7 +332,6 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
         {
             break;
         }
-
         thDb = (THREAD_DB*)tmp;
         if(thDb->thHandle)
         {
@@ -415,27 +345,10 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
     }
     thCtx->tag = 0x0;
     UTL_LockClose(thCtx->dllLock);
-    
     free(handle); 
     return ENT_SYS_NORMAL;
 }
 #else
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :ENT_ThreadDetachCreate
- *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
- *
- *-----------------------------------------------------------------------------
- */
 ENT_PUBLIC MSG_ID_T ENT_ThreadDetachCreate(ENT_THREAD handle,PTHREAD_START_ROUTINE thProc,void* thData)
 {
     ENT_TH_CTX*    thCtx=(ENT_TH_CTX*)handle;
@@ -448,7 +361,6 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadDetachCreate(ENT_THREAD handle,PTHREAD_START_ROUTI
         IENT_LOG_ERROR("thread handle is null\n");
         return ENT_THRD_INVALID_ARGUMENT;
     }
-
     if(thCtx->tag != ENT_TH_TAG)
     {
         IENT_LOG_ERROR("break handle\n");
@@ -460,7 +372,6 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadDetachCreate(ENT_THREAD handle,PTHREAD_START_ROUTI
         IENT_LOG_ERROR("pthread_attr_init failed,error [%d]->[%s]\n",s,strerror(s));
         return ENT_THRD_ATTR_FAILED;
     }
-
     s = pthread_attr_setdetachstate(&thAttr, PTHREAD_CREATE_DETACHED);
     if (s != 0)
     {
@@ -468,7 +379,6 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadDetachCreate(ENT_THREAD handle,PTHREAD_START_ROUTI
         pthread_attr_destroy(&thAttr);
         return ENT_THRD_ATTR_FAILED;
     }
-    
     s = pthread_create(&thId, &thAttr, thProc, thData); 
      if(s != 0)
      {
@@ -477,31 +387,14 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadDetachCreate(ENT_THREAD handle,PTHREAD_START_ROUTI
          return ENT_THRD_CREATE_FAILED;
      }
      IENT_LOG_PRINT("pthread_create sucessful,thread id is %ld\n",thId);
-     
      s = pthread_attr_destroy(&thAttr);
      if(s != 0)
      {
         IENT_LOG_WARN("pthread_attr_destroy failed,error [%d]->[%s]\n",s,strerror(s));
      }
-    
     return ENT_SYS_NORMAL;
 }
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :ENT_ThreadCreate
- *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
- *
- *-----------------------------------------------------------------------------
- */
+
 ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREAD_START_ROUTINE thProc,void* thData)
 {
     MSG_ID_T       sts=0;
@@ -518,13 +411,11 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
         IENT_LOG_ERROR("handle is null\n");
         return ENT_THRD_INVALID_ARGUMENT;
     }
-
     if(thCtx->tag != ENT_TH_TAG)
     {
         IENT_LOG_ERROR("break handle\n");
         return ENT_THRD_INVALID_HANDLE;
     }
-
     tmp=(THREAD_DB*)malloc(sizeof(THREAD_DB));
     if(tmp==NULL)
     {
@@ -532,7 +423,6 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
          return ENT_THRD_ALLOC_FAILED;
     }
     memset(tmp,0,sizeof(THREAD_DB));
-    
     tmp->thProc = thProc;
     tmp->thData = thData;
     tmp->thRet = NULL;
@@ -544,7 +434,7 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
         free(tmp);
         return ENT_THRD_CREATE_FAILED;
     }
-    s = pthread_cond_init(&tmp->doneCv,NULL);
+    s = iENT_ThreadCondInit(&tmp->doneCv);
     if(s != 0)
     {
         IENT_LOG_ERROR("pthread_cond_init failed,error [%d]->[%s]\n",s,strerror(s));
@@ -552,7 +442,6 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
         free(tmp);
         return ENT_THRD_CREATE_FAILED;
     }
-
     s = pthread_create(&tmp->thId, NULL, iENT_ThreadProc, tmp); 
     if(s != 0)
     {
@@ -564,7 +453,6 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
     }
     tmp->thHandle = NULL;
     tmp->tag = ENT_TH_TAG;
-    
     UTL_LockEnter(thCtx->dllLock);
     sts = UTL_DllInsHead(&thCtx->dllHeader,(DLL_D_HDR*)tmp);
     UTL_LockLeave(thCtx->dllLock);
@@ -578,29 +466,13 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
         free(tmp);
         return ENT_THRD_CREATE_FAILED;
     }
-
     if(tid!=NULL)
     {
        *tid = tmp;
     }
     return ENT_SYS_NORMAL;
 }
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :ENT_ThreadWaitById
- *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
- *
- *-----------------------------------------------------------------------------
- */
+
 ENT_PUBLIC MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int ms)
 {
     MSG_ID_T     sts = 0;
@@ -613,17 +485,15 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int 
 
     if(tid == NULL || handle==NULL)
     {
-        IENT_LOG_ERROR("Database handle is null\n");
+        IENT_LOG_ERROR("thread wait argument is null\n");
         return ENT_THRD_INVALID_ARGUMENT;
     }
-
     thCtx=(ENT_TH_CTX*)handle;
     if(thCtx->tag != ENT_TH_TAG)
     {
         IENT_LOG_ERROR("break handle\n");
         return ENT_THRD_INVALID_HANDLE;
     }
-
     UTL_LockEnter(thCtx->dllLock);
     thDb = (THREAD_DB*)*tid;
     if(thDb==NULL || thDb->tag != ENT_TH_TAG)
@@ -659,7 +529,7 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int 
         }
         else
         {
-            clock_gettime(CLOCK_MONOTONIC,&deadline);
+            clock_gettime(iENT_ThreadCondClockId(),&deadline);
             deadline.tv_sec += ms/1000;
             deadline.tv_nsec += (long)(ms%1000) * 1000000L;
             if(deadline.tv_nsec >= 1000000000L)
@@ -707,22 +577,7 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int 
     free(thDb);
     return ENT_SYS_NORMAL;
 }
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :ENT_ThreadClose
- *
- * DESCRIPTION :   
- *                 
- *                   
- *
- * COMPLETION
- * STATUS      :  0
- *                Success; Service has completed successfully.           
- *
- *                            
- *
- *-----------------------------------------------------------------------------
- */
+
 ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
 {
     MSG_ID_T     sts=0;
@@ -733,17 +588,15 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
     
     if(handle==NULL)
     {
-        IENT_LOG_ERROR("Database handle is null\n");
+        IENT_LOG_ERROR("thread close handle is null\n");
         return ENT_THRD_INVALID_ARGUMENT;
     }
-    
     thCtx=(ENT_TH_CTX*)handle;
     if(thCtx->tag != ENT_TH_TAG)
     {
         IENT_LOG_ERROR("break handle\n");
         return ENT_THRD_INVALID_HANDLE;
     }
-    
     while(1)
     {
         UTL_LockEnter(thCtx->dllLock);
@@ -753,7 +606,6 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
         {
             break;
         }
-
         thDb = (THREAD_DB*)tmp;
         if(thDb->thId)
         {
@@ -768,7 +620,6 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
     }
     thCtx->tag = 0x0;
     UTL_LockClose(thCtx->dllLock);
-    
     free(handle);  
     return ENT_SYS_NORMAL;
 }
