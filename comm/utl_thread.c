@@ -34,6 +34,17 @@
 #define ENT_HAS_PTHREAD_SPINLOCK 0
 #endif
 
+#ifndef WIN32
+static clockid_t iUTL_CVClockId(void)
+{
+#if defined(__linux__)
+    return CLOCK_MONOTONIC;
+#else
+    return CLOCK_REALTIME;
+#endif
+}
+#endif
+
 typedef struct
 {
     UTL_LOCK_TYPE_T  lockType;
@@ -642,7 +653,7 @@ ENT_PUBLIC MSG_ID_T UTL_CVInit(UTL_CV* cv,const char* name)
         return ENT_UTHD_INIT_FAILED;
     }
 #if defined(__linux__)
-    s = pthread_condattr_setclock(&cvAttr,CLOCK_MONOTONIC);
+    s = pthread_condattr_setclock(&cvAttr,iUTL_CVClockId());
     if(s != 0)
     {
         IENT_LOG_ERROR("pthread_condattr_setclock failed,error [%d]->[%s]\n",s,strerror(s));
@@ -717,7 +728,7 @@ static MSG_ID_T iUTL_CVWaitMutex(UTL_TH_CV* cvCtx,UTL_TH_LOCK* lockCtx,int ms)
     {
         struct timespec cvTm;
         int s;
-        if(clock_gettime(CLOCK_MONOTONIC, &cvTm) == -1)
+        if(clock_gettime(iUTL_CVClockId(), &cvTm) == -1)
         {
             IENT_LOG_ERROR("clock_gettime failed,error [%d]->[%s]\n",errno,strerror(errno));
             return -4;
