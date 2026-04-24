@@ -79,12 +79,12 @@ jobs:
         shell: pwsh
         run: .\scripts\run-ci-windows.ps1 build
 
-      - name: Run test_ent_log (Windows explicit)
+      - name: Run log tests (Windows explicit)
         shell: pwsh
         run: |
           Push-Location build
           try {
-            ctest -C Release --output-on-failure -R "^test_ent_log$"
+            ctest -C Release --output-on-failure -R "^(test_ent_log|test_ent_log_flush_deadline)$"
           }
           finally {
             Pop-Location
