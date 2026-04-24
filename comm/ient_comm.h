@@ -27,31 +27,31 @@
 
 #define IENT_LOG_FATAL(format,...) \
  do { \
-    ENT_LogFatal(iENT_LogDefaultHandle(),"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,__VA_ARGS__);\
+    ENT_LogFatal(iENT_LogDefaultHandle(),"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,##__VA_ARGS__);\
  }\
  while(0)
  
 #define IENT_LOG_ERROR(format,...) \
  do { \
-    ENT_LogError(iENT_LogDefaultHandle(),"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,__VA_ARGS__);\
+    ENT_LogError(iENT_LogDefaultHandle(),"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,##__VA_ARGS__);\
  }\
  while(0)
  
 #define IENT_LOG_WARN(format,...) \
  do { \
-    ENT_LogWarn(iENT_LogDefaultHandle(),"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,__VA_ARGS__);\
+    ENT_LogWarn(iENT_LogDefaultHandle(),"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,##__VA_ARGS__);\
  }\
  while(0)
  
 #define IENT_LOG_PRINT(format,...) \
  do { \
-    ENT_LogPrint(iENT_LogDefaultHandle(),"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,__VA_ARGS__);\
+    ENT_LogPrint(iENT_LogDefaultHandle(),"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,##__VA_ARGS__);\
  }\
  while(0)
  
 #define IENT_LOG_DEBUG(format,...) \
  do { \
-    ENT_LogDebug(iENT_LogDefaultHandle(),"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,__VA_ARGS__);\
+    ENT_LogDebug(iENT_LogDefaultHandle(),"Func [%s] Line [%d]," format,__FUNCTION__,__LINE__,##__VA_ARGS__);\
  }\
  while(0)
 #else
