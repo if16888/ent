@@ -307,6 +307,38 @@ static int test_rw_lock_requires_explicit_enter_and_leave_mode(void)
     return expect_true(UTL_LockClose(lock) == 0, "UTL_LockClose should release the rw lock after explicit mode checks");
 }
 
+static int test_lock_close_safe_closes_and_nulls_handle(void)
+{
+    UTL_LOCK lock = NULL;
+
+    if(expect_true(UTL_LockInit(&lock, "safe") == ENT_SYS_NORMAL,
+                   "UTL_LockInit should create a lock for safe close") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(UTL_LockCloseSafe(&lock) == ENT_SYS_NORMAL,
+                   "UTL_LockCloseSafe should close the lock") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(lock == NULL,
+                   "UTL_LockCloseSafe should clear the caller-owned lock handle") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(UTL_LockCloseSafe(&lock) == ENT_UTHD_INVALID_ARGUMENT,
+                   "UTL_LockCloseSafe should reject an already-cleared handle") != 0)
+    {
+        return 1;
+    }
+
+    return expect_true(UTL_LockCloseSafe(NULL) == ENT_UTHD_INVALID_ARGUMENT,
+                       "UTL_LockCloseSafe should reject a NULL handle pointer");
+}
+
 static int test_cv_wait_rejects_spin_lock(void)
 {
     UTL_LOCK lock = NULL;
@@ -338,6 +370,38 @@ static int test_cv_wait_rejects_spin_lock(void)
     }
 
     return expect_true(UTL_LockClose(lock) == 0, "UTL_LockClose should release the spin lock");
+}
+
+static int test_cv_close_safe_closes_and_nulls_handle(void)
+{
+    UTL_CV cv = NULL;
+
+    if(expect_true(UTL_CVInit(&cv, "safe-cv") == ENT_SYS_NORMAL,
+                   "UTL_CVInit should create a condition variable for safe close") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(UTL_CVCloseSafe(&cv) == ENT_SYS_NORMAL,
+                   "UTL_CVCloseSafe should close the condition variable") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(cv == NULL,
+                   "UTL_CVCloseSafe should clear the caller-owned condition-variable handle") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(UTL_CVCloseSafe(&cv) == ENT_UTHD_INVALID_ARGUMENT,
+                   "UTL_CVCloseSafe should reject an already-cleared handle") != 0)
+    {
+        return 1;
+    }
+
+    return expect_true(UTL_CVCloseSafe(NULL) == ENT_UTHD_INVALID_ARGUMENT,
+                       "UTL_CVCloseSafe should reject a NULL handle pointer");
 }
 
 static int test_cv_wake_and_wake_all_reject_null(void)
@@ -467,7 +531,9 @@ int main(void)
     failures += test_mutex_lock_roundtrip_succeeds();
     failures += test_rw_lock_read_roundtrip_succeeds();
     failures += test_rw_lock_requires_explicit_enter_and_leave_mode();
+    failures += test_lock_close_safe_closes_and_nulls_handle();
     failures += test_cv_wait_rejects_spin_lock();
+    failures += test_cv_close_safe_closes_and_nulls_handle();
     failures += test_cv_wake_and_wake_all_reject_null();
     failures += test_cv_wait_uses_monotonic_deadline_and_normalized_timespec();
 
