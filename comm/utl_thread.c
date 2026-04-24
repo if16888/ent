@@ -622,6 +622,21 @@ ENT_PUBLIC MSG_ID_T UTL_LockClose(UTL_LOCK lock)
     return iUTL_MapLockSts(sts);
 }
 
+ENT_PUBLIC MSG_ID_T UTL_LockCloseSafe(UTL_LOCK* lock)
+{
+    MSG_ID_T sts;
+    if(lock == NULL || *lock == NULL)
+    {
+        return ENT_UTHD_INVALID_ARGUMENT;
+    }
+    sts = UTL_LockClose(*lock);
+    if(sts == ENT_SYS_NORMAL)
+    {
+        *lock = NULL;
+    }
+    return sts;
+}
+
 ENT_PUBLIC MSG_ID_T UTL_CVInit(UTL_CV* cv,const char* name)
 {
     if(cv == NULL)
@@ -696,6 +711,21 @@ ENT_PUBLIC MSG_ID_T UTL_CVClose(UTL_CV cv)
     }
     free(tmp);
     return ENT_SYS_NORMAL;
+}
+
+ENT_PUBLIC MSG_ID_T UTL_CVCloseSafe(UTL_CV* cv)
+{
+    MSG_ID_T sts;
+    if(cv == NULL || *cv == NULL)
+    {
+        return ENT_UTHD_INVALID_ARGUMENT;
+    }
+    sts = UTL_CVClose(*cv);
+    if(sts == ENT_SYS_NORMAL)
+    {
+        *cv = NULL;
+    }
+    return sts;
 }
 
 static MSG_ID_T iUTL_CVWaitMutex(UTL_TH_CV* cvCtx,UTL_TH_LOCK* lockCtx,int ms)
