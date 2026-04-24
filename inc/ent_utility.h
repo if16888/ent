@@ -57,12 +57,12 @@ ENT_PUBLIC MSG_ID_T  UTL_LockEnter(UTL_LOCK lock);
 ENT_PUBLIC MSG_ID_T  UTL_LockEnterEx(UTL_LOCK lock,UTL_LOCK_RW_TYPE_T rwType);
 ENT_PUBLIC MSG_ID_T  UTL_LockLeave(UTL_LOCK lock);
 ENT_PUBLIC MSG_ID_T  UTL_LockLeaveEx(UTL_LOCK lock,UTL_LOCK_RW_TYPE_T rwType);
-ENT_PUBLIC MSG_ID_T  UTL_LockClose(UTL_LOCK* lock);
-#define UTL_LockClose(lock) UTL_LockClose(&(lock))
+ENT_PUBLIC MSG_ID_T  UTL_LockClose(UTL_LOCK lock);
+ENT_PUBLIC MSG_ID_T  UTL_LockCloseSafe(UTL_LOCK* lock);
 
 ENT_PUBLIC MSG_ID_T  UTL_CVInit(UTL_CV* cv,const char* name);
-ENT_PUBLIC MSG_ID_T  UTL_CVClose(UTL_CV* cv);
-#define UTL_CVClose(cv) UTL_CVClose(&(cv))
+ENT_PUBLIC MSG_ID_T  UTL_CVClose(UTL_CV cv);
+ENT_PUBLIC MSG_ID_T  UTL_CVCloseSafe(UTL_CV* cv);
 ENT_PUBLIC MSG_ID_T  UTL_CVWait(UTL_CV cv,UTL_LOCK lock,int ms,UTL_LOCK_RW_TYPE_T rwType);
 ENT_PUBLIC MSG_ID_T  UTL_CVWake(UTL_CV cv);
 ENT_PUBLIC MSG_ID_T  UTL_CVWakeAll(UTL_CV cv);
