@@ -303,7 +303,6 @@ if(ENT_ENABLE_SQLITE AND (NOT WIN32 OR ENT_SQLITE_LIBRARY))
     target_link_libraries(test_ent_db PRIVATE pthread sqlite3)
   endif()
 
-  
   if(PostgreSQL_FOUND)
       target_include_directories(test_ent_db PRIVATE ${PostgreSQL_INCLUDE_DIRS})
       target_link_libraries(test_ent_db PRIVATE ${PostgreSQL_LIBRARIES})
@@ -334,6 +333,30 @@ if(APPLE OR UNIX)
 endif()
 
 add_test(NAME test_ent_log COMMAND test_ent_log)
+
+add_executable(
+  test_ent_log_flush_deadline
+  test_ent_log_flush_deadline.c
+  ../comm/ent_log_core.c
+  ../comm/ent_log_writer.c
+  ../comm/ent_log_options.c
+  ../comm/ent_log_compat.c
+  ../comm/utl_thread.c
+  ../comm/utl_dll.c
+)
+
+target_include_directories(
+  test_ent_log_flush_deadline
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../comm
+)
+
+if(APPLE OR UNIX)
+  target_link_libraries(test_ent_log_flush_deadline PRIVATE pthread)
+endif()
+
+add_test(NAME test_ent_log_flush_deadline COMMAND test_ent_log_flush_deadline)
 
 if(ENT_ENABLE_SQLITE AND (NOT WIN32 OR ENT_SQLITE_LIBRARY))
   add_executable(
@@ -407,7 +430,6 @@ if(ENT_ENABLE_SQLITE AND (NOT WIN32 OR ENT_SQLITE_LIBRARY))
     endif()
   endif()
 
-  
   if(PostgreSQL_FOUND)
       target_include_directories(test_security PRIVATE ${PostgreSQL_INCLUDE_DIRS})
       target_link_libraries(test_security PRIVATE ${PostgreSQL_LIBRARIES})
