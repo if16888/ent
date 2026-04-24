@@ -77,7 +77,7 @@ static MSG_ID_T mock_UTL_LockInit(UTL_LOCK* lock,const char* name)
     return ENT_SYS_NORMAL;
 }
 
-static MSG_ID_T mock_UTL_LockClose(UTL_LOCK lock)
+static MSG_ID_T mock_UTL_LockClose(UTL_LOCK* lock)
 {
     (void)lock;
     return ENT_SYS_NORMAL;

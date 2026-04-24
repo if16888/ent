@@ -344,7 +344,7 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
         free(thDb);
     }
     thCtx->tag = 0x0;
-    UTL_LockClose(thCtx->dllLock);
+    UTL_LockClose(&thCtx->dllLock);
     free(handle); 
     return ENT_SYS_NORMAL;
 }
@@ -619,7 +619,7 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
         free(thDb);
     }
     thCtx->tag = 0x0;
-    UTL_LockClose(thCtx->dllLock);
+    UTL_LockClose(&thCtx->dllLock);
     free(handle);  
     return ENT_SYS_NORMAL;
 }

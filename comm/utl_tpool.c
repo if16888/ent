@@ -404,7 +404,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolInit(UTL_TPOOL*  pool,int num)
     sts = UTL_LockInitEx(&poolCtx->recycleLock,"",LOCK_SPIN_E);
     if(sts<0)
     {
-        UTL_LockClose(poolCtx->taskLock);
+        UTL_LockClose(&poolCtx->taskLock);
         ENT_ThreadClose(poolCtx->thHandle);
         free(poolCtx);
         IENT_LOG_ERROR("UTL_LockInitEx failed,sts [%d]\n",sts);
@@ -414,8 +414,8 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolInit(UTL_TPOOL*  pool,int num)
     sts = UTL_CVInit(&poolCtx->taskEmptyCV,"");
     if(sts<0)
     {
-        UTL_LockClose(poolCtx->recycleLock);
-        UTL_LockClose(poolCtx->taskLock);
+        UTL_LockClose(&poolCtx->recycleLock);
+        UTL_LockClose(&poolCtx->taskLock);
         ENT_ThreadClose(poolCtx->thHandle);
         free(poolCtx);
         IENT_LOG_ERROR("UTL_CVInit failed,sts [%d]\n",sts);
@@ -458,9 +458,9 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolInit(UTL_TPOOL*  pool,int num)
 
     if(poolCtx->threadNum <= 0)
     {
-        UTL_CVClose(poolCtx->taskEmptyCV);
-        UTL_LockClose(poolCtx->recycleLock);
-        UTL_LockClose(poolCtx->taskLock);
+        UTL_CVClose(&poolCtx->taskEmptyCV);
+        UTL_LockClose(&poolCtx->recycleLock);
+        UTL_LockClose(&poolCtx->taskLock);
         ENT_ThreadClose(poolCtx->thHandle);
         free(poolCtx);
         return ENT_TPL_WORKER_CREATEFAIL;
@@ -545,9 +545,9 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolClose(UTL_TPOOL  pool)
     poolCtx->tag = 0;
     iUTL_TPoolRegistryUnlock();
 
-    UTL_CVClose(poolCtx->taskEmptyCV);
-    UTL_LockClose(poolCtx->recycleLock);
-    UTL_LockClose(poolCtx->taskLock);
+    UTL_CVClose(&poolCtx->taskEmptyCV);
+    UTL_LockClose(&poolCtx->recycleLock);
+    UTL_LockClose(&poolCtx->taskLock);
     ENT_ThreadClose(poolCtx->thHandle);
 
     free(poolCtx);

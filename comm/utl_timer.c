@@ -302,7 +302,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerClose()
     }
 
     iUTL_TimerLifecycleLockEnter();
-    UTL_LockClose(sTimerCtx.dllLock);
+    UTL_LockClose(&sTimerCtx.dllLock);
     memset(&sTimerCtx,0,sizeof(sTimerCtx));
     sUtilTimerInit = false;
     sTimerClosing = FALSE;
@@ -346,7 +346,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerInit()
         sts = UTL_DllInitHead(&sTimerCtx.dllHeader);
         if(sts<0)
         {
-            UTL_LockClose(sTimerCtx.dllLock);
+            UTL_LockClose(&sTimerCtx.dllLock);
             IENT_LOG_ERROR("UTL_DllInitHead failed,sts [%d].\n",sts);
             goto END_OF_ROUTINE;
         }
@@ -699,7 +699,7 @@ static MSG_ID_T iUTL_TimerCreateRt(UTL_TIMER_T* pTimer,unsigned int type,int per
     sts = UTL_CVInit(&timerCtx->cbCv,"timer_rt_cb");
     if(sts < 0)
     {
-        UTL_LockClose(timerCtx->cbLock);
+        UTL_LockClose(&timerCtx->cbLock);
         free(timerCtx);
         return ENT_TMR_THREAD_FAILED;
     }
@@ -707,8 +707,8 @@ static MSG_ID_T iUTL_TimerCreateRt(UTL_TIMER_T* pTimer,unsigned int type,int per
     if(pthread_create(&timerCtx->cbWorker, NULL, iUTL_TimerCallbackWorker, timerCtx) != 0)
     {
         IENT_LOG_ERROR("pthread_create callback worker failed,error [%d]->[%s]\n",errno,strerror(errno));
-        UTL_CVClose(timerCtx->cbCv);
-        UTL_LockClose(timerCtx->cbLock);
+        UTL_CVClose(&timerCtx->cbCv);
+        UTL_LockClose(&timerCtx->cbLock);
         free(timerCtx);
         return ENT_TMR_THREAD_FAILED;
     }
@@ -718,8 +718,8 @@ static MSG_ID_T iUTL_TimerCreateRt(UTL_TIMER_T* pTimer,unsigned int type,int per
         timerCtx->stopCallbackWorker = TRUE;
         UTL_CVWakeAll(timerCtx->cbCv);
         pthread_join(timerCtx->cbWorker, NULL);
-        UTL_CVClose(timerCtx->cbCv);
-        UTL_LockClose(timerCtx->cbLock);
+        UTL_CVClose(&timerCtx->cbCv);
+        UTL_LockClose(&timerCtx->cbLock);
         free(timerCtx);
         return ENT_TMR_THREAD_FAILED;
     }
@@ -731,8 +731,8 @@ static MSG_ID_T iUTL_TimerCreateRt(UTL_TIMER_T* pTimer,unsigned int type,int per
         UTL_CVWakeAll(timerCtx->cbCv);
         pthread_join(timerCtx->rtWorker, NULL);
         pthread_join(timerCtx->cbWorker, NULL);
-        UTL_CVClose(timerCtx->cbCv);
-        UTL_LockClose(timerCtx->cbLock);
+        UTL_CVClose(&timerCtx->cbCv);
+        UTL_LockClose(&timerCtx->cbLock);
         free(timerCtx);
         IENT_LOG_WARN("realtime timer create aborted because close started\n");
         return ENT_TMR_NOT_INITIALIZED;
@@ -748,8 +748,8 @@ static MSG_ID_T iUTL_TimerCreateRt(UTL_TIMER_T* pTimer,unsigned int type,int per
         UTL_CVWakeAll(timerCtx->cbCv);
         pthread_join(timerCtx->rtWorker, NULL);
         pthread_join(timerCtx->cbWorker, NULL);
-        UTL_CVClose(timerCtx->cbCv);
-        UTL_LockClose(timerCtx->cbLock);
+        UTL_CVClose(&timerCtx->cbCv);
+        UTL_LockClose(&timerCtx->cbLock);
         free(timerCtx);
         return ENT_TMR_LIST_FAILED;
     }
@@ -784,8 +784,8 @@ static MSG_ID_T iUTL_TimerDeleteRt(PTIMER_CTX_T timerCtx)
     sts = UTL_DllRemCurr((DLL_D_HDR*)timerCtx,&tmpDll);
     UTL_LockLeave(sTimerCtx.dllLock);
 
-    UTL_CVClose(timerCtx->cbCv);
-    UTL_LockClose(timerCtx->cbLock);
+    UTL_CVClose(&timerCtx->cbCv);
+    UTL_LockClose(&timerCtx->cbLock);
     memset(timerCtx,0,sizeof(TIMER_CTX_T));
     free(timerCtx);
     if(sts < 0)
@@ -817,7 +817,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerInit()
     sts = UTL_DllInitHead(&sTimerCtx.dllHeader);
     if(sts<0)
     {
-        UTL_LockClose(sTimerCtx.dllLock);
+        UTL_LockClose(&sTimerCtx.dllLock);
         IENT_LOG_ERROR("UTL_DllInitHead failed,sts [%d].\n",sts);
         goto END_OF_ROUTINE;
     }
@@ -826,7 +826,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerInit()
     sigemptyset(&sa.sa_mask);
     if(sigaction(SIG_UTL, &sa, NULL) == -1)
     {
-        UTL_LockClose(sTimerCtx.dllLock);
+        UTL_LockClose(&sTimerCtx.dllLock);
         IENT_LOG_ERROR("sigaction failed,error [%d]->[%s]\n",errno,strerror(errno));
         sts = ENT_TMR_CREATE_FAILED;
         goto END_OF_ROUTINE;
@@ -1102,7 +1102,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerInit()
     sts = UTL_DllInitHead(&sTimerCtx.dllHeader);
     if(sts<0)
     {
-        UTL_LockClose(sTimerCtx.dllLock);
+        UTL_LockClose(&sTimerCtx.dllLock);
         IENT_LOG_ERROR("UTL_DllInitHead failed,sts [%d].\n",sts);
         iUTL_TimerLifecycleLockLeave();
         return ENT_TMR_LIST_FAILED;

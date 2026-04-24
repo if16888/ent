@@ -256,7 +256,7 @@ static int test_mutex_lock_roundtrip_succeeds(void)
         return 1;
     }
 
-    return expect_true(UTL_LockClose(lock) == 0, "UTL_LockClose should release a mutex lock");
+    return expect_true(UTL_LockClose(&lock) == 0, "UTL_LockClose should release a mutex lock");
 }
 
 static int test_rw_lock_read_roundtrip_succeeds(void)
@@ -278,7 +278,7 @@ static int test_rw_lock_read_roundtrip_succeeds(void)
         return 1;
     }
 
-    return expect_true(UTL_LockClose(lock) == 0, "UTL_LockClose should release an rw lock");
+    return expect_true(UTL_LockClose(&lock) == 0, "UTL_LockClose should release an rw lock");
 }
 
 static int test_rw_lock_requires_explicit_enter_and_leave_mode(void)
@@ -293,50 +293,50 @@ static int test_rw_lock_requires_explicit_enter_and_leave_mode(void)
     if(expect_true(UTL_LockEnter(lock) == ENT_UTHD_RWMODE_REQUIRED,
                    "UTL_LockEnter should reject rw locks unless the caller specifies read or write mode explicitly") != 0)
     {
-        UTL_LockClose(lock);
+        UTL_LockClose(&lock);
         return 1;
     }
 
     if(expect_true(UTL_LockLeave(lock) == ENT_UTHD_RWMODE_REQUIRED,
                    "UTL_LockLeave should reject rw locks unless the caller specifies read or write mode explicitly") != 0)
     {
-        UTL_LockClose(lock);
+        UTL_LockClose(&lock);
         return 1;
     }
 
-    return expect_true(UTL_LockClose(lock) == 0, "UTL_LockClose should release the rw lock after explicit mode checks");
+    return expect_true(UTL_LockClose(&lock) == 0, "UTL_LockClose should release the rw lock after explicit mode checks");
 }
 
-static int test_lock_close_safe_closes_and_nulls_handle(void)
+static int test_lock_close_closes_and_nulls_handle(void)
 {
     UTL_LOCK lock = NULL;
 
     if(expect_true(UTL_LockInit(&lock, "safe") == ENT_SYS_NORMAL,
-                   "UTL_LockInit should create a lock for safe close") != 0)
+                   "UTL_LockInit should create a lock for close") != 0)
     {
         return 1;
     }
 
-    if(expect_true(UTL_LockCloseSafe(&lock) == ENT_SYS_NORMAL,
-                   "UTL_LockCloseSafe should close the lock") != 0)
+    if(expect_true(UTL_LockClose(&lock) == ENT_SYS_NORMAL,
+                   "UTL_LockClose should close the lock") != 0)
     {
         return 1;
     }
 
     if(expect_true(lock == NULL,
-                   "UTL_LockCloseSafe should clear the caller-owned lock handle") != 0)
+                   "UTL_LockClose should clear the caller-owned lock handle") != 0)
     {
         return 1;
     }
 
-    if(expect_true(UTL_LockCloseSafe(&lock) == ENT_UTHD_INVALID_ARGUMENT,
-                   "UTL_LockCloseSafe should reject an already-cleared handle") != 0)
+    if(expect_true(UTL_LockClose(&lock) == ENT_UTHD_INVALID_ARGUMENT,
+                   "UTL_LockClose should reject an already-cleared handle") != 0)
     {
         return 1;
     }
 
-    return expect_true(UTL_LockCloseSafe(NULL) == ENT_UTHD_INVALID_ARGUMENT,
-                       "UTL_LockCloseSafe should reject a NULL handle pointer");
+    return expect_true(UTL_LockClose(NULL) == ENT_UTHD_INVALID_ARGUMENT,
+                       "UTL_LockClose should reject a NULL handle pointer");
 }
 
 static int test_cv_wait_rejects_spin_lock(void)
@@ -351,57 +351,57 @@ static int test_cv_wait_rejects_spin_lock(void)
 
     if(expect_true(UTL_CVInit(&cv, "cv") == 0, "UTL_CVInit should create a condition variable") != 0)
     {
-        UTL_LockClose(lock);
+        UTL_LockClose(&lock);
         return 1;
     }
 
     if(expect_true(UTL_CVWait(cv, lock, 1, RW_WRITE_E) == ENT_UTHD_UNSUPPORTED_LOCK,
                    "UTL_CVWait should reject unsupported spin locks") != 0)
     {
-        UTL_CVClose(cv);
-        UTL_LockClose(lock);
+        UTL_CVClose(&cv);
+        UTL_LockClose(&lock);
         return 1;
     }
 
-    if(expect_true(UTL_CVClose(cv) == 0, "UTL_CVClose should release the condition variable") != 0)
+    if(expect_true(UTL_CVClose(&cv) == 0, "UTL_CVClose should release the condition variable") != 0)
     {
-        UTL_LockClose(lock);
+        UTL_LockClose(&lock);
         return 1;
     }
 
-    return expect_true(UTL_LockClose(lock) == 0, "UTL_LockClose should release the spin lock");
+    return expect_true(UTL_LockClose(&lock) == 0, "UTL_LockClose should release the spin lock");
 }
 
-static int test_cv_close_safe_closes_and_nulls_handle(void)
+static int test_cv_close_closes_and_nulls_handle(void)
 {
     UTL_CV cv = NULL;
 
     if(expect_true(UTL_CVInit(&cv, "safe-cv") == ENT_SYS_NORMAL,
-                   "UTL_CVInit should create a condition variable for safe close") != 0)
+                   "UTL_CVInit should create a condition variable for close") != 0)
     {
         return 1;
     }
 
-    if(expect_true(UTL_CVCloseSafe(&cv) == ENT_SYS_NORMAL,
-                   "UTL_CVCloseSafe should close the condition variable") != 0)
+    if(expect_true(UTL_CVClose(&cv) == ENT_SYS_NORMAL,
+                   "UTL_CVClose should close the condition variable") != 0)
     {
         return 1;
     }
 
     if(expect_true(cv == NULL,
-                   "UTL_CVCloseSafe should clear the caller-owned condition-variable handle") != 0)
+                   "UTL_CVClose should clear the caller-owned condition-variable handle") != 0)
     {
         return 1;
     }
 
-    if(expect_true(UTL_CVCloseSafe(&cv) == ENT_UTHD_INVALID_ARGUMENT,
-                   "UTL_CVCloseSafe should reject an already-cleared handle") != 0)
+    if(expect_true(UTL_CVClose(&cv) == ENT_UTHD_INVALID_ARGUMENT,
+                   "UTL_CVClose should reject an already-cleared handle") != 0)
     {
         return 1;
     }
 
-    return expect_true(UTL_CVCloseSafe(NULL) == ENT_UTHD_INVALID_ARGUMENT,
-                       "UTL_CVCloseSafe should reject a NULL handle pointer");
+    return expect_true(UTL_CVClose(NULL) == ENT_UTHD_INVALID_ARGUMENT,
+                       "UTL_CVClose should reject a NULL handle pointer");
 }
 
 static int test_cv_wake_and_wake_all_reject_null(void)
@@ -427,14 +427,14 @@ static int test_cv_wait_uses_monotonic_deadline_and_normalized_timespec(void)
 
     if(expect_true(UTL_CVInit(&cv, "cv") == 0, "UTL_CVInit should create a condition variable for timing checks") != 0)
     {
-        UTL_LockClose(lock);
+        UTL_LockClose(&lock);
         return 1;
     }
 
     if(expect_true(UTL_LockEnter(lock) == 0, "UTL_LockEnter should lock the mutex before waiting on Windows") != 0)
     {
-        UTL_CVClose(cv);
-        UTL_LockClose(lock);
+        UTL_CVClose(&cv);
+        UTL_LockClose(&lock);
         return 1;
     }
 
@@ -442,25 +442,25 @@ static int test_cv_wait_uses_monotonic_deadline_and_normalized_timespec(void)
                    "UTL_CVWait should accept a timed mutex wait on Windows") != 0)
     {
         UTL_LockLeave(lock);
-        UTL_CVClose(cv);
-        UTL_LockClose(lock);
+        UTL_CVClose(&cv);
+        UTL_LockClose(&lock);
         return 1;
     }
 
     if(expect_true(UTL_LockLeave(lock) == 0, "UTL_LockLeave should release the mutex after waiting on Windows") != 0)
     {
-        UTL_CVClose(cv);
-        UTL_LockClose(lock);
+        UTL_CVClose(&cv);
+        UTL_LockClose(&lock);
         return 1;
     }
 
-    if(expect_true(UTL_CVClose(cv) == 0, "UTL_CVClose should release the condition variable after timing checks") != 0)
+    if(expect_true(UTL_CVClose(&cv) == 0, "UTL_CVClose should release the condition variable after timing checks") != 0)
     {
-        UTL_LockClose(lock);
+        UTL_LockClose(&lock);
         return 1;
     }
 
-    return expect_true(UTL_LockClose(lock) == 0, "UTL_LockClose should release the mutex after timing checks");
+    return expect_true(UTL_LockClose(&lock) == 0, "UTL_LockClose should release the mutex after timing checks");
 #else
     UTL_LOCK lock = NULL;
     UTL_CV cv = NULL;
@@ -472,7 +472,7 @@ static int test_cv_wait_uses_monotonic_deadline_and_normalized_timespec(void)
 
     if(expect_true(UTL_CVInit(&cv, "cv") == 0, "UTL_CVInit should create a condition variable for timing checks") != 0)
     {
-        UTL_LockClose(lock);
+        UTL_LockClose(&lock);
         return 1;
     }
 
@@ -481,42 +481,42 @@ static int test_cv_wait_uses_monotonic_deadline_and_normalized_timespec(void)
     if(expect_true(UTL_CVWait(cv, lock, 600, RW_WRITE_E) == 0,
                    "UTL_CVWait should accept a timed mutex wait") != 0)
     {
-        UTL_CVClose(cv);
-        UTL_LockClose(lock);
+        UTL_CVClose(&cv);
+        UTL_LockClose(&lock);
         return 1;
     }
 
     if(expect_true(s_clock_gettime_call_count == 1,
                    "UTL_CVWait should capture the current time exactly once for a timed wait") != 0)
     {
-        UTL_CVClose(cv);
-        UTL_LockClose(lock);
+        UTL_CVClose(&cv);
+        UTL_LockClose(&lock);
         return 1;
     }
 
     if(expect_true(s_timedwait_call_count == 1,
                    "UTL_CVWait should call pthread_cond_timedwait for timed mutex waits") != 0)
     {
-        UTL_CVClose(cv);
-        UTL_LockClose(lock);
+        UTL_CVClose(&cv);
+        UTL_LockClose(&lock);
         return 1;
     }
 
     if(expect_true(s_last_timedwait_deadline.tv_sec == 101 && s_last_timedwait_deadline.tv_nsec == 599500000,
                    "UTL_CVWait should normalize timed wait deadlines when nanoseconds overflow") != 0)
     {
-        UTL_CVClose(cv);
-        UTL_LockClose(lock);
+        UTL_CVClose(&cv);
+        UTL_LockClose(&lock);
         return 1;
     }
 
-    if(expect_true(UTL_CVClose(cv) == 0, "UTL_CVClose should release the condition variable after timing checks") != 0)
+    if(expect_true(UTL_CVClose(&cv) == 0, "UTL_CVClose should release the condition variable after timing checks") != 0)
     {
-        UTL_LockClose(lock);
+        UTL_LockClose(&lock);
         return 1;
     }
 
-    return expect_true(UTL_LockClose(lock) == 0, "UTL_LockClose should release the mutex after timing checks");
+    return expect_true(UTL_LockClose(&lock) == 0, "UTL_LockClose should release the mutex after timing checks");
 #endif
 }
 
@@ -531,9 +531,9 @@ int main(void)
     failures += test_mutex_lock_roundtrip_succeeds();
     failures += test_rw_lock_read_roundtrip_succeeds();
     failures += test_rw_lock_requires_explicit_enter_and_leave_mode();
-    failures += test_lock_close_safe_closes_and_nulls_handle();
+    failures += test_lock_close_closes_and_nulls_handle();
     failures += test_cv_wait_rejects_spin_lock();
-    failures += test_cv_close_safe_closes_and_nulls_handle();
+    failures += test_cv_close_closes_and_nulls_handle();
     failures += test_cv_wake_and_wake_all_reject_null();
     failures += test_cv_wait_uses_monotonic_deadline_and_normalized_timespec();
 

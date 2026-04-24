@@ -592,44 +592,33 @@ static MSG_ID_T iUTL_LockCloseSpin(UTL_LOCK lock)
     return 0;
 }
 
-ENT_PUBLIC MSG_ID_T UTL_LockClose(UTL_LOCK lock)
+ENT_PUBLIC MSG_ID_T UTL_LockClose(UTL_LOCK* lock)
 {
     MSG_ID_T sts = 0;
-    if(lock == NULL)
+    if(lock == NULL || *lock == NULL)
     {
         IENT_LOG_ERROR("lock handle is null\n");
         return ENT_UTHD_INVALID_ARGUMENT;
     }
 
-    UTL_TH_LOCK* tmp = (UTL_TH_LOCK*)lock;
+    UTL_TH_LOCK* tmp = (UTL_TH_LOCK*)(*lock);
     switch(tmp->lockType)
     {
         case LOCK_MUTEX_E:
-            sts = iUTL_LockCloseMutex(lock);
+            sts = iUTL_LockCloseMutex(*lock);
             break;
         case LOCK_RW_E:
-            sts = iUTL_LockCloseRW(lock);
+            sts = iUTL_LockCloseRW(*lock);
             break;
         case LOCK_SPIN_E:
-            sts = iUTL_LockCloseSpin(lock);
+            sts = iUTL_LockCloseSpin(*lock);
             break;
         default:
             IENT_LOG_ERROR("unknow lock type [%d]\n",tmp->lockType);
             sts = -4;
             break;
     }
-
-    return iUTL_MapLockSts(sts);
-}
-
-ENT_PUBLIC MSG_ID_T UTL_LockCloseSafe(UTL_LOCK* lock)
-{
-    MSG_ID_T sts;
-    if(lock == NULL || *lock == NULL)
-    {
-        return ENT_UTHD_INVALID_ARGUMENT;
-    }
-    sts = UTL_LockClose(*lock);
+    sts = iUTL_MapLockSts(sts);
     if(sts == ENT_SYS_NORMAL)
     {
         *lock = NULL;
@@ -692,15 +681,15 @@ ENT_PUBLIC MSG_ID_T UTL_CVInit(UTL_CV* cv,const char* name)
     return ENT_SYS_NORMAL;
 }
 
-ENT_PUBLIC MSG_ID_T UTL_CVClose(UTL_CV cv)
+ENT_PUBLIC MSG_ID_T UTL_CVClose(UTL_CV* cv)
 {
-    if(cv == NULL)
+    if(cv == NULL || *cv == NULL)
     {
         IENT_LOG_ERROR("cv handle is null\n");
         return ENT_UTHD_INVALID_ARGUMENT;
     }
 
-    UTL_TH_CV* tmp = (UTL_TH_CV*)cv;
+    UTL_TH_CV* tmp = (UTL_TH_CV*)(*cv);
 #ifdef WIN32
 #else
     pthread_cond_destroy(&tmp->cv);
@@ -710,22 +699,8 @@ ENT_PUBLIC MSG_ID_T UTL_CVClose(UTL_CV cv)
         free(tmp->cvName);
     }
     free(tmp);
+    *cv = NULL;
     return ENT_SYS_NORMAL;
-}
-
-ENT_PUBLIC MSG_ID_T UTL_CVCloseSafe(UTL_CV* cv)
-{
-    MSG_ID_T sts;
-    if(cv == NULL || *cv == NULL)
-    {
-        return ENT_UTHD_INVALID_ARGUMENT;
-    }
-    sts = UTL_CVClose(*cv);
-    if(sts == ENT_SYS_NORMAL)
-    {
-        *cv = NULL;
-    }
-    return sts;
 }
 
 static MSG_ID_T iUTL_CVWaitMutex(UTL_TH_CV* cvCtx,UTL_TH_LOCK* lockCtx,int ms)

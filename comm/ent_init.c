@@ -486,7 +486,7 @@ static MSG_ID_T iENT_CTXInit(ENT_CTX* ctx,
     {
         IENT_LOG_ERROR("UTL_CVInit failed,sts [%d]\n",sts);
         iENT_CTXFree(ctx);
-        UTL_LockClose(ctx->entLock);
+        UTL_LockClose(&ctx->entLock);
         ctx->entLock = NULL;
         iENT_CTXCloseLog(ctx,true,createDefaultLog);
         iENT_CTXResetRuntime(ctx);
@@ -521,10 +521,10 @@ static MSG_ID_T iENT_CTXClose(ENT_CTX* ctx)
     }
 #endif
 
-    UTL_CVClose(ctx->entCV);
+    UTL_CVClose(&ctx->entCV);
     ctx->entCV = NULL;
 
-    UTL_LockClose(ctx->entLock);
+    UTL_LockClose(&ctx->entLock);
     ctx->entLock = NULL;
 
     iENT_CTXCloseLog(ctx, true, iENT_CTXUsesDefaultLog(ctx));

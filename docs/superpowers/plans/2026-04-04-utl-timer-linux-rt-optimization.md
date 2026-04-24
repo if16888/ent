@@ -388,8 +388,8 @@ static MSG_ID_T iUTL_TimerDeleteRt(PTIMER_CTX_T timerCtx)
     UTL_DllRemCurr((DLL_D_HDR*)timerCtx, &tmpDll);
     UTL_LockLeave(sTimerCtx.dllLock);
 
-    UTL_CVClose(timerCtx->cbCv);
-    UTL_LockClose(timerCtx->cbLock);
+    UTL_CVClose(&timerCtx->cbCv);
+    UTL_LockClose(&timerCtx->cbLock);
     memset(timerCtx, 0, sizeof(*timerCtx));
     free(timerCtx);
     return 0;

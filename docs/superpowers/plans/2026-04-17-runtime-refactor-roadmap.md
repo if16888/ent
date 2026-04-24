@@ -313,8 +313,8 @@
                                               bool closeLock,
                                               bool closeCv)
   {
-      if(closeCv && ctx->entCV != NULL) { UTL_CVClose(ctx->entCV); ctx->entCV = NULL; }
-      if(closeLock && ctx->entLock != NULL) { UTL_LockClose(ctx->entLock); ctx->entLock = NULL; }
+      if(closeCv && ctx->entCV != NULL) { UTL_CVClose(&ctx->entCV); ctx->entCV = NULL; }
+      if(closeLock && ctx->entLock != NULL) { UTL_LockClose(&ctx->entLock); ctx->entLock = NULL; }
       iENT_CTXCloseLog(ctx, closeEntLog, closeDefaultLog);
       iENT_CTXFree(ctx);
       iENT_CTXResetRuntime(ctx);
