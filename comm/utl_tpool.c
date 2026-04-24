@@ -19,6 +19,11 @@
 #include <time.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef WIN32
+#include <windows.h>
+#else
+#include <pthread.h>
+#endif
 #include "ient_comm.h"
 #include "ent_msg.h"
 #include "ent_thread.h"
@@ -31,21 +36,32 @@ typedef enum
     TASK_E_TYPE_PAUSE
 }TASK_E_TYPE;
 
-typedef struct 
+typedef enum
 {
-    unsigned int  tag;
-    BOOL          acceptingTasks;
-    BOOL          closing;
-    ENT_THREAD    thHandle;
-    UTL_LOCK      taskLock;
-    UTL_LOCK      recycleLock;
-    UTL_CV        taskEmptyCV;
-    DLL_D_HDR     taskActiveHeader;
-    DLL_D_HDR     taskFinishHeader;
-    int           taskNum;
-    int           threadNum;
-    int           waitNum;
-    DLL_D_HDR     threadHeader;
+    UTL_TPOOL_STATE_CREATED_E = 0,
+    UTL_TPOOL_STATE_ACTIVE_E,
+    UTL_TPOOL_STATE_CLOSING_E,
+    UTL_TPOOL_STATE_CLOSED_E
+} UTL_TPOOL_STATE_E;
+
+typedef struct UTL_TPOOL_CTX_TAG
+{
+    unsigned int              tag;
+    BOOL                      acceptingTasks;
+    BOOL                      closing;
+    UTL_TPOOL_STATE_E         state;
+    int                       activeOps;
+    struct UTL_TPOOL_CTX_TAG* registryNext;
+    ENT_THREAD                thHandle;
+    UTL_LOCK                  taskLock;
+    UTL_LOCK                  recycleLock;
+    UTL_CV                    taskEmptyCV;
+    DLL_D_HDR                 taskActiveHeader;
+    DLL_D_HDR                 taskFinishHeader;
+    int                       taskNum;
+    int                       threadNum;
+    int                       waitNum;
+    DLL_D_HDR                 threadHeader;
 }UTL_TPOOL_CTX;
 
 typedef struct
@@ -63,24 +79,181 @@ typedef struct
     TASK_E_TYPE       taskType;
     time_t            taskStartTime;
     ENT_THREAD_ID     thId;
-    UTL_TPOOL_CTX*    pool;  
+    UTL_TPOOL_CTX*    pool;
 }UTL_TPOOL_THREAD;
 
 static int sPoolIdx;
 
 #define DEFAULT_NUM   8
 #define UTL_TPOOL_TAG (0xEB90F00D)
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :  iUTL_TPoolTaskPro
- *
- * DESCRIPTION :  
- *
- * COMPLETION
- * STATUS      :  0
- *
- *-----------------------------------------------------------------------------
- */
+
+#ifdef WIN32
+static INIT_ONCE sTPoolRegistryOnce = INIT_ONCE_STATIC_INIT;
+static CRITICAL_SECTION sTPoolRegistryLock;
+static BOOL CALLBACK iUTL_TPoolRegistryInitOnce(PINIT_ONCE once, PVOID param, PVOID* context)
+{
+    (void)once;
+    (void)param;
+    (void)context;
+    InitializeCriticalSection(&sTPoolRegistryLock);
+    return TRUE;
+}
+static void iUTL_TPoolRegistryLock(void)
+{
+    InitOnceExecuteOnce(&sTPoolRegistryOnce, iUTL_TPoolRegistryInitOnce, NULL, NULL);
+    EnterCriticalSection(&sTPoolRegistryLock);
+}
+static void iUTL_TPoolRegistryUnlock(void)
+{
+    LeaveCriticalSection(&sTPoolRegistryLock);
+}
+#else
+static pthread_mutex_t sTPoolRegistryLock = PTHREAD_MUTEX_INITIALIZER;
+static void iUTL_TPoolRegistryLock(void)
+{
+    pthread_mutex_lock(&sTPoolRegistryLock);
+}
+static void iUTL_TPoolRegistryUnlock(void)
+{
+    pthread_mutex_unlock(&sTPoolRegistryLock);
+}
+#endif
+
+static UTL_TPOOL_CTX* sTPoolRegistryHead = NULL;
+
+static void iUTL_TPoolRegistryAdd(UTL_TPOOL_CTX* poolCtx)
+{
+    iUTL_TPoolRegistryLock();
+    poolCtx->registryNext = sTPoolRegistryHead;
+    sTPoolRegistryHead = poolCtx;
+    iUTL_TPoolRegistryUnlock();
+}
+
+static int iUTL_TPoolRegistryContainsLocked(UTL_TPOOL_CTX* poolCtx)
+{
+    UTL_TPOOL_CTX* cur = sTPoolRegistryHead;
+    while(cur != NULL)
+    {
+        if(cur == poolCtx)
+        {
+            return 1;
+        }
+        cur = cur->registryNext;
+    }
+    return 0;
+}
+
+static void iUTL_TPoolRegistryRemoveLocked(UTL_TPOOL_CTX* poolCtx)
+{
+    UTL_TPOOL_CTX** cur = &sTPoolRegistryHead;
+    while(*cur != NULL)
+    {
+        if(*cur == poolCtx)
+        {
+            *cur = poolCtx->registryNext;
+            poolCtx->registryNext = NULL;
+            return;
+        }
+        cur = &((*cur)->registryNext);
+    }
+}
+
+static MSG_ID_T iUTL_TPoolAcquireOp(UTL_TPOOL pool, UTL_TPOOL_CTX** outPool)
+{
+    UTL_TPOOL_CTX* poolCtx = NULL;
+
+    if(outPool == NULL)
+    {
+        return ENT_TPL_BAD_ARGUMENT;
+    }
+    *outPool = NULL;
+    if(pool == NULL)
+    {
+        return ENT_TPL_BAD_ARGUMENT;
+    }
+
+    poolCtx = (UTL_TPOOL_CTX*)pool;
+    iUTL_TPoolRegistryLock();
+    if(!iUTL_TPoolRegistryContainsLocked(poolCtx) ||
+       poolCtx->tag != UTL_TPOOL_TAG ||
+       poolCtx->state != UTL_TPOOL_STATE_ACTIVE_E)
+    {
+        iUTL_TPoolRegistryUnlock();
+        return ENT_TPL_NOT_INITIALIZED;
+    }
+    poolCtx->activeOps++;
+    *outPool = poolCtx;
+    iUTL_TPoolRegistryUnlock();
+    return ENT_SYS_NORMAL;
+}
+
+static void iUTL_TPoolReleaseOp(UTL_TPOOL_CTX* poolCtx)
+{
+    if(poolCtx == NULL)
+    {
+        return;
+    }
+    iUTL_TPoolRegistryLock();
+    if(iUTL_TPoolRegistryContainsLocked(poolCtx) && poolCtx->activeOps > 0)
+    {
+        poolCtx->activeOps--;
+    }
+    iUTL_TPoolRegistryUnlock();
+}
+
+static MSG_ID_T iUTL_TPoolBeginClose(UTL_TPOOL pool, UTL_TPOOL_CTX** outPool)
+{
+    UTL_TPOOL_CTX* poolCtx = NULL;
+
+    if(outPool == NULL)
+    {
+        return ENT_TPL_BAD_ARGUMENT;
+    }
+    *outPool = NULL;
+    if(pool == NULL)
+    {
+        return ENT_TPL_BAD_ARGUMENT;
+    }
+
+    poolCtx = (UTL_TPOOL_CTX*)pool;
+    iUTL_TPoolRegistryLock();
+    if(!iUTL_TPoolRegistryContainsLocked(poolCtx) || poolCtx->tag != UTL_TPOOL_TAG)
+    {
+        iUTL_TPoolRegistryUnlock();
+        return ENT_TPL_BAD_ARGUMENT;
+    }
+    if(poolCtx->state == UTL_TPOOL_STATE_CLOSING_E || poolCtx->state == UTL_TPOOL_STATE_CLOSED_E)
+    {
+        iUTL_TPoolRegistryUnlock();
+        return ENT_SYS_NORMAL;
+    }
+    poolCtx->state = UTL_TPOOL_STATE_CLOSING_E;
+    *outPool = poolCtx;
+    iUTL_TPoolRegistryUnlock();
+    return ENT_SYS_NORMAL;
+}
+
+static void iUTL_TPoolWaitActiveOps(UTL_TPOOL_CTX* poolCtx)
+{
+    int activeOps = 0;
+
+    if(poolCtx == NULL)
+    {
+        return;
+    }
+
+    do
+    {
+        iUTL_TPoolRegistryLock();
+        activeOps = (iUTL_TPoolRegistryContainsLocked(poolCtx)) ? poolCtx->activeOps : 0;
+        iUTL_TPoolRegistryUnlock();
+        if(activeOps > 0)
+        {
+            UTL_Sleep(1);
+        }
+    } while(activeOps > 0);
+}
+
 static DWORD iUTL_TPoolTaskPro(void* data)
 {
     MSG_ID_T            sts = 0;
@@ -97,7 +270,7 @@ static DWORD iUTL_TPoolTaskPro(void* data)
     thCtx = (UTL_TPOOL_THREAD*)data;
     poolCtx = thCtx->pool;
 
-    do 
+    do
     {
         UTL_LockEnter(poolCtx->taskLock);
         while(tmp==NULL)
@@ -142,7 +315,7 @@ static DWORD iUTL_TPoolTaskPro(void* data)
                 poolCtx->threadNum--;
                 UTL_LockLeave(poolCtx->taskLock);
                 return 0;
-            }   
+            }
         }
         UTL_LockLeave(poolCtx->taskLock);
 
@@ -171,51 +344,20 @@ static DWORD iUTL_TPoolTaskPro(void* data)
 
     return 0;
 }
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :  iUTL_TPoolTaskProWin
- *
- * DESCRIPTION :  
- *
- * COMPLETION
- * STATUS      :  0
- *
- *-----------------------------------------------------------------------------
- */
+
 #ifdef WIN32
 static DWORD WINAPI  iUTL_TPoolTaskProWin(void* data)
 {
     return iUTL_TPoolTaskPro(data);
 }
 #else
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :  iUTL_TPoolTaskProLinux
- *
- * DESCRIPTION :  
- *
- * COMPLETION
- * STATUS      :  0
- *
- *-----------------------------------------------------------------------------
- */
 static void*  iUTL_TPoolTaskProLinux(void* data)
 {
      iUTL_TPoolTaskPro(data);
      return NULL;
 }
 #endif
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :  UTL_TPoolInit
- *
- * DESCRIPTION :  
- *
- * COMPLETION
- * STATUS      :  0
- *
- *-----------------------------------------------------------------------------
- */
+
 ENT_PUBLIC MSG_ID_T  UTL_TPoolInit(UTL_TPOOL*  pool,int num)
 {
     MSG_ID_T          sts=0;
@@ -238,6 +380,9 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolInit(UTL_TPOOL*  pool,int num)
     poolCtx->tag = UTL_TPOOL_TAG;
     poolCtx->acceptingTasks = TRUE;
     poolCtx->closing = FALSE;
+    poolCtx->state = UTL_TPOOL_STATE_CREATED_E;
+    poolCtx->activeOps = 0;
+    poolCtx->registryNext = NULL;
 
     sts = ENT_ThreadInit(&poolCtx->thHandle);
     if(sts < 0)
@@ -321,21 +466,13 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolInit(UTL_TPOOL*  pool,int num)
         return ENT_TPL_WORKER_CREATEFAIL;
     }
 
+    poolCtx->state = UTL_TPOOL_STATE_ACTIVE_E;
+    iUTL_TPoolRegistryAdd(poolCtx);
     *pool = poolCtx;
 
     return ENT_SYS_NORMAL;
 }
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :  UTL_TPoolClose
- *
- * DESCRIPTION :  
- *
- * COMPLETION
- * STATUS      :  0
- *
- *-----------------------------------------------------------------------------
- */
+
 ENT_PUBLIC MSG_ID_T  UTL_TPoolClose(UTL_TPOOL  pool)
 {
     MSG_ID_T            sts = 0;
@@ -344,24 +481,20 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolClose(UTL_TPOOL  pool)
     UTL_TPOOL_TASK*     taskDb = NULL;
     DLL_D_HDR*          tmp = NULL;
     DLL_D_HDR*          curr = NULL;
-    if(pool==NULL)
-    {
-        IENT_LOG_ERROR("thread pool init handle is null\n");
-        return ENT_TPL_BAD_ARGUMENT;
-    }
-    poolCtx=(UTL_TPOOL_CTX*)pool;
-    if(poolCtx->tag != UTL_TPOOL_TAG)
+    sts = iUTL_TPoolBeginClose(pool, &poolCtx);
+    if(sts != ENT_SYS_NORMAL)
     {
         IENT_LOG_ERROR("invalid thread pool handle\n");
-        return ENT_TPL_BAD_ARGUMENT;
+        return sts;
     }
-
-    UTL_LockEnter(poolCtx->taskLock);
-    if(poolCtx->closing)
+    if(poolCtx == NULL)
     {
-        UTL_LockLeave(poolCtx->taskLock);
         return ENT_SYS_NORMAL;
     }
+
+    iUTL_TPoolWaitActiveOps(poolCtx);
+
+    UTL_LockEnter(poolCtx->taskLock);
     poolCtx->closing = TRUE;
     poolCtx->acceptingTasks = FALSE;
     curr = &poolCtx->threadHeader;
@@ -406,26 +539,21 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolClose(UTL_TPOOL  pool)
     }
     UTL_LockLeave(poolCtx->recycleLock);
 
+    iUTL_TPoolRegistryLock();
+    iUTL_TPoolRegistryRemoveLocked(poolCtx);
+    poolCtx->state = UTL_TPOOL_STATE_CLOSED_E;
     poolCtx->tag = 0;
+    iUTL_TPoolRegistryUnlock();
+
     UTL_CVClose(poolCtx->taskEmptyCV);
     UTL_LockClose(poolCtx->recycleLock);
     UTL_LockClose(poolCtx->taskLock);
     ENT_ThreadClose(poolCtx->thHandle);
-    
+
     free(poolCtx);
     return ENT_SYS_NORMAL;
 }
-/*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
- *
- * NAME        :  UTL_TPoolAddTask
- *
- * DESCRIPTION :  
- *
- * COMPLETION
- * STATUS      :  0
- *
- *-----------------------------------------------------------------------------
- */
+
 ENT_PUBLIC MSG_ID_T  UTL_TPoolAddTask(UTL_TPOOL pool,UTL_TP_TASK_F taskCb,UTL_TP_TASK_END_F taskEndCb,void* taskData,MSG_ID_T* retVal)
 {
     MSG_ID_T          sts = 0;
@@ -433,17 +561,16 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolAddTask(UTL_TPOOL pool,UTL_TP_TASK_F taskCb,UTL_TP
     UTL_TPOOL_TASK*   taskDb = NULL;
     DLL_D_HDR*        tmp = NULL;
     BOOL              shouldWake = FALSE;
-    if(pool==NULL || taskCb==NULL || retVal == NULL)
+    if(taskCb==NULL || retVal == NULL)
     {
         IENT_LOG_ERROR("invalid arguments\n");
         return ENT_TPL_BAD_ARGUMENT;
     }
 
-    poolCtx=(UTL_TPOOL_CTX*)pool;
-    if(poolCtx->tag != UTL_TPOOL_TAG)
+    sts = iUTL_TPoolAcquireOp(pool, &poolCtx);
+    if(sts != ENT_SYS_NORMAL)
     {
-        IENT_LOG_ERROR("invalid thread pool handle\n");
-        return ENT_TPL_BAD_ARGUMENT;
+        return sts;
     }
 
     UTL_LockEnter(poolCtx->recycleLock);
@@ -454,7 +581,8 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolAddTask(UTL_TPOOL pool,UTL_TP_TASK_F taskCb,UTL_TP
         taskDb = (UTL_TPOOL_TASK*)malloc(sizeof(UTL_TPOOL_TASK));
         if(taskDb == NULL)
         {
-            IENT_LOG_ERROR("malloc size [%d] failed\n",sizeof(UTL_TPOOL_TASK));
+            IENT_LOG_ERROR("malloc size [%d] failed\n",(int)sizeof(UTL_TPOOL_TASK));
+            iUTL_TPoolReleaseOp(poolCtx);
             return ENT_TPL_TASK_ALLOCFAIL;
         }
     }
@@ -474,6 +602,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolAddTask(UTL_TPOOL pool,UTL_TP_TASK_F taskCb,UTL_TP
     {
         UTL_LockLeave(poolCtx->taskLock);
         free(taskDb);
+        iUTL_TPoolReleaseOp(poolCtx);
         return ENT_TPL_NOT_INITIALIZED;
     }
     poolCtx->taskNum++;
@@ -483,6 +612,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolAddTask(UTL_TPOOL pool,UTL_TP_TASK_F taskCb,UTL_TP
         poolCtx->taskNum--;
         UTL_LockLeave(poolCtx->taskLock);
         free(taskDb);
+        iUTL_TPoolReleaseOp(poolCtx);
         return ENT_TPL_TASK_ALLOCFAIL;
     }
     shouldWake = (poolCtx->waitNum > 0) ? TRUE : FALSE;
@@ -491,6 +621,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolAddTask(UTL_TPOOL pool,UTL_TP_TASK_F taskCb,UTL_TP
     {
         UTL_CVWake(poolCtx->taskEmptyCV);
     }
-    
+
+    iUTL_TPoolReleaseOp(poolCtx);
     return ENT_SYS_NORMAL;
 }
