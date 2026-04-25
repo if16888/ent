@@ -44,7 +44,12 @@ static const char* s_first_log_init_handle_path = NULL;
 static const char* s_second_log_init_handle_module = NULL;
 static const char* s_second_log_init_handle_path = NULL;
 static ENT_LOG s_last_closed_log_handle = NULL;
+static ENT_LOG s_first_closed_log_handle = NULL;
+static ENT_LOG s_second_closed_log_handle = NULL;
 static ENT_LOG s_last_log_error_handle = NULL;
+static ENT_LOG s_last_log_set_option_handle = NULL;
+static ENT_LOG_OPTIONS_E s_last_log_set_option = (ENT_LOG_OPTIONS_E)-1;
+static int s_last_log_set_level = -1;
 static char s_expected_log_path[512];
 
 static const char* expected_log_path_for(const char* work_path)
@@ -103,7 +108,12 @@ static void reset_log_failures(void)
     s_second_log_init_handle_module = NULL;
     s_second_log_init_handle_path = NULL;
     s_last_closed_log_handle = NULL;
+    s_first_closed_log_handle = NULL;
+    s_second_closed_log_handle = NULL;
     s_last_log_error_handle = NULL;
+    s_last_log_set_option_handle = NULL;
+    s_last_log_set_option = (ENT_LOG_OPTIONS_E)-1;
+    s_last_log_set_level = -1;
     s_mlockall_result = 0;
     s_mlockall_errno = 0;
     s_mlockall_calls = 0;
@@ -195,10 +205,13 @@ MSG_ID_T ENT_LogInitHandle(ENT_LOG* pLogHandle, const char* moduleName, const ch
 
 MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const void* arg)
 {
-    (void)logHandle;
-    (void)option;
-    (void)arg;
     s_log_set_option_calls++;
+    s_last_log_set_option_handle = logHandle;
+    s_last_log_set_option = option;
+    if(option == ENT_LOG_LEVEL_E && arg != NULL)
+    {
+        s_last_log_set_level = *((const int*)arg);
+    }
     if(s_fail_log_set_option_call == s_log_set_option_calls)
     {
         return -200 - s_log_set_option_calls;
@@ -210,6 +223,14 @@ MSG_ID_T ENT_LogCloseHandle(ENT_LOG logHandle)
 {
     s_last_closed_log_handle = logHandle;
     s_log_close_handle_calls++;
+    if(s_log_close_handle_calls == 1)
+    {
+        s_first_closed_log_handle = logHandle;
+    }
+    else if(s_log_close_handle_calls == 2)
+    {
+        s_second_closed_log_handle = logHandle;
+    }
     return 0;
 }
 
@@ -448,7 +469,19 @@ static int test_ent_close_clears_runtime_handles(void)
         return 1;
     }
 
-    return expect_true(s_log_close_calls == 1, "ENT_Close should close logging exactly once");
+    if(expect_true(s_log_close_calls == 0, "ENT_Close should not close log service when ENT_LogInit was never acquired") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(s_first_closed_log_handle == (ENT_LOG)0x11 && s_second_closed_log_handle == NULL,
+                   "ENT_Close should close entity handle first, then default handle") != 0)
+    {
+        return 1;
+    }
+
+    return expect_true(s_last_closed_log_handle == NULL,
+                       "ENT_Close should close default log handle at service level (NULL handle)");
 }
 
 static int test_ent_init_closes_logging_when_default_log_level_setup_fails(void)
@@ -595,6 +628,18 @@ static int test_ent_init_builds_paths_without_trailing_separator(void)
 
     if(expect_true(s_log_set_option_calls == 2,
                    "ENT_Init should set log level for the default and entity loggers") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(s_last_log_set_option_handle == iENT_LogDefaultHandle(),
+                   "ENT_Init should set log option on the entity handle as the second call") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(s_last_log_set_option == ENT_LOG_LEVEL_E && s_last_log_set_level == LOG_LEV_WARN_E,
+                   "ENT_Init should set ENT_LOG_LEVEL_E to requested log level") != 0)
     {
         return 1;
     }
