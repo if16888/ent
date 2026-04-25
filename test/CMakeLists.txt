@@ -219,6 +219,38 @@ endif()
 add_test(NAME test_utl_tpool_lifecycle COMMAND test_utl_tpool_lifecycle)
 
 add_executable(
+  test_utl_tpool_integration
+  test_utl_tpool_integration.c
+  test_runtime_stub.c
+  ../comm/utl_tpool.c
+  ../comm/ent_thread.c
+  ../comm/utl_thread.c
+  ../comm/utl_dll.c
+  ../comm/utl_timer.c
+)
+
+target_include_directories(
+  test_utl_tpool_integration
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../comm
+)
+
+if(APPLE OR UNIX)
+  target_link_libraries(test_utl_tpool_integration PRIVATE pthread)
+endif()
+
+if(WIN32)
+  target_link_libraries(test_utl_tpool_integration PRIVATE Winmm)
+endif()
+
+if(UNIX AND NOT APPLE)
+  target_link_libraries(test_utl_tpool_integration PRIVATE rt)
+endif()
+
+add_test(NAME test_utl_tpool_integration COMMAND test_utl_tpool_integration)
+
+add_executable(
   test_utl_timer
   test_utl_timer.c
   test_runtime_stub.c
