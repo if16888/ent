@@ -305,10 +305,14 @@ MSG_ID_T UTL_LockLeaveEx(UTL_LOCK lock, UTL_LOCK_RW_TYPE_T rwType)
     return 0;
 }
 
-MSG_ID_T UTL_LockClose(UTL_LOCK lock)
+MSG_ID_T UTL_LockClose(UTL_LOCK* lock)
 {
     (void)lock;
     s_lock_close_calls++;
+    if(lock != NULL)
+    {
+        *lock = NULL;
+    }
     return 0;
 }
 
@@ -323,10 +327,14 @@ MSG_ID_T UTL_CVInit(UTL_CV* cv, const char* name)
     return 0;
 }
 
-MSG_ID_T UTL_CVClose(UTL_CV cv)
+MSG_ID_T UTL_CVClose(UTL_CV* cv)
 {
     (void)cv;
     s_cv_close_calls++;
+    if(cv != NULL)
+    {
+        *cv = NULL;
+    }
     return 0;
 }
 

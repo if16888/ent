@@ -106,16 +106,16 @@ static int test_rw_lock_requires_explicit_mode(void)
     if(expect_true(UTL_LockEnter(lock) == ENT_UTHD_RWMODE_REQUIRED,
                    "UTL_LockEnter should reject rw locks without explicit mode") != 0)
     {
-        UTL_LockClose(lock);
+        UTL_LockClose(&lock);
         return 1;
     }
     if(expect_true(UTL_LockLeave(lock) == ENT_UTHD_RWMODE_REQUIRED,
                    "UTL_LockLeave should reject rw locks without explicit mode") != 0)
     {
-        UTL_LockClose(lock);
+        UTL_LockClose(&lock);
         return 1;
     }
-    return expect_true(UTL_LockClose(lock) == ENT_SYS_NORMAL,
+    return expect_true(UTL_LockClose(&lock) == ENT_SYS_NORMAL,
                        "UTL_LockClose should release the rw lock");
 }
 
@@ -131,18 +131,18 @@ static int test_cv_wait_rejects_spin_lock(void)
     if(expect_true(UTL_CVInit(&cv, "cv") == ENT_SYS_NORMAL,
                    "UTL_CVInit should create a condition variable") != 0)
     {
-        UTL_LockClose(lock);
+        UTL_LockClose(&lock);
         return 1;
     }
     if(expect_true(UTL_CVWait(cv, lock, 1, RW_WRITE_E) == ENT_UTHD_UNSUPPORTED_LOCK,
                    "UTL_CVWait should reject spin locks") != 0)
     {
-        UTL_CVClose(cv);
-        UTL_LockClose(lock);
+        UTL_CVClose(&cv);
+        UTL_LockClose(&lock);
         return 1;
     }
-    UTL_CVClose(cv);
-    return expect_true(UTL_LockClose(lock) == ENT_SYS_NORMAL,
+    UTL_CVClose(&cv);
+    return expect_true(UTL_LockClose(&lock) == ENT_SYS_NORMAL,
                        "UTL_LockClose should release the spin lock");
 }
 
@@ -159,14 +159,14 @@ static int test_cv_wait_timeout_semantics(void)
     if(expect_true(UTL_CVInit(&cv, "cv") == ENT_SYS_NORMAL,
                    "UTL_CVInit should create a cv for timeout test") != 0)
     {
-        UTL_LockClose(lock);
+        UTL_LockClose(&lock);
         return 1;
     }
     if(expect_true(UTL_LockEnter(lock) == ENT_SYS_NORMAL,
                    "UTL_LockEnter should acquire mutex before timed wait") != 0)
     {
-        UTL_CVClose(cv);
-        UTL_LockClose(lock);
+        UTL_CVClose(&cv);
+        UTL_LockClose(&lock);
         return 1;
     }
     wait_sts = UTL_CVWait(cv, lock, 20, RW_WRITE_E);
@@ -174,13 +174,13 @@ static int test_cv_wait_timeout_semantics(void)
                    "UTL_CVWait should return timeout semantics") != 0)
     {
         UTL_LockLeave(lock);
-        UTL_CVClose(cv);
-        UTL_LockClose(lock);
+        UTL_CVClose(&cv);
+        UTL_LockClose(&lock);
         return 1;
     }
     UTL_LockLeave(lock);
-    UTL_CVClose(cv);
-    return expect_true(UTL_LockClose(lock) == ENT_SYS_NORMAL,
+    UTL_CVClose(&cv);
+    return expect_true(UTL_LockClose(&lock) == ENT_SYS_NORMAL,
                        "UTL_LockClose should release the mutex after timeout test");
 }
 
@@ -199,7 +199,7 @@ static int test_cv_wait_and_wake_roundtrip(void)
     if(expect_true(UTL_CVInit(&cv, "cv") == ENT_SYS_NORMAL,
                    "UTL_CVInit should create a cv for wake test") != 0)
     {
-        UTL_LockClose(lock);
+        UTL_LockClose(&lock);
         return 1;
     }
     probe.lock = lock;
@@ -209,8 +209,8 @@ static int test_cv_wait_and_wake_roundtrip(void)
         HANDLE th = CreateThread(NULL, 0, cv_wait_thread, &probe, 0, NULL);
         if(expect_true(th != NULL, "cv wait helper thread should start on Windows") != 0)
         {
-            UTL_CVClose(cv);
-            UTL_LockClose(lock);
+            UTL_CVClose(&cv);
+            UTL_LockClose(&lock);
             return 1;
         }
         sleep_ms(20);
@@ -227,8 +227,8 @@ static int test_cv_wait_and_wake_roundtrip(void)
         if(expect_true(pthread_create(&th, NULL, cv_wait_thread, &probe) == 0,
                        "cv wait helper thread should start on POSIX") != 0)
         {
-            UTL_CVClose(cv);
-            UTL_LockClose(lock);
+            UTL_CVClose(&cv);
+            UTL_LockClose(&lock);
             return 1;
         }
         sleep_ms(20);
@@ -242,12 +242,12 @@ static int test_cv_wait_and_wake_roundtrip(void)
     if(expect_true(probe.wait_status == ENT_SYS_NORMAL,
                    "helper thread should complete cv wait/wake roundtrip") != 0)
     {
-        UTL_CVClose(cv);
-        UTL_LockClose(lock);
+        UTL_CVClose(&cv);
+        UTL_LockClose(&lock);
         return 1;
     }
-    UTL_CVClose(cv);
-    return expect_true(UTL_LockClose(lock) == ENT_SYS_NORMAL,
+    UTL_CVClose(&cv);
+    return expect_true(UTL_LockClose(&lock) == ENT_SYS_NORMAL,
                        "UTL_LockClose should release the mutex after wake test");
 }
 

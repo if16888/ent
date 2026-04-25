@@ -6,29 +6,14 @@ This document records the current lifecycle contract for the low-level thread, l
 
 ### `UTL_LockClose()` / `UTL_CVClose()`
 
-The legacy close APIs take the handle value directly:
+`UTL_LockClose(&lock)` and `UTL_CVClose(&cv)` are the only close APIs.
 
 ```c
-UTL_LockClose(lock);
-UTL_CVClose(cv);
+UTL_LockClose(&lock);
+UTL_CVClose(&cv);
 ```
 
-After a successful close, the caller-owned variable still contains the old pointer value. Reusing that value is undefined and can become a use-after-free bug.
-
-### `UTL_LockCloseSafe()` / `UTL_CVCloseSafe()`
-
-Prefer the safe-close variants for new code:
-
-```c
-UTL_LockCloseSafe(&lock);
-UTL_CVCloseSafe(&cv);
-```
-
-These APIs:
-
-- validate the pointer-to-handle argument;
-- call the corresponding legacy close API;
-- set the caller-owned handle to `NULL` after successful close.
+These APIs validate the pointer-to-handle argument and set the caller-owned handle to `NULL` after successful close.
 
 They do not make it safe to close a lock or condition variable while another thread is actively using it. The caller must still guarantee that no thread is blocked on or holding the object when it is closed.
 

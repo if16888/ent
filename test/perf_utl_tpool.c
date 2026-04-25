@@ -110,7 +110,7 @@ int main(void)
     if(UTL_LockInit(&probe.done_lock, "perf_tpool_done") != 0) return EXIT_FAILURE;
     if(UTL_CVInit(&probe.done_cv, "perf_tpool_done") != 0)
     {
-        UTL_LockClose(probe.done_lock);
+        UTL_LockClose(&probe.done_lock);
         return EXIT_FAILURE;
     }
 
@@ -136,12 +136,12 @@ int main(void)
 
     if(UTL_TPoolClose(pool) != 0)
     {
-        UTL_CVClose(probe.done_cv);
-        UTL_LockClose(probe.done_lock);
+        UTL_CVClose(&probe.done_cv);
+        UTL_LockClose(&probe.done_lock);
         return EXIT_FAILURE;
     }
-    UTL_CVClose(probe.done_cv);
-    UTL_LockClose(probe.done_lock);
+    UTL_CVClose(&probe.done_cv);
+    UTL_LockClose(&probe.done_lock);
 
     printf("tpool workers=%d tasks=%d elapsed_ms=%.3f tasks_per_sec=%.3f\n",
            WORKERS,
