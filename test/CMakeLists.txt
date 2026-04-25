@@ -87,6 +87,7 @@ add_test(NAME test_utl_dll COMMAND test_utl_dll)
 add_executable(
   test_utl_thread
   test_utl_thread.c
+  test_runtime_stub.c
   ../comm/utl_thread.c
 )
 
@@ -106,6 +107,7 @@ add_test(NAME test_utl_thread COMMAND test_utl_thread)
 add_executable(
   test_utl_lock_cv
   test_utl_lock_cv.c
+  test_runtime_stub.c
   ../comm/utl_thread.c
 )
 
@@ -125,6 +127,7 @@ add_test(NAME test_utl_lock_cv COMMAND test_utl_lock_cv)
 add_executable(
   test_ent_thread
   test_ent_thread.c
+  test_runtime_stub.c
   ../comm/ent_thread.c
   ../comm/utl_thread.c
   ../comm/utl_dll.c
@@ -155,6 +158,7 @@ add_test(NAME test_ent_thread COMMAND test_ent_thread)
 add_executable(
   test_ent_thread_failures
   test_ent_thread_failures.c
+  test_runtime_stub.c
 )
 
 target_include_directories(
@@ -173,6 +177,7 @@ add_test(NAME test_ent_thread_failures COMMAND test_ent_thread_failures)
 add_executable(
   test_utl_tpool
   test_utl_tpool.c
+  test_runtime_stub.c
   ../comm/utl_tpool.c
   ../comm/utl_thread.c
   ../comm/utl_dll.c
@@ -194,6 +199,7 @@ add_test(NAME test_utl_tpool COMMAND test_utl_tpool)
 add_executable(
   test_utl_tpool_lifecycle
   test_utl_tpool_lifecycle.c
+  test_runtime_stub.c
   ../comm/utl_tpool.c
   ../comm/utl_thread.c
   ../comm/utl_dll.c
@@ -215,6 +221,7 @@ add_test(NAME test_utl_tpool_lifecycle COMMAND test_utl_tpool_lifecycle)
 add_executable(
   test_utl_timer
   test_utl_timer.c
+  test_runtime_stub.c
   ../comm/utl_timer.c
   ../comm/utl_thread.c
   ../comm/utl_dll.c
@@ -244,6 +251,7 @@ add_test(NAME test_utl_timer COMMAND test_utl_timer)
 add_executable(
   test_utl_socket
   test_utl_socket.c
+  test_runtime_stub.c
   ../comm/utl_socket.c
 )
 
@@ -264,6 +272,7 @@ if(ENT_ENABLE_SQLITE AND (NOT WIN32 OR ENT_SQLITE_LIBRARY))
   add_executable(
     test_ent_db
     test_ent_db.c
+    test_runtime_stub.c
     ../comm/ent_db.c
     ../comm/ent_db_sqlite.c
     ../comm/ent_db_mysql.c
@@ -443,6 +452,7 @@ endif()
 add_executable(
   perf_utl_socket
   perf_utl_socket.c
+  test_runtime_stub.c
   ../comm/utl_socket.c
 )
 
@@ -464,6 +474,7 @@ endif()
 add_executable(
   perf_utl_timer
   perf_utl_timer.c
+  test_runtime_stub.c
   ../comm/utl_timer.c
   ../comm/utl_thread.c
   ../comm/utl_dll.c
@@ -492,6 +503,7 @@ if(UNIX AND NOT APPLE)
   add_executable(
     perf_utl_timer_rt
     perf_utl_timer_rt.c
+    test_runtime_stub.c
     ../comm/utl_timer.c
     ../comm/utl_thread.c
     ../comm/utl_dll.c
@@ -511,6 +523,7 @@ endif()
 add_executable(
   perf_utl_tpool
   perf_utl_tpool.c
+  test_runtime_stub.c
   ../comm/utl_tpool.c
   ../comm/utl_thread.c
   ../comm/utl_dll.c
