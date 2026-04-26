@@ -142,8 +142,9 @@ ENT_PUBLIC MSG_ID_T  UTL_Listen(
 
 ENT_PUBLIC MSG_ID_T  UTL_Accept (
     UTL_D_SOCKET	        SocketListen,	 
-    const struct sockaddr* addr,
-    int                    addr_size);
+    struct sockaddr*       addr,
+    int*                   addr_size,
+    UTL_D_SOCKET*          pSocketDesc);
 
 ENT_PUBLIC MSG_ID_T  UTL_CloseSocket(
     UTL_D_SOCKET  SocketDesc);

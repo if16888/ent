@@ -291,33 +291,41 @@ ENT_PUBLIC MSG_ID_T  UTL_Listen(
  *-----------------------------------------------------------------------------
  */
 ENT_PUBLIC MSG_ID_T  UTL_Accept(
- UTL_D_SOCKET	        SocketListen,	 
- const struct sockaddr* addr,
- int                    addr_size) 
+ UTL_D_SOCKET	        SocketListen,
+ struct sockaddr*       addr,
+ int*                   addr_size,
+ UTL_D_SOCKET*          pSocketDesc)
 
 {
-    MSG_ID_T	    sts = 0;	    
-    struct sockaddr Sockaddr;	
-    int     	    SockaddrLen;
+    MSG_ID_T	    sts = 0;
     SOCKET          ret;
 
-    if (!sUtlInitFlag) 
+    if (!sUtlInitFlag)
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
     }
+    if(pSocketDesc == NULL || (addr != NULL && addr_size == NULL))
+    {
+        IENT_LOG_ERROR("unvalid args.\n");
+        return ENT_SOCK_BAD_ARGUMENT;
+    }
 
-    SockaddrLen= sizeof(struct sockaddr);
+    *pSocketDesc = INVALID_SOCKET;
     while ( ( ( ret = accept(
-	SocketListen,
-	&Sockaddr,
-	&SockaddrLen) ) ==  INVALID_SOCKET )
-	&& ( (WSAGetLastError() == WSAEINTR) && sUtlRetryFlag )  );
+		SocketListen,
+		addr,
+		addr_size) ) ==  INVALID_SOCKET )
+		&& ( (WSAGetLastError() == WSAEINTR) && sUtlRetryFlag )  );
 
     if ( ret == INVALID_SOCKET )
     {
         sts = ENT_SOCK_ACCEPT_FAILED;
         IENT_LOG_ERROR("accpet failed,error [%d].\n",WSAGetLastError());
+    }
+    else
+    {
+        *pSocketDesc = ret;
     }
 
     return sts;
@@ -837,33 +845,52 @@ ENT_PUBLIC MSG_ID_T  UTL_Listen(
  *-----------------------------------------------------------------------------
  */
 ENT_PUBLIC MSG_ID_T  UTL_Accept(
- UTL_D_SOCKET	        SocketListen,	 
- const struct sockaddr* addr,
- int                    addr_size) 
+ UTL_D_SOCKET	        SocketListen,
+ struct sockaddr*       addr,
+ int*                   addr_size,
+ UTL_D_SOCKET*          pSocketDesc)
 
 {
-    MSG_ID_T	    sts = 0;	    
-    struct sockaddr Sockaddr;	
-    socklen_t     	SockaddrLen;
+    MSG_ID_T	    sts = 0;
+    socklen_t     	SockaddrLen = 0;
+    socklen_t*      pSockaddrLen = NULL;
     int             ret;
 
-    if (!sUtlInitFlag) 
+    if (!sUtlInitFlag)
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
     }
+    if(pSocketDesc == NULL || (addr != NULL && addr_size == NULL))
+    {
+        IENT_LOG_ERROR("unvalid args.\n");
+        return ENT_SOCK_BAD_ARGUMENT;
+    }
 
-    SockaddrLen= sizeof(struct sockaddr);
+    *pSocketDesc = -1;
+    if(addr != NULL)
+    {
+        SockaddrLen = (socklen_t)*addr_size;
+        pSockaddrLen = &SockaddrLen;
+    }
     while ( ( ( ret = accept (
-	SocketListen,
-	&Sockaddr,
-	&SockaddrLen) ) < 0 )
-	&& ( (errno == EINTR) && sUtlRetryFlag )  );
+		SocketListen,
+		addr,
+		pSockaddrLen) ) < 0 )
+		&& ( (errno == EINTR) && sUtlRetryFlag )  );
 
     if ( ret < 0 )
     {
         sts = ENT_SOCK_ACCEPT_FAILED;
         IENT_LOG_ERROR("accpet failed,error [%d]->[%s].\n",errno,strerror(errno));
+    }
+    else
+    {
+        *pSocketDesc = ret;
+        if(addr_size != NULL && pSockaddrLen != NULL)
+        {
+            *addr_size = (int)SockaddrLen;
+        }
     }
 
     return sts;

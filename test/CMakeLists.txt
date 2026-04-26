@@ -72,6 +72,7 @@ endif()
 add_executable(
   test_utl_dll
   test_utl_dll.c
+  test_runtime_stub.c
   ../comm/utl_dll.c
 )
 
@@ -581,6 +582,7 @@ endif()
 add_executable(
   perf_ent_log
   perf_ent_log.c
+  test_runtime_stub.c
   ../comm/ent_log_core.c
   ../comm/ent_log_writer.c
   ../comm/ent_log_options.c

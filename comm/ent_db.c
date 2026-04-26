@@ -826,6 +826,7 @@ ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE dbHandle)
         return ENT_DBS_BAD_HANDLE;
     }
     dbCfg->handleState = ENT_DB_HANDLE_CLOSING_E;
+    iENT_DbGlobalUnlock();
     while(dbCfg->activeOps > 0)
     {
         iENT_DbLifecycleWait(dbCfg);
@@ -862,6 +863,7 @@ ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE dbHandle)
             break;
     }
 
+    iENT_DbGlobalLock();
     iENT_DbLifecycleLock(dbCfg);
     dbCfg->handleState = ENT_DB_HANDLE_CLOSED_E;
     iENT_DbLifecycleUnlock(dbCfg);

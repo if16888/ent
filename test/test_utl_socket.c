@@ -119,23 +119,6 @@ static void close_native_socket(UTL_D_SOCKET socketDesc)
 #endif
 }
 
-static UTL_D_SOCKET accept_native_socket(UTL_D_SOCKET listenSocket,
-                                         struct sockaddr* addr,
-                                         int* addrLen)
-{
-#ifdef WIN32
-    return accept(listenSocket, addr, addrLen);
-#else
-    socklen_t nativeAddrLen = (addrLen != NULL) ? (socklen_t)*addrLen : 0;
-    UTL_D_SOCKET accepted = accept(listenSocket, addr, (addrLen != NULL) ? &nativeAddrLen : NULL);
-    if(addrLen != NULL)
-    {
-        *addrLen = (int)nativeAddrLen;
-    }
-    return accepted;
-#endif
-}
-
 static int get_socket_name(UTL_D_SOCKET socketDesc, struct sockaddr* addr, int* addrLen)
 {
 #ifdef WIN32
@@ -272,7 +255,16 @@ static int test_socket_local_roundtrip_send_and_recv(void)
         return 1;
     }
 
-    accepted = accept_native_socket(server, (struct sockaddr*)&acceptedAddr, &acceptedLen);
+    if(expect_true(UTL_Accept(server,
+                              (struct sockaddr*)&acceptedAddr,
+                              &acceptedLen,
+                              &accepted) == 0,
+                   "UTL_Accept should accept the localhost client connection") != 0)
+    {
+        UTL_CloseSocket(client);
+        UTL_CloseSocket(server);
+        return 1;
+    }
 #ifdef WIN32
     if(expect_true(accepted != INVALID_SOCKET, "The server should accept the localhost client connection") != 0)
 #else
@@ -402,7 +394,16 @@ static int setup_loopback_tcp_pair(UTL_D_SOCKET* server,
         return 1;
     }
 
-    *accepted = accept_native_socket(*server, NULL, NULL);
+    if(expect_true(UTL_Accept(*server, NULL, NULL, accepted) == 0,
+                   "UTL_Accept should accept a connected client") != 0)
+    {
+        UTL_CloseSocket(*client);
+        UTL_CloseSocket(*server);
+        *client = -1;
+        *server = -1;
+        *accepted = (UTL_D_SOCKET)-1;
+        return 1;
+    }
 #ifdef WIN32
     if(expect_true(*accepted != INVALID_SOCKET, "accept should succeed") != 0)
 #else

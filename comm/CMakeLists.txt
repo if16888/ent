@@ -4,7 +4,8 @@ project(ent C)
 
 set(LIB_NAME_SHARE ent)
 set(LIB_NAME_STATIC ent_s)
-set(LIB_NAME_OBJS ent_objs)
+set(LIB_NAME_OBJS_SHARE ent_objs_shared)
+set(LIB_NAME_OBJS_STATIC ent_objs_static)
 
 if(UNIX AND NOT APPLE)
   add_compile_definitions(_GNU_SOURCE)
@@ -15,12 +16,18 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
+option(ENT_BUILD_SHARED "Build the shared ent library target" ${BUILD_SHARED_LIBS})
+option(ENT_BUILD_STATIC "Build the static ent library target" ON)
 option(ENT_ENABLE_SQLITE "Enable SQLite backend" ON)
 option(ENT_ENABLE_MYSQL "Enable MySQL backend" ON)
 option(ENT_ENABLE_LUA "Enable Lua scripting backend" OFF)
 option(ENT_ALLOW_VENDORED_DB_LIBS "Allow vendored DB libraries as a fallback" ON)
 set(ENT_LUA_LINK_MODE "static" CACHE STRING "Lua link mode: static or shared")
 set_property(CACHE ENT_LUA_LINK_MODE PROPERTY STRINGS static shared)
+
+if(NOT ENT_BUILD_SHARED AND NOT ENT_BUILD_STATIC)
+  message(FATAL_ERROR "At least one of ENT_BUILD_SHARED or ENT_BUILD_STATIC must be enabled.")
+endif()
 
 if(CMAKE_VERSION VERSION_LESS "3.12")
   find_package(PythonInterp REQUIRED)
@@ -369,15 +376,7 @@ add_definitions(-DENT_ENABLE_SQLITE=$<BOOL:${ENT_ENABLE_SQLITE}>)
 add_definitions(-DENT_ENABLE_MYSQL=$<BOOL:${ENT_ENABLE_MYSQL}>)
 add_definitions(-DENT_ENABLE_LUA=$<BOOL:${ENT_ENABLE_LUA}>)
 
-if(BUILD_SHARED_LIBS)
-  add_definitions(-DENT_MODULE_BEING_COMPILED)
-else()
-  add_definitions(-DLINKING_LIBENT)
-endif()
-
-add_library(
-  ${LIB_NAME_OBJS}
-  OBJECT
+set(ENT_LIBRARY_SOURCES
   ent_init.c ent_db.c ent_db_sqlite.c ent_db_mysql.c ent_db_pgsql.c
   ent_log_core.c ent_log_writer.c ent_log_options.c ent_log_compat.c
   ent_thread.c ent_msg.c ent_script.c
@@ -385,7 +384,43 @@ add_library(
   ${ENT_MSG_GENERATED_SOURCE}
 )
 
-add_dependencies(${LIB_NAME_OBJS} ent_msg_codegen)
+set(ENT_PUBLIC_HEADERS
+  "../inc/ent_comm.h;../inc/ent_init.h;../inc/ent_types.h;../inc/ent_db.h;../inc/ent_log.h;../inc/ent_thread.h;../inc/ent_utility.h;../inc/ent_msg.h;../inc/ent_script.h;${ENT_MSG_GENERATED_HEADER}"
+)
+
+function(ent_add_object_library target export_definition)
+  add_library(
+    ${target}
+    OBJECT
+    ${ENT_LIBRARY_SOURCES}
+  )
+
+  add_dependencies(${target} ent_msg_codegen)
+  target_include_directories(
+    ${target}
+    PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+      ${ENT_MSG_GENERATED_DIR}
+  )
+  target_compile_definitions(
+    ${target}
+    PRIVATE
+      ENT_ENABLE_SQLITE=$<BOOL:${ENT_ENABLE_SQLITE}>
+      ENT_ENABLE_MYSQL=$<BOOL:${ENT_ENABLE_MYSQL}>
+      ENT_ENABLE_PGSQL=$<BOOL:${PostgreSQL_FOUND}>
+      ENT_ENABLE_LUA=$<BOOL:${ENT_ENABLE_LUA}>
+      ${export_definition}
+  )
+  set_target_properties(${target} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endfunction()
+
+if(ENT_BUILD_SHARED)
+  ent_add_object_library(${LIB_NAME_OBJS_SHARE} ENT_MODULE_BEING_COMPILED)
+endif()
+
+if(ENT_BUILD_STATIC)
+  ent_add_object_library(${LIB_NAME_OBJS_STATIC} LINKING_LIBENT)
+endif()
 
 function(ent_link_backend_deps target visibility)
   if(WIN32)
@@ -418,63 +453,80 @@ function(ent_link_backend_deps target visibility)
   endif()
 endfunction()
 
-add_library(
-  ${LIB_NAME_SHARE}
-  SHARED
-  $<TARGET_OBJECTS:${LIB_NAME_OBJS}>
-)
+if(ENT_BUILD_SHARED)
+  add_library(
+    ${LIB_NAME_SHARE}
+    SHARED
+    $<TARGET_OBJECTS:${LIB_NAME_OBJS_SHARE}>
+  )
 
-target_include_directories(
-  ${LIB_NAME_SHARE}
-  PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../inc>
-    $<BUILD_INTERFACE:${ENT_MSG_GENERATED_DIR}>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-)
+  target_include_directories(
+    ${LIB_NAME_SHARE}
+    PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../inc>
+      $<BUILD_INTERFACE:${ENT_MSG_GENERATED_DIR}>
+      $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+  )
 
-target_compile_definitions(
-  ${LIB_NAME_SHARE}
-  PUBLIC
-    ENT_ENABLE_SQLITE=$<BOOL:${ENT_ENABLE_SQLITE}>
-    ENT_ENABLE_MYSQL=$<BOOL:${ENT_ENABLE_MYSQL}>
-    ENT_ENABLE_PGSQL=$<BOOL:${PostgreSQL_FOUND}>
-    ENT_ENABLE_LUA=$<BOOL:${ENT_ENABLE_LUA}>
-)
+  target_compile_definitions(
+    ${LIB_NAME_SHARE}
+    PUBLIC
+      ENT_ENABLE_SQLITE=$<BOOL:${ENT_ENABLE_SQLITE}>
+      ENT_ENABLE_MYSQL=$<BOOL:${ENT_ENABLE_MYSQL}>
+      ENT_ENABLE_PGSQL=$<BOOL:${PostgreSQL_FOUND}>
+      ENT_ENABLE_LUA=$<BOOL:${ENT_ENABLE_LUA}>
+  )
 
-set_target_properties(
-  ${LIB_NAME_SHARE}
-  PROPERTIES
-    PUBLIC_HEADER "../inc/ent_comm.h;../inc/ent_init.h;../inc/ent_types.h;../inc/ent_db.h;../inc/ent_log.h;../inc/ent_thread.h;../inc/ent_utility.h;../inc/ent_msg.h;../inc/ent_script.h;${ENT_MSG_GENERATED_HEADER}"
-)
+  set_target_properties(
+    ${LIB_NAME_SHARE}
+    PROPERTIES
+      PUBLIC_HEADER "${ENT_PUBLIC_HEADERS}"
+  )
 
-ent_link_backend_deps(${LIB_NAME_SHARE} PRIVATE)
+  ent_link_backend_deps(${LIB_NAME_SHARE} PRIVATE)
+endif()
 
-add_library(
-  ${LIB_NAME_STATIC}
-  STATIC
-  $<TARGET_OBJECTS:${LIB_NAME_OBJS}>
-)
+if(ENT_BUILD_STATIC)
+  add_library(
+    ${LIB_NAME_STATIC}
+    STATIC
+    $<TARGET_OBJECTS:${LIB_NAME_OBJS_STATIC}>
+  )
 
-target_include_directories(
-  ${LIB_NAME_STATIC}
-  PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../inc>
-    $<BUILD_INTERFACE:${ENT_MSG_GENERATED_DIR}>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-)
+  target_include_directories(
+    ${LIB_NAME_STATIC}
+    PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../inc>
+      $<BUILD_INTERFACE:${ENT_MSG_GENERATED_DIR}>
+      $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+  )
 
-target_compile_definitions(
-  ${LIB_NAME_STATIC}
-  PUBLIC
-    ENT_ENABLE_SQLITE=$<BOOL:${ENT_ENABLE_SQLITE}>
-    ENT_ENABLE_MYSQL=$<BOOL:${ENT_ENABLE_MYSQL}>
-    ENT_ENABLE_PGSQL=$<BOOL:${PostgreSQL_FOUND}>
-    ENT_ENABLE_LUA=$<BOOL:${ENT_ENABLE_LUA}>
-)
+  target_compile_definitions(
+    ${LIB_NAME_STATIC}
+    PUBLIC
+      ENT_ENABLE_SQLITE=$<BOOL:${ENT_ENABLE_SQLITE}>
+      ENT_ENABLE_MYSQL=$<BOOL:${ENT_ENABLE_MYSQL}>
+      ENT_ENABLE_PGSQL=$<BOOL:${PostgreSQL_FOUND}>
+      ENT_ENABLE_LUA=$<BOOL:${ENT_ENABLE_LUA}>
+      LINKING_LIBENT
+  )
 
-ent_link_backend_deps(${LIB_NAME_STATIC} PUBLIC)
+  set_target_properties(
+    ${LIB_NAME_STATIC}
+    PROPERTIES
+      PUBLIC_HEADER "${ENT_PUBLIC_HEADERS}"
+  )
 
-set(ENT_INSTALL_TARGETS ${LIB_NAME_SHARE} ${LIB_NAME_STATIC})
+  ent_link_backend_deps(${LIB_NAME_STATIC} PUBLIC)
+endif()
+
+set(ENT_INSTALL_TARGETS)
+if(TARGET ${LIB_NAME_SHARE})
+  list(APPEND ENT_INSTALL_TARGETS ${LIB_NAME_SHARE})
+endif()
+if(TARGET ${LIB_NAME_STATIC})
+  list(APPEND ENT_INSTALL_TARGETS ${LIB_NAME_STATIC})
+endif()
 if(ENT_ENABLE_LUA AND ENT_LUA_TARGET)
   list(APPEND ENT_INSTALL_TARGETS ${ENT_LUA_TARGET})
 endif()

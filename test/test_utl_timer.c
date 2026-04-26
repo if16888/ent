@@ -129,6 +129,14 @@ typedef struct
     volatile int reentry_hits;
 } TIMER_SLOW_PROBE;
 
+typedef struct
+{
+    volatile int in_callback;
+    volatile int callback_done;
+    volatile MSG_ID_T create_status;
+    volatile MSG_ID_T delete_status;
+} TIMER_REENTRANT_PROBE;
+
 static void* slow_timer_cb(void* data)
 {
     TIMER_SLOW_PROBE* probe = (TIMER_SLOW_PROBE*)data;
@@ -142,6 +150,27 @@ static void* slow_timer_cb(void* data)
     probe->hits++;
     UTL_Sleep(60);
     probe->in_callback = 0;
+    return NULL;
+}
+
+static void* reentrant_timer_api_cb(void* data)
+{
+    TIMER_REENTRANT_PROBE* probe = (TIMER_REENTRANT_PROBE*)data;
+    UTL_TIMER_T nested_timer = NULL;
+    int nested_hits = 0;
+
+    probe->in_callback = 1;
+    UTL_Sleep(20);
+    probe->create_status = UTL_TimerCreate(&nested_timer,
+                                           UTL_TIMER_E_ONESHOT,
+                                           1000,
+                                           timer_cb,
+                                           &nested_hits);
+    if(probe->create_status == 0)
+    {
+        probe->delete_status = UTL_TimerDelete(&nested_timer);
+    }
+    probe->callback_done = 1;
     return NULL;
 }
 
@@ -226,6 +255,66 @@ static int test_periodic_timer_remains_stable_with_slow_callback(void)
     }
 
     return expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after slow callback test");
+}
+
+static int test_timer_delete_allows_reentrant_callback_timer_api(void)
+{
+    UTL_TIMER_T timer = NULL;
+    TIMER_REENTRANT_PROBE probe;
+    int i = 0;
+
+    memset(&probe, 0, sizeof(probe));
+    probe.create_status = -999;
+    probe.delete_status = -999;
+
+    if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize for reentrant callback test") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(UTL_TimerCreate(&timer, UTL_TIMER_E_ONESHOT, 5, reentrant_timer_api_cb, &probe) == 0,
+                   "UTL_TimerCreate should create a timer for reentrant callback test") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    for(i = 0; i < 100 && !probe.in_callback; ++i)
+    {
+        UTL_Sleep(1);
+    }
+
+    if(expect_true(probe.in_callback == 1, "reentrant callback should start before delete") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    if(expect_true(UTL_TimerDelete(&timer) == 0, "UTL_TimerDelete should wait for reentrant callback without deadlock") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    if(expect_true(probe.callback_done == 1, "reentrant callback should complete during delete") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    if(expect_true(probe.create_status == 0, "reentrant callback should be able to create a timer") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    if(expect_true(probe.delete_status == 0, "reentrant callback should be able to delete its nested timer") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    return expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after reentrant callback test");
 }
 
 static int test_timer_rejects_uninitialized_use(void)
@@ -608,6 +697,7 @@ int main(void)
     failures += test_oneshot_timer_fires_once();
     failures += test_periodic_timer_fires_until_deleted();
     failures += test_periodic_timer_remains_stable_with_slow_callback();
+    failures += test_timer_delete_allows_reentrant_callback_timer_api();
     failures += test_timer_create_us_has_consistent_failure_contract();
     failures += test_timer_create_us_delete_does_not_wait_full_period();
     failures += test_timer_create_us_periodic_timer_fires_on_linux();
