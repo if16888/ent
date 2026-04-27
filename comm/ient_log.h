@@ -38,7 +38,7 @@
 #define ENTLOG_TAG     (0x6AFEFE6A)
 #define ENTLOG_CTX_TAG (0x6AFEFE6B)
 
-/* ENT_LOG_RC_* return codes are defined in public header inc/ent_log.h. */
+/* Log return codes are generated from msg/ent.msg via ent_msg.h. */
 
 typedef enum ENT_LOG_HANDLE_STATE_TAG
 {
@@ -135,7 +135,7 @@ MSG_ID_T      iENT_LogFormatMessage(const char* format,
                                     size_t stackBufLen,
                                     char** msgBuf,
                                     size_t* msgLen);
-void          iENT_LogFlushMaybe(ENT_LOG_CTX_INTERNAL* log, FILE* fp, bool forceFlush);
+MSG_ID_T      iENT_LogFlushMaybe(ENT_LOG_CTX_INTERNAL* log, FILE* fp, bool forceFlush);
 int           iENT_LogFastFlagGet(
 #ifdef WIN32
                                const volatile LONG* flag
@@ -160,7 +160,7 @@ MSG_ID_T      iENT_LogFormatPrefix(ENT_LOG_LEV_E logLevel,
                                    size_t* prefixLen,
                                    time_t* rollTime);
 MSG_ID_T      iENT_LogStartBufferThread(ENT_LOG_CTX_INTERNAL* log);
-void          iENT_LogStopBufferThread(ENT_LOG_CTX_INTERNAL* log);
+MSG_ID_T      iENT_LogStopBufferThread(ENT_LOG_CTX_INTERNAL* log);
 MSG_ID_T      iENT_LogQueueMessage(ENT_LOG_CTX_INTERNAL* log,
                                    const char* msg,
                                    size_t msgLen,

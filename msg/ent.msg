@@ -187,3 +187,19 @@ PREPARE_FAILED err 11 prepare database statement failed
 BIND_FAILED   err 12 bind database statement parameter failed
 EXEC_FAILED   err 13 execute prepared database statement failed
 IN_USE        err 14 database handle or service is still in use
+
+# ----------------------------------------------------------------------------
+# LOG: log service and log handle lifecycle
+# ----------------------------------------------------------------------------
+submodule LOG 11
+OK              ok  0  log operation success
+NON_FATAL       ok  1  log operation no-op or filtered by level
+BAD_ARGUMENT    err 1  invalid log argument
+NOT_INITIALIZED err 2  log service is not initialized
+BAD_HANDLE      err 3  invalid log handle or context
+IN_USE          err 4  log handle or service is in use
+ALLOC_FAILED    err 5  allocate log resource failed
+PATH_FAILED     err 6  log path check or creation failed
+FORMAT_FAILED   err 7  log message format failed
+THREAD_FAILED   err 8  log background thread operation failed
+IO_FAILED       err 9  log file io operation failed

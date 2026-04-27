@@ -26,13 +26,13 @@ MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const voi
     if(sLogMutexInit == false)
     {
         fprintf(stderr, "Func [%s] Line [%d],Uninitialized,please call ENT_LogInit.\n", "ENT_LogSetOption", __LINE__);
-        return ENT_LOG_RC_ERROR;
+        return ENT_LOG_NOT_INITIALIZED;
     }
 
     if(arg == NULL)
     {
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogSetOption", __LINE__);
-        return ENT_LOG_RC_ERROR;
+        return ENT_LOG_BAD_ARGUMENT;
     }
 
     if(log == NULL)
@@ -42,13 +42,13 @@ MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const voi
         else
         {
             fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogSetOption", __LINE__);
-            return ENT_LOG_RC_INVALID_HANDLE;
+            return ENT_LOG_BAD_HANDLE;
         }
     }
     else if(log->tag != ENTLOG_TAG || log->isInit == false)
     {
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogSetOption", __LINE__);
-        return ENT_LOG_RC_INVALID_HANDLE;
+        return ENT_LOG_BAD_HANDLE;
     }
 
 #ifdef WIN32
@@ -58,7 +58,7 @@ MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const voi
 #endif
     if(iENT_LogStateGet(log) != ENT_LOG_HANDLE_ACTIVE_E)
     {
-        sts = ENT_LOG_RC_IN_USE;
+        sts = ENT_LOG_IN_USE;
         goto END_OF_ROUTINE;
     }
 
@@ -77,7 +77,7 @@ MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const voi
             newPath = strdup(newPathArg);
             if(newPath == NULL)
             {
-                sts = ENT_LOG_RC_IN_USE;
+                sts = ENT_LOG_ALLOC_FAILED;
                 fprintf(stderr, "Func [%s] Line [%d],strdup failed.\n", "ENT_LogSetOption", __LINE__);
                 goto END_OF_ROUTINE;
             }
@@ -106,7 +106,7 @@ MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const voi
             int maxNum = *(int*)arg;
             if(maxNum < 0)
             {
-                sts = ENT_LOG_RC_ERROR;
+                sts = ENT_LOG_BAD_ARGUMENT;
                 break;
             }
             log->maxNum = maxNum;
@@ -126,7 +126,7 @@ MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const voi
             ENT_LOG_LEV_E level = *(ENT_LOG_LEV_E*)arg;
             if(level < LOG_LEV_FATAL_E || level > LOG_LEV_DEBUG_E)
             {
-                sts = ENT_LOG_RC_ERROR;
+                sts = ENT_LOG_BAD_ARGUMENT;
                 break;
             }
             log->logLevel = level;
@@ -138,7 +138,7 @@ MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const voi
             int flushBatch = *(int*)arg;
             if(flushBatch <= 0)
             {
-                sts = ENT_LOG_RC_ERROR;
+                sts = ENT_LOG_BAD_ARGUMENT;
                 break;
             }
             log->flushBatch = flushBatch;
@@ -150,7 +150,7 @@ MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const voi
             int flushIntervalMs = *(int*)arg;
             if(flushIntervalMs < 0)
             {
-                sts = ENT_LOG_RC_ERROR;
+                sts = ENT_LOG_BAD_ARGUMENT;
                 break;
             }
             log->flushIntervalMs = flushIntervalMs;

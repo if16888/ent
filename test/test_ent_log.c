@@ -393,19 +393,19 @@ static int test_log_rejects_uninitialized_calls(void)
     ENT_LOG logHandle = NULL;
     ENT_LOG_LEV_E level = LOG_LEV_DEBUG_E;
 
-    if(expect_true(ENT_LogInitHandle(&logHandle, "NoInit", ".") == -1,
+    if(expect_true(ENT_LogInitHandle(&logHandle, "NoInit", ".") == ENT_LOG_NOT_INITIALIZED,
                    "ENT_LogInitHandle should reject use before ENT_LogInit") != 0)
     {
         return 1;
     }
 
-    if(expect_true(ENT_LogSetOption(NULL, ENT_LOG_LEVEL_E, &level) == -1,
+    if(expect_true(ENT_LogSetOption(NULL, ENT_LOG_LEVEL_E, &level) == ENT_LOG_NOT_INITIALIZED,
                    "ENT_LogSetOption should reject use before ENT_LogInit") != 0)
     {
         return 1;
     }
 
-    return expect_true(ENT_LogCloseHandle(NULL) == -1,
+    return expect_true(ENT_LogCloseHandle(NULL) == ENT_LOG_NOT_INITIALIZED,
                        "ENT_LogCloseHandle should reject use before ENT_LogInit");
 }
 
@@ -526,7 +526,7 @@ static int test_default_log_handle_lifecycle(void)
         return 1;
     }
 
-    if(expect_true(ENT_LogInitHandle(NULL, "DefaultModule", ".") == 1,
+    if(expect_true(ENT_LogInitHandle(NULL, "DefaultModule", ".") == ENT_LOG_NON_FATAL,
                    "ENT_LogInitHandle should report an already-open default handle") != 0)
     {
         ENT_LogCloseHandle(NULL);
@@ -549,7 +549,7 @@ static int test_default_log_handle_lifecycle(void)
         return 1;
     }
 
-    if(expect_true(ENT_LogRaw(NULL, "after close\n") == -2,
+    if(expect_true(ENT_LogRaw(NULL, "after close\n") == ENT_LOG_BAD_HANDLE,
                    "ENT_LogRaw should reject the default handle after it is closed") != 0)
     {
         ENT_LogClose();
@@ -573,7 +573,7 @@ static int test_log_service_close_rejects_live_handle(void)
         ENT_LogClose();
         return 1;
     }
-    if(expect_true(ENT_LogClose() == -3,
+    if(expect_true(ENT_LogClose() == ENT_LOG_IN_USE,
                    "ENT_LogClose should reject shutdown while live handles exist") != 0)
     {
         ENT_LogCloseHandle(logHandle);
@@ -676,19 +676,19 @@ static int test_log_close_handle_blocks_until_active_writer_released(void)
     }
 
     test_sleep_ms(50);
-    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_LEVEL_E, &level) == -3,
+    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_LEVEL_E, &level) == ENT_LOG_IN_USE,
                    "ENT_LogSetOption should reject updates while handle is closing") != 0)
     {
         iENT_LogReleaseWriter(writerCtx);
         goto join_cleanup;
     }
-    if(expect_true(ENT_LogPrint(logHandle, "should reject while closing\n") == -3,
+    if(expect_true(ENT_LogPrint(logHandle, "should reject while closing\n") == ENT_LOG_IN_USE,
                    "ENT_LogPrint should reject new writes while handle is closing") != 0)
     {
         iENT_LogReleaseWriter(writerCtx);
         goto join_cleanup;
     }
-    if(expect_true(ENT_LogCloseHandle(logHandle) == -3,
+    if(expect_true(ENT_LogCloseHandle(logHandle) == ENT_LOG_IN_USE,
                    "ENT_LogCloseHandle second close should report busy while closing") != 0)
     {
         iENT_LogReleaseWriter(writerCtx);
@@ -754,7 +754,7 @@ static int test_log_close_rejects_invalid_handle(void)
         return 1;
     }
 
-    if(expect_true(ENT_LogCloseHandle((ENT_LOG)&badLog) == -2,
+    if(expect_true(ENT_LogCloseHandle((ENT_LOG)&badLog) == ENT_LOG_BAD_HANDLE,
                    "ENT_LogCloseHandle should reject invalid log handles") != 0)
     {
         ENT_LogClose();
@@ -786,7 +786,7 @@ static int test_log_set_option_validates_arguments(void)
         return 1;
     }
 
-    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_LEVEL_E, NULL) == -1,
+    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_LEVEL_E, NULL) == ENT_LOG_BAD_ARGUMENT,
                    "ENT_LogSetOption should reject a NULL option argument") != 0)
     {
         ENT_LogCloseHandle(logHandle);
@@ -802,7 +802,7 @@ static int test_log_set_option_validates_arguments(void)
         return 1;
     }
 
-    if(expect_true(ENT_LogSetOption((ENT_LOG)&badLog, ENT_LOG_LEVEL_E, &level) == -2,
+    if(expect_true(ENT_LogSetOption((ENT_LOG)&badLog, ENT_LOG_LEVEL_E, &level) == ENT_LOG_BAD_HANDLE,
                    "ENT_LogSetOption should reject an invalid log handle") != 0)
     {
         ENT_LogCloseHandle(logHandle);
@@ -958,7 +958,7 @@ static int test_log_level_filters_debug_messages(void)
         return 1;
     }
 
-    if(expect_true(ENT_LogDebug(logHandle, "hidden debug\n") == 1,
+    if(expect_true(ENT_LogDebug(logHandle, "hidden debug\n") == ENT_LOG_NON_FATAL,
                    "ENT_LogDebug should be filtered out when the level is WARN") != 0)
     {
         ENT_LogCloseHandle(logHandle);

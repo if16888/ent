@@ -221,45 +221,45 @@ int main(void)
 
     format_log_file_path(logFilePath, sizeof(logFilePath), dirPath, moduleName);
 
-    if(expect_true(ENT_LogInit() == ENT_LOG_RC_OK,
+    if(expect_true(ENT_LogInit() == ENT_SYS_NORMAL,
                    "ENT_LogInit should initialize before flush-deadline testing") != 0)
     {
         goto cleanup_dir;
     }
 
-    if(expect_true(ENT_LogInitHandle(&logHandle, moduleName, dirPath) == ENT_LOG_RC_OK,
+    if(expect_true(ENT_LogInitHandle(&logHandle, moduleName, dirPath) == ENT_SYS_NORMAL,
                    "ENT_LogInitHandle should create a handle for flush-deadline testing") != 0)
     {
         ENT_LogClose();
         goto cleanup_dir;
     }
 
-    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_LEVEL_E, &level) == ENT_LOG_RC_OK,
+    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_LEVEL_E, &level) == ENT_SYS_NORMAL,
                    "ENT_LogSetOption should enable INFO writes for flush-deadline testing") != 0)
     {
         goto cleanup_log;
     }
 
-    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_BUFFER_E, &buffered) == ENT_LOG_RC_OK,
+    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_BUFFER_E, &buffered) == ENT_SYS_NORMAL,
                    "ENT_LogSetOption should enable buffered logging for flush-deadline testing") != 0)
     {
         goto cleanup_log;
     }
 
-    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_FLUSH_BATCH_E, &flushBatch) == ENT_LOG_RC_OK,
+    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_FLUSH_BATCH_E, &flushBatch) == ENT_SYS_NORMAL,
                    "ENT_LogSetOption should apply a high flush batch for deadline testing") != 0)
     {
         goto cleanup_log;
     }
 
-    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_FLUSH_INTERVAL_E, &flushIntervalMs) == ENT_LOG_RC_OK,
+    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_FLUSH_INTERVAL_E, &flushIntervalMs) == ENT_SYS_NORMAL,
                    "ENT_LogSetOption should apply the flush interval for deadline testing") != 0)
     {
         goto cleanup_log;
     }
 
     startMs = now_ms();
-    if(expect_true(ENT_LogPrint(logHandle, "%s\n", message) == ENT_LOG_RC_OK,
+    if(expect_true(ENT_LogPrint(logHandle, "%s\n", message) == ENT_SYS_NORMAL,
                    "ENT_LogPrint should enqueue the flush-deadline message") != 0)
     {
         goto cleanup_log;

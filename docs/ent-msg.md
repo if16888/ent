@@ -74,6 +74,8 @@ Current `ENT` submodules:
 - `TPL`
 - `DLL`
 - `SCR`
+- `DBS`
+- `LOG`
 
 ## Generated Macros
 
@@ -91,6 +93,7 @@ ENT_INIT_INVALID_ARGUMENT
 ENT_SOCK_CONNECT_FAILED
 ENT_TMR_NOT_INITIALIZED
 ENT_TPL_WORKER_CREATEFAIL
+ENT_LOG_OK
 ```
 
 Generated files:

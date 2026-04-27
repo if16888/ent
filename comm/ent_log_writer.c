@@ -55,7 +55,7 @@ static MSG_ID_T iENT_LogRollCheck(ENT_LOG logHandle, time_t nowTime)
     }
 
     if(log->nextCreate > nowTime)
-        return ENT_LOG_RC_NON_FATAL;
+        return ENT_LOG_NON_FATAL;
 
     if(log->logFp == NULL || log->nextCreate + 86400 < nowTime)
     {
@@ -83,7 +83,11 @@ static MSG_ID_T iENT_LogRollCheck(ENT_LOG logHandle, time_t nowTime)
 
     if(log->logFp != NULL)
     {
-        fclose(log->logFp);
+        if(fclose(log->logFp) != 0)
+        {
+            log->logFp = NULL;
+            return ENT_LOG_IO_FAILED;
+        }
         log->logFp = NULL;
     }
 
@@ -104,6 +108,7 @@ static MSG_ID_T iENT_LogRollCheck(ENT_LOG logHandle, time_t nowTime)
         if(log->logFp == NULL)
         {
             fprintf(stderr, "Func [%s] Line [%d],The file %s  was not opened\n", "iENT_LogRollCheck", __LINE__, fileName);
+            return ENT_LOG_IO_FAILED;
         }
         else
         {
@@ -135,7 +140,7 @@ static MSG_ID_T iENT_LogRollCheck(ENT_LOG logHandle, time_t nowTime)
         }
     }
 
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
 MSG_ID_T iENT_LogFormatMessage(const char* format,
@@ -152,7 +157,7 @@ MSG_ID_T iENT_LogFormatMessage(const char* format,
 
     if(format == NULL || stackBuf == NULL || stackBufLen == 0 || msgBuf == NULL || msgLen == NULL)
     {
-        return ENT_LOG_RC_ERROR;
+        return ENT_LOG_BAD_ARGUMENT;
     }
 
     va_copy(writeArgs, va_args);
@@ -177,13 +182,13 @@ MSG_ID_T iENT_LogFormatMessage(const char* format,
         requiredLen = _vscprintf(format, sizeArgs);
         va_end(sizeArgs);
 #else
-        return ENT_LOG_RC_ERROR;
+        return ENT_LOG_FORMAT_FAILED;
 #endif
     }
 
     if(requiredLen < 0)
     {
-        return ENT_LOG_RC_ERROR;
+        return ENT_LOG_FORMAT_FAILED;
     }
 
     if((size_t)requiredLen + 1 > stackBufLen)
@@ -191,7 +196,7 @@ MSG_ID_T iENT_LogFormatMessage(const char* format,
         targetBuf = (char*)malloc((size_t)requiredLen + 1);
         if(targetBuf == NULL)
         {
-            return ENT_LOG_RC_ERROR;
+            return ENT_LOG_ALLOC_FAILED;
         }
     }
 
@@ -203,7 +208,7 @@ MSG_ID_T iENT_LogFormatMessage(const char* format,
         {
             free(targetBuf);
         }
-        return ENT_LOG_RC_ERROR;
+        return ENT_LOG_FORMAT_FAILED;
     }
     va_end(writeArgs);
 
@@ -212,7 +217,7 @@ MSG_ID_T iENT_LogFormatMessage(const char* format,
     return 0;
 }
 
-void iENT_LogFlushMaybe(ENT_LOG_CTX_INTERNAL* log, FILE* fp, bool forceFlush)
+MSG_ID_T iENT_LogFlushMaybe(ENT_LOG_CTX_INTERNAL* log, FILE* fp, bool forceFlush)
 {
     long long nowMs = 0;
     int flushBatch = 0;
@@ -220,7 +225,7 @@ void iENT_LogFlushMaybe(ENT_LOG_CTX_INTERNAL* log, FILE* fp, bool forceFlush)
 
     if(log == NULL || fp == NULL)
     {
-        return;
+        return ENT_LOG_BAD_ARGUMENT;
     }
 
     nowMs = iENT_LogNowMs();
@@ -229,10 +234,13 @@ void iENT_LogFlushMaybe(ENT_LOG_CTX_INTERNAL* log, FILE* fp, bool forceFlush)
 
     if(forceFlush || !log->isBuffer)
     {
-        fflush(fp);
+        if(fflush(fp) != 0)
+        {
+            return ENT_LOG_IO_FAILED;
+        }
         log->pendingFlushes = 0;
         log->lastFlushMs = nowMs;
-        return;
+        return ENT_SYS_NORMAL;
     }
 
     log->pendingFlushes++;
@@ -244,10 +252,15 @@ void iENT_LogFlushMaybe(ENT_LOG_CTX_INTERNAL* log, FILE* fp, bool forceFlush)
     if(log->pendingFlushes >= flushBatch ||
        (flushIntervalMs > 0 && nowMs - log->lastFlushMs >= (long long)flushIntervalMs))
     {
-        fflush(fp);
+        if(fflush(fp) != 0)
+        {
+            return ENT_LOG_IO_FAILED;
+        }
         log->pendingFlushes = 0;
         log->lastFlushMs = nowMs;
     }
+
+    return ENT_SYS_NORMAL;
 }
 
 int iENT_LogFastFlagGet(
@@ -356,7 +369,7 @@ MSG_ID_T iENT_LogFormatPrefix(ENT_LOG_LEV_E logLevel,
 
     if(prefixBuf == NULL || prefixLen == NULL || rollTime == NULL)
     {
-        return ENT_LOG_RC_ERROR;
+        return ENT_LOG_BAD_ARGUMENT;
     }
 
     _ftime(&nowTmb);
@@ -381,7 +394,7 @@ MSG_ID_T iENT_LogFormatPrefix(ENT_LOG_LEV_E logLevel,
 
     if(prefixBuf == NULL || prefixLen == NULL || rollTime == NULL)
     {
-        return ENT_LOG_RC_ERROR;
+        return ENT_LOG_BAD_ARGUMENT;
     }
 
     gettimeofday(&nowTmv, NULL);
@@ -403,11 +416,11 @@ MSG_ID_T iENT_LogFormatPrefix(ENT_LOG_LEV_E logLevel,
 
     if(writeLen < 0 || (size_t)writeLen >= prefixBufLen)
     {
-        return ENT_LOG_RC_ERROR;
+        return ENT_LOG_FORMAT_FAILED;
     }
 
     *prefixLen = (size_t)writeLen;
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
 #ifdef WIN32
@@ -599,7 +612,7 @@ MSG_ID_T iENT_LogStartBufferThread(ENT_LOG_CTX_INTERNAL* log)
 #else
         pthread_mutex_unlock(&log->cs);
 #endif
-        return 0;
+        return ENT_SYS_NORMAL;
     }
     log->bufferThreadStop = false;
 #ifdef WIN32
@@ -612,12 +625,12 @@ MSG_ID_T iENT_LogStartBufferThread(ENT_LOG_CTX_INTERNAL* log)
     log->bufferThread = CreateThread(NULL, 0, iENT_LogBufferThreadMain, log, 0, NULL);
     if(log->bufferThread == NULL)
     {
-        sts = ENT_LOG_RC_IN_USE;
+        sts = ENT_LOG_THREAD_FAILED;
     }
 #else
     if(pthread_create(&log->bufferThread, NULL, iENT_LogBufferThreadMain, log) != 0)
     {
-        sts = ENT_LOG_RC_IN_USE;
+        sts = ENT_LOG_THREAD_FAILED;
     }
 #endif
 
@@ -644,9 +657,10 @@ MSG_ID_T iENT_LogStartBufferThread(ENT_LOG_CTX_INTERNAL* log)
     return sts;
 }
 
-void iENT_LogStopBufferThread(ENT_LOG_CTX_INTERNAL* log)
+MSG_ID_T iENT_LogStopBufferThread(ENT_LOG_CTX_INTERNAL* log)
 {
     bool shouldJoin = false;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
 
 #ifdef WIN32
     EnterCriticalSection(&log->cs);
@@ -671,17 +685,31 @@ void iENT_LogStopBufferThread(ENT_LOG_CTX_INTERNAL* log)
 
     if(!shouldJoin)
     {
-        return;
+        return ENT_SYS_NORMAL;
     }
 
 #ifdef WIN32
-    WaitForSingleObject(log->bufferThread, INFINITE);
-    CloseHandle(log->bufferThread);
-    log->bufferThread = NULL;
+    if(WaitForSingleObject(log->bufferThread, INFINITE) == WAIT_FAILED)
+    {
+        sts = ENT_LOG_THREAD_FAILED;
+    }
+    else
+    {
+        CloseHandle(log->bufferThread);
+        log->bufferThread = NULL;
+    }
 #else
-    pthread_join(log->bufferThread, NULL);
-    memset(&log->bufferThread, 0, sizeof(log->bufferThread));
+    if(pthread_join(log->bufferThread, NULL) != 0)
+    {
+        sts = ENT_LOG_THREAD_FAILED;
+    }
+    else
+    {
+        memset(&log->bufferThread, 0, sizeof(log->bufferThread));
+    }
 #endif
+
+    return sts;
 }
 
 MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX_INTERNAL* log,
@@ -695,12 +723,12 @@ MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX_INTERNAL* log,
 
     if(log == NULL || msg == NULL || msgLen == 0)
     {
-        return ENT_LOG_RC_ERROR;
+        return ENT_LOG_BAD_ARGUMENT;
     }
 
     if(!iENT_LogFastFlagGet(&log->isBufferFast))
     {
-        return ENT_LOG_RC_NON_FATAL;
+        return ENT_LOG_NON_FATAL;
     }
 
     usePool = msgLen <= 1024;
@@ -717,7 +745,7 @@ MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX_INTERNAL* log,
 #else
         pthread_mutex_unlock(&log->cs);
 #endif
-        return ENT_LOG_RC_NON_FATAL;
+        return ENT_LOG_NON_FATAL;
     }
 
     if(usePool && log->poolFreeHead != NULL)
@@ -748,7 +776,7 @@ MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX_INTERNAL* log,
         }
         if(node == NULL)
         {
-            return ENT_LOG_RC_ERROR;
+            return ENT_LOG_ALLOC_FAILED;
         }
     }
 
@@ -783,7 +811,7 @@ MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX_INTERNAL* log,
         {
             free(node);
         }
-        return ENT_LOG_RC_NON_FATAL;
+        return ENT_LOG_NON_FATAL;
     }
 
     if(log->bufferTail != NULL)
@@ -828,7 +856,7 @@ MSG_ID_T iENT_LogVRaw(ENT_LOG_CTX_INTERNAL* log, const char* format, va_list va_
         {
             free(msgBuf);
         }
-        return 0;
+        return ENT_SYS_NORMAL;
     }
 
 #ifdef WIN32
@@ -838,16 +866,41 @@ MSG_ID_T iENT_LogVRaw(ENT_LOG_CTX_INTERNAL* log, const char* format, va_list va_
 #endif
 
     time_t nowTime = time(NULL);
-    iENT_LogRollCheck(log, nowTime);
+    sts = iENT_LogRollCheck(log, nowTime);
+    if(sts < 0)
+    {
+        goto END_OF_ROUTINE;
+    }
 
     FILE* fp = log->logFp == NULL ? stderr : log->logFp;
 
-    fwrite(msgBuf, 1, msgLen, fp);
-    iENT_LogFlushMaybe(log, fp, fp == stderr);
+    if(fwrite(msgBuf, 1, msgLen, fp) != msgLen)
+    {
+        sts = ENT_LOG_IO_FAILED;
+        goto END_OF_ROUTINE;
+    }
+    sts = iENT_LogFlushMaybe(log, fp, fp == stderr);
+    if(sts < 0)
+    {
+        goto END_OF_ROUTINE;
+    }
 #ifdef WIN32
     LeaveCriticalSection(&log->cs);
 #else
     pthread_mutex_unlock(&log->cs);
+#endif
+
+END_OF_ROUTINE:
+#ifdef WIN32
+    if(sts < 0)
+    {
+        LeaveCriticalSection(&log->cs);
+    }
+#else
+    if(sts < 0)
+    {
+        pthread_mutex_unlock(&log->cs);
+    }
 #endif
 
     if(msgBuf != stackBuf)
@@ -855,7 +908,7 @@ MSG_ID_T iENT_LogVRaw(ENT_LOG_CTX_INTERNAL* log, const char* format, va_list va_
         free(msgBuf);
     }
 
-    return 0;
+    return sts < 0 ? sts : ENT_SYS_NORMAL;
 }
 
 MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_LEV_E logLevel, const char* format, va_list va_args)
@@ -869,12 +922,13 @@ MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_LEV_E logLevel, const
     char* lineBuf = lineStackBuf;
     size_t lineLen = 0;
     time_t rollTime = 0;
+    MSG_ID_T sts = 0;
     bool debugMirror = false;
     bool useBuffer = false;
 
     if(iENT_LogFormatMessage(format, va_args, stackBuf, sizeof(stackBuf), &msgBuf, &msgLen) < 0)
     {
-        return ENT_LOG_RC_ERROR;
+        return ENT_LOG_FORMAT_FAILED;
     }
 
     if(iENT_LogFormatPrefix(logLevel, prefixBuf, sizeof(prefixBuf), &prefixLen, &rollTime) < 0)
@@ -883,7 +937,7 @@ MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_LEV_E logLevel, const
         {
             free(msgBuf);
         }
-        return ENT_LOG_RC_ERROR;
+        return ENT_LOG_FORMAT_FAILED;
     }
 
     lineLen = prefixLen + msgLen;
@@ -896,7 +950,7 @@ MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_LEV_E logLevel, const
             {
                 free(msgBuf);
             }
-            return ENT_LOG_RC_ERROR;
+            return ENT_LOG_ALLOC_FAILED;
         }
     }
     memcpy(lineBuf, prefixBuf, prefixLen);
@@ -922,7 +976,7 @@ MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_LEV_E logLevel, const
             {
                 free(msgBuf);
             }
-            return 0;
+            return ENT_SYS_NORMAL;
         }
     }
 
@@ -932,17 +986,30 @@ MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_LEV_E logLevel, const
     pthread_mutex_lock(&log->cs);
 #endif
 
-    iENT_LogRollCheck(log, rollTime);
+    sts = iENT_LogRollCheck(log, rollTime);
+    if(sts < 0)
+    {
+        goto END_OF_ROUTINE;
+    }
     FILE* fp = log->logFp == NULL ? stderr : log->logFp;
 
-    fwrite(lineBuf, 1, lineLen, fp);
-    iENT_LogFlushMaybe(log, fp, fp == stderr || logLevel <= LOG_LEV_ERROR_E);
+    if(fwrite(lineBuf, 1, lineLen, fp) != lineLen)
+    {
+        sts = ENT_LOG_IO_FAILED;
+        goto END_OF_ROUTINE;
+    }
+    sts = iENT_LogFlushMaybe(log, fp, fp == stderr || logLevel <= LOG_LEV_ERROR_E);
+    if(sts < 0)
+    {
+        goto END_OF_ROUTINE;
+    }
 #ifdef WIN32
     LeaveCriticalSection(&log->cs);
 #else
     pthread_mutex_unlock(&log->cs);
 #endif
 
+END_OF_ROUTINE:
     if(lineBuf != lineStackBuf)
     {
         free(lineBuf);
@@ -952,5 +1019,5 @@ MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_LEV_E logLevel, const
         free(msgBuf);
     }
 
-    return 0;
+    return sts < 0 ? sts : ENT_SYS_NORMAL;
 }

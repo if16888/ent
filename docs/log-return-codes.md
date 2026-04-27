@@ -1,40 +1,49 @@
-# Log API return-code quick reference
+# Log Return Codes
 
-The log module currently uses the legacy numeric return-value style, exposed through the public `ENT_LOG_RC_*` macros in `inc/ent_log.h`.
+The log module now uses the repository-wide `msg/ent.msg` message-code system. Its return codes are generated from the `LOG` submodule and exposed through `ent_msg_gen.h`.
 
-| Macro | Value | Meaning |
-|---|---:|---|
-| `ENT_LOG_RC_OK` | `0` | Success. |
-| `ENT_LOG_RC_NON_FATAL` | `1` | Non-fatal / no-op state, such as already initialized, already opened, or log filtered by level. |
-| `ENT_LOG_RC_ERROR` | `-1` | Generic failure, including bad arguments, uninitialized service, allocation failure, path creation failure, or runtime failure. |
-| `ENT_LOG_RC_INVALID_HANDLE` | `-2` | Invalid log handle or invalid log context. |
-| `ENT_LOG_RC_IN_USE` | `-3` | Busy / in-use / closing state conflict. |
+## Quick Reference
 
-## Function-level semantics
+| Code | Meaning |
+|---|---|
+| `ENT_SYS_NORMAL` / `ENT_LOG_OK` | success |
+| `ENT_LOG_NON_FATAL` | no-op / filtered by level |
+| `ENT_LOG_BAD_ARGUMENT` | invalid argument |
+| `ENT_LOG_NOT_INITIALIZED` | log service not initialized |
+| `ENT_LOG_BAD_HANDLE` | invalid log handle or context |
+| `ENT_LOG_IN_USE` | handle/service closing or in use |
+| `ENT_LOG_ALLOC_FAILED` | allocation failed |
+| `ENT_LOG_PATH_FAILED` | log path invalid or creation failed |
+| `ENT_LOG_FORMAT_FAILED` | format/prefix generation failed |
+| `ENT_LOG_THREAD_FAILED` | buffer thread operation failed |
+| `ENT_LOG_IO_FAILED` | file IO failed |
 
-| API | Success | Non-fatal | Generic failure | Invalid handle/context | Busy / in-use |
-|---|---:|---:|---:|---:|---:|
-| `ENT_LogInit()` | `ENT_LOG_RC_OK` | `ENT_LOG_RC_NON_FATAL` when already initialized | Usually not expected unless platform init fails in future changes | N/A | N/A |
-| `ENT_LogClose()` | `ENT_LOG_RC_OK` | N/A | `ENT_LOG_RC_ERROR` when service is not initialized | N/A | `ENT_LOG_RC_IN_USE` when live handles still exist |
-| `ENT_LogInitHandle()` | `ENT_LOG_RC_OK` | `ENT_LOG_RC_NON_FATAL` when the default handle is already open | `ENT_LOG_RC_ERROR` for uninitialized service, allocation failure, or invalid path | N/A | N/A |
-| `ENT_LogCloseHandle()` | `ENT_LOG_RC_OK` | N/A | `ENT_LOG_RC_ERROR` when service is not initialized | `ENT_LOG_RC_INVALID_HANDLE` for invalid or already closed handles | `ENT_LOG_RC_IN_USE` for an already-closing handle |
-| `ENT_LogSetOption()` | `ENT_LOG_RC_OK` | N/A | `ENT_LOG_RC_ERROR` for bad arguments or invalid option values | `ENT_LOG_RC_INVALID_HANDLE` for invalid handles | `ENT_LOG_RC_IN_USE` when the handle is not `ACTIVE` |
-| `ENT_LogRaw()` | `ENT_LOG_RC_OK` | N/A | `ENT_LOG_RC_ERROR` for uninitialized service or formatting/runtime failure | `ENT_LOG_RC_INVALID_HANDLE` for invalid handles | `ENT_LOG_RC_IN_USE` when the handle is closing |
-| `ENT_LogFatal()` / `ENT_LogError()` / `ENT_LogWarn()` / `ENT_LogPrint()` / `ENT_LogDebug()` | `ENT_LOG_RC_OK` | `ENT_LOG_RC_NON_FATAL` when filtered by log level | `ENT_LOG_RC_ERROR` for uninitialized service or formatting/runtime failure | `ENT_LOG_RC_INVALID_HANDLE` for invalid handles | `ENT_LOG_RC_IN_USE` when the handle is closing |
-| `ENT_LogCtxInit()` | `ENT_LOG_RC_OK` | N/A | `ENT_LOG_RC_ERROR` for uninitialized service, bad argument, or allocation failure | N/A | N/A |
-| `ENT_LogCtxClose()` | `ENT_LOG_RC_OK` | N/A | `ENT_LOG_RC_ERROR` when service is not initialized | `ENT_LOG_RC_INVALID_HANDLE` for invalid context | Propagates `ENT_LogCloseHandle()` busy return if owned handle is closing |
-| `ENT_LogCtxInitHandle()` | `ENT_LOG_RC_OK` | Propagates `ENT_LogInitHandle()` non-fatal return | `ENT_LOG_RC_ERROR` for uninitialized service, bad argument, allocation failure, or invalid path | `ENT_LOG_RC_INVALID_HANDLE` for invalid context or duplicate context handle | N/A |
-| `ENT_LogCtxSetOption()` | `ENT_LOG_RC_OK` | N/A | `ENT_LOG_RC_ERROR` for uninitialized service or bad option arguments | `ENT_LOG_RC_INVALID_HANDLE` for invalid context/handle relationship | `ENT_LOG_RC_IN_USE` when the handle is not `ACTIVE` |
-| `ENT_LogCtxCloseHandle()` | `ENT_LOG_RC_OK` | N/A | `ENT_LOG_RC_ERROR` when service is not initialized | `ENT_LOG_RC_INVALID_HANDLE` for invalid context/handle relationship | `ENT_LOG_RC_IN_USE` when the handle is already closing |
-| `ENT_LogCtxRaw()` / level-specific `ENT_LogCtx*()` | `ENT_LOG_RC_OK` | `ENT_LOG_RC_NON_FATAL` when filtered by log level | `ENT_LOG_RC_ERROR` for uninitialized service or formatting/runtime failure | `ENT_LOG_RC_INVALID_HANDLE` for invalid context/handle relationship | `ENT_LOG_RC_IN_USE` when the handle is closing |
+## Function Semantics
 
-## Lifecycle summary
+| API | Success | Non-fatal | Bad argument | Not initialized | Bad handle | In use | Alloc failed | Path failed | Format failed | Thread failed | IO failed |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `ENT_LogInit()` | `ENT_SYS_NORMAL` | `ENT_LOG_NON_FATAL` when already initialized | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A |
+| `ENT_LogClose()` | `ENT_SYS_NORMAL` | N/A | N/A | `ENT_LOG_NOT_INITIALIZED` | N/A | `ENT_LOG_IN_USE` when live handles still exist | N/A | N/A | N/A | N/A | N/A |
+| `ENT_LogInitHandle()` | `ENT_SYS_NORMAL` | `ENT_LOG_NON_FATAL` when the default handle is already open | `ENT_LOG_BAD_ARGUMENT` for missing input or invalid option state | `ENT_LOG_NOT_INITIALIZED` | N/A | N/A | `ENT_LOG_ALLOC_FAILED` | `ENT_LOG_PATH_FAILED` | N/A | N/A | N/A |
+| `ENT_LogCloseHandle()` | `ENT_SYS_NORMAL` | N/A | N/A | `ENT_LOG_NOT_INITIALIZED` | `ENT_LOG_BAD_HANDLE` for invalid or already closed handles | `ENT_LOG_IN_USE` for an already-closing handle | N/A | N/A | N/A | `ENT_LOG_THREAD_FAILED` if buffer thread join fails | `ENT_LOG_IO_FAILED` for file close/flush failures |
+| `ENT_LogSetOption()` | `ENT_SYS_NORMAL` | N/A | `ENT_LOG_BAD_ARGUMENT` for bad arguments or invalid option values | `ENT_LOG_NOT_INITIALIZED` | `ENT_LOG_BAD_HANDLE` for invalid handles | `ENT_LOG_IN_USE` when the handle is not `ACTIVE` | `ENT_LOG_ALLOC_FAILED` when option processing allocates memory and that allocation fails | `ENT_LOG_PATH_FAILED` when path validation or creation fails | N/A | `ENT_LOG_THREAD_FAILED` when enabling the buffer thread fails | `ENT_LOG_IO_FAILED` for file option IO failures |
+| `ENT_LogRaw()` | `ENT_SYS_NORMAL` | N/A | `ENT_LOG_BAD_ARGUMENT` for malformed format input | `ENT_LOG_NOT_INITIALIZED` | `ENT_LOG_BAD_HANDLE` for invalid handles | `ENT_LOG_IN_USE` when the handle is closing | `ENT_LOG_ALLOC_FAILED` when format expansion allocates memory and fails | N/A | `ENT_LOG_FORMAT_FAILED` for format expansion failures | N/A | `ENT_LOG_IO_FAILED` for write/flush failures |
+| `ENT_LogFatal()` / `ENT_LogError()` / `ENT_LogWarn()` / `ENT_LogPrint()` / `ENT_LogDebug()` | `ENT_SYS_NORMAL` | `ENT_LOG_NON_FATAL` when filtered by log level | `ENT_LOG_BAD_ARGUMENT` for malformed format input | `ENT_LOG_NOT_INITIALIZED` | `ENT_LOG_BAD_HANDLE` for invalid handles | `ENT_LOG_IN_USE` when the handle is closing | `ENT_LOG_ALLOC_FAILED` when format expansion or line buffering fails | N/A | `ENT_LOG_FORMAT_FAILED` for prefix or message format failures | N/A | `ENT_LOG_IO_FAILED` for write/flush failures |
+| `ENT_LogCtxInit()` | `ENT_SYS_NORMAL` | N/A | `ENT_LOG_BAD_ARGUMENT` for missing context pointer | `ENT_LOG_NOT_INITIALIZED` | N/A | N/A | `ENT_LOG_ALLOC_FAILED` | `ENT_LOG_PATH_FAILED` | N/A | N/A | N/A |
+| `ENT_LogCtxClose()` | `ENT_SYS_NORMAL` | N/A | N/A | `ENT_LOG_NOT_INITIALIZED` | `ENT_LOG_BAD_HANDLE` for invalid context | `ENT_LOG_IN_USE` when the owned handle is closing | N/A | N/A | N/A | `ENT_LOG_THREAD_FAILED` if the owned buffer thread cannot stop cleanly | `ENT_LOG_IO_FAILED` for file close/flush failures |
+| `ENT_LogCtxInitHandle()` | `ENT_SYS_NORMAL` | Propagates `ENT_LOG_NON_FATAL` from `ENT_LogInitHandle()` | `ENT_LOG_BAD_ARGUMENT` for missing arguments | `ENT_LOG_NOT_INITIALIZED` | `ENT_LOG_BAD_HANDLE` for invalid context or duplicate context handle | N/A | `ENT_LOG_ALLOC_FAILED` | `ENT_LOG_PATH_FAILED` | N/A | N/A | N/A |
+| `ENT_LogCtxSetOption()` | `ENT_SYS_NORMAL` | N/A | `ENT_LOG_BAD_ARGUMENT` for missing arguments | `ENT_LOG_NOT_INITIALIZED` | `ENT_LOG_BAD_HANDLE` for invalid context/handle relationship | `ENT_LOG_IN_USE` when the handle is not `ACTIVE` | `ENT_LOG_ALLOC_FAILED` | `ENT_LOG_PATH_FAILED` | N/A | `ENT_LOG_THREAD_FAILED` | `ENT_LOG_IO_FAILED` |
+| `ENT_LogCtxCloseHandle()` | `ENT_SYS_NORMAL` | N/A | N/A | `ENT_LOG_NOT_INITIALIZED` | `ENT_LOG_BAD_HANDLE` for invalid context/handle relationship | `ENT_LOG_IN_USE` when the handle is already closing | N/A | N/A | N/A | `ENT_LOG_THREAD_FAILED` | `ENT_LOG_IO_FAILED` |
+| `ENT_LogCtxRaw()` / level-specific `ENT_LogCtx*()` | `ENT_SYS_NORMAL` | `ENT_LOG_NON_FATAL` when filtered by log level | `ENT_LOG_BAD_ARGUMENT` for malformed format input | `ENT_LOG_NOT_INITIALIZED` | `ENT_LOG_BAD_HANDLE` for invalid context/handle relationship | `ENT_LOG_IN_USE` when the handle is closing | `ENT_LOG_ALLOC_FAILED` when format expansion or line buffering fails | N/A | `ENT_LOG_FORMAT_FAILED` for format/prefix failures | N/A | `ENT_LOG_IO_FAILED` for write/flush failures |
 
-- `ACTIVE`: write and option updates are allowed.
-- `CLOSING`: new writers and option updates are rejected with `ENT_LOG_RC_IN_USE`.
+## Lifecycle Summary
+
+- `ACTIVE`: writes and option updates are allowed.
+- `CLOSING`: new writers and option updates are rejected with `ENT_LOG_IN_USE`.
 - `CLOSED`: the handle is invalid and must not be reused.
 - Service close must happen after all live handles have been closed.
 
-## Future direction
+## Notes
 
-This document describes the current transitional state. A later migration can map these log return codes into the repository-wide `msg/ent.msg` generated message-code system.
+- `ENT_LOG_OK` exists as the `LOG` submodule success symbol, but the public API success path continues to use `ENT_SYS_NORMAL`.
+- Legacy log return macros are no longer used.
