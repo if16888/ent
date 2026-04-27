@@ -184,6 +184,8 @@ add_executable(
   ../comm/utl_dll.c
 )
 
+target_compile_definitions(test_utl_tpool PRIVATE ENT_TPOOL_TEST_HOOKS=1)
+
 target_include_directories(
   test_utl_tpool
   PRIVATE

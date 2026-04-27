@@ -213,7 +213,7 @@ static void* close_pool_thread(void* data)
 #endif
 {
     UTL_TPOOL pool = (UTL_TPOOL)data;
-    (void)UTL_TPoolClose(pool);
+    (void)UTL_TPoolClose(&pool);
 #ifdef WIN32
     return 0;
 #else
@@ -243,7 +243,7 @@ static int test_tpool_add_task_is_rejected_once_close_starts(void)
     if(expect_true(UTL_TPoolAddTask(pool, slow_task_cb, NULL, &probe, &retVal) == ENT_SYS_NORMAL,
                    "UTL_TPoolAddTask should queue the initial slow task") != 0)
     {
-        UTL_TPoolClose(pool);
+        UTL_TPoolClose(&pool);
         s_use_real_threads = 0;
         return 1;
     }
@@ -256,7 +256,7 @@ static int test_tpool_add_task_is_rejected_once_close_starts(void)
     if(expect_true(probe.task_started == 1,
                    "slow task should start before close/add race is exercised") != 0)
     {
-        UTL_TPoolClose(pool);
+        UTL_TPoolClose(&pool);
         s_use_real_threads = 0;
         return 1;
     }
@@ -266,7 +266,7 @@ static int test_tpool_add_task_is_rejected_once_close_starts(void)
         HANDLE th = CreateThread(NULL, 0, close_pool_thread, pool, 0, NULL);
         if(expect_true(th != NULL, "close helper thread should start on Windows") != 0)
         {
-            UTL_TPoolClose(pool);
+            UTL_TPoolClose(&pool);
             s_use_real_threads = 0;
             return 1;
         }
@@ -289,7 +289,7 @@ static int test_tpool_add_task_is_rejected_once_close_starts(void)
         if(expect_true(pthread_create(&th, NULL, close_pool_thread, pool) == 0,
                        "close helper thread should start on POSIX") != 0)
         {
-            UTL_TPoolClose(pool);
+            UTL_TPoolClose(&pool);
             s_use_real_threads = 0;
             return 1;
         }

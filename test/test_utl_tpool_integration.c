@@ -301,7 +301,7 @@ static int test_real_tpool_executes_multiple_tasks(void)
         failures++;
     }
 
-    if(expect_true(UTL_TPoolClose(pool) == ENT_SYS_NORMAL,
+    if(expect_true(UTL_TPoolClose(&pool) == ENT_SYS_NORMAL,
                    "UTL_TPoolClose should close a real thread-backed pool") != 0)
     {
         failures++;
@@ -334,7 +334,7 @@ static int test_real_tpool_close_waits_for_running_task(void)
     if(expect_true(UTL_TPoolAddTask(pool, slow_task_cb, slow_task_end_cb, &probe, &retVal) == ENT_SYS_NORMAL,
                    "UTL_TPoolAddTask should accept a running close test task") != 0)
     {
-        UTL_TPoolClose(pool);
+        UTL_TPoolClose(&pool);
         probe_close(&probe);
         return 1;
     }
@@ -342,12 +342,12 @@ static int test_real_tpool_close_waits_for_running_task(void)
     if(expect_true(wait_for_slow_start(&probe, 3000) == 1,
                    "slow task should start before close is called") != 0)
     {
-        UTL_TPoolClose(pool);
+        UTL_TPoolClose(&pool);
         probe_close(&probe);
         return 1;
     }
 
-    if(expect_true(UTL_TPoolClose(pool) == ENT_SYS_NORMAL,
+    if(expect_true(UTL_TPoolClose(&pool) == ENT_SYS_NORMAL,
                    "UTL_TPoolClose should wait for the running real task") != 0)
     {
         failures++;
@@ -383,7 +383,7 @@ static int test_real_tpool_rejects_add_after_close(void)
         return 1;
     }
 
-    if(expect_true(UTL_TPoolClose(pool) == ENT_SYS_NORMAL,
+    if(expect_true(UTL_TPoolClose(&pool) == ENT_SYS_NORMAL,
                    "UTL_TPoolClose should close the post-close add pool") != 0)
     {
         probe_close(&probe);

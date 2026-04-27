@@ -186,7 +186,7 @@ MSG_ID_T tpool_example_start()
 MSG_ID_T tpool_example_stop()
 {
     MSG_ID_T  sts = 0;
-    sts = UTL_TPoolClose(tpHandle);
+    sts = UTL_TPoolClose(&tpHandle);
     if(sts < 0)
     {
         ENT_LOG_ERROR("UTL_TPoolClose failed,sts [%d]\n",sts);

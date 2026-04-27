@@ -647,7 +647,7 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
 
     if(dbCfg!=NULL && dbCfg->sTag==ENTDB_S_TAG && dbCfg->eTag == ENTDB_E_TAG)
     {
-        sts=ENT_DbCloseHandle(dbCfg);
+        sts=ENT_DbCloseHandle(pdbHandle);
         if(sts < 0)
         {
             *pdbHandle = NULL;
@@ -792,7 +792,7 @@ ENT_PUBLIC MSG_ID_T ENT_DbOpen(DB_HANDLE dbHandle)
  *
  *-----------------------------------------------------------------------------
  */
-ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE dbHandle)
+ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE* dbHandle)
 {
     MSG_ID_T sts=ENT_SYS_NORMAL;
     DB_CFG*  dbCfg=NULL;
@@ -802,8 +802,14 @@ ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE dbHandle)
         return ENT_DBS_NOT_INITIALIZED;
     }
 
+    if(dbHandle == NULL)
+    {
+        IENT_LOG_ERROR("Database handle is null.\n");
+        return ENT_DBS_BAD_ARGUMENT;
+    }
+
     iENT_DbGlobalLock();
-    sts = iENT_DbValidateHandle(dbHandle, &dbCfg, false);
+    sts = iENT_DbValidateHandle(*dbHandle, &dbCfg, false);
     if(sts < 0)
     {
         iENT_DbGlobalUnlock();
@@ -884,6 +890,7 @@ ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE dbHandle)
 
     iENT_DbLifecycleDestroy(dbCfg);
     free(dbCfg);
+    *dbHandle = NULL;
     return sts;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++

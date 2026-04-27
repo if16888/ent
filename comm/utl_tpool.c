@@ -121,6 +121,15 @@ static void iUTL_TPoolRegistryUnlock(void)
 
 static UTL_TPOOL_CTX* sTPoolRegistryHead = NULL;
 
+#ifdef ENT_TPOOL_TEST_HOOKS
+static BOOL sTPoolTestFailThreadListInsert = FALSE;
+
+ENT_PUBLIC void UTL_TPoolTestSetThreadListInsertFailure(BOOL enable)
+{
+    sTPoolTestFailThreadListInsert = enable;
+}
+#endif
+
 static void iUTL_TPoolRegistryAdd(UTL_TPOOL_CTX* poolCtx)
 {
     iUTL_TPoolRegistryLock();
@@ -252,6 +261,21 @@ static void iUTL_TPoolWaitActiveOps(UTL_TPOOL_CTX* poolCtx)
             UTL_Sleep(1);
         }
     } while(activeOps > 0);
+}
+
+static void iUTL_TPoolAbortStartedWorker(UTL_TPOOL_CTX* poolCtx, UTL_TPOOL_THREAD* thCtx)
+{
+    if(poolCtx == NULL || thCtx == NULL)
+    {
+        return;
+    }
+
+    UTL_LockEnter(poolCtx->taskLock);
+    thCtx->taskType = TASK_E_TYPE_QUIT;
+    UTL_CVWakeAll(poolCtx->taskEmptyCV);
+    UTL_LockLeave(poolCtx->taskLock);
+
+    ENT_ThreadWaitById(&thCtx->thId, poolCtx->thHandle, 0);
 }
 
 static DWORD iUTL_TPoolTaskPro(void* data)
@@ -447,9 +471,15 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolInit(UTL_TPOOL*  pool,int num)
             continue;
         }
         sts = UTL_DllInsHead(&poolCtx->threadHeader,(DLL_D_HDR*)thCtx);
+#ifdef ENT_TPOOL_TEST_HOOKS
+        if(sts >= 0 && sTPoolTestFailThreadListInsert)
+        {
+            sts = ENT_TPL_WORKER_CREATEFAIL;
+        }
+#endif
         if(sts < 0)
         {
-            ENT_ThreadWaitById(&thCtx->thId,poolCtx->thHandle,0);
+            iUTL_TPoolAbortStartedWorker(poolCtx, thCtx);
             free(thCtx);
             continue;
         }
@@ -473,7 +503,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolInit(UTL_TPOOL*  pool,int num)
     return ENT_SYS_NORMAL;
 }
 
-ENT_PUBLIC MSG_ID_T  UTL_TPoolClose(UTL_TPOOL  pool)
+ENT_PUBLIC MSG_ID_T  UTL_TPoolClose(UTL_TPOOL* pool)
 {
     MSG_ID_T            sts = 0;
     UTL_TPOOL_CTX*      poolCtx= NULL;
@@ -481,7 +511,13 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolClose(UTL_TPOOL  pool)
     UTL_TPOOL_TASK*     taskDb = NULL;
     DLL_D_HDR*          tmp = NULL;
     DLL_D_HDR*          curr = NULL;
-    sts = iUTL_TPoolBeginClose(pool, &poolCtx);
+    if(pool == NULL)
+    {
+        IENT_LOG_ERROR("invalid thread pool handle\n");
+        return ENT_TPL_BAD_ARGUMENT;
+    }
+
+    sts = iUTL_TPoolBeginClose(*pool, &poolCtx);
     if(sts != ENT_SYS_NORMAL)
     {
         IENT_LOG_ERROR("invalid thread pool handle\n");
@@ -489,6 +525,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolClose(UTL_TPOOL  pool)
     }
     if(poolCtx == NULL)
     {
+        *pool = NULL;
         return ENT_SYS_NORMAL;
     }
 
@@ -551,6 +588,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolClose(UTL_TPOOL  pool)
     ENT_ThreadClose(poolCtx->thHandle);
 
     free(poolCtx);
+    *pool = NULL;
     return ENT_SYS_NORMAL;
 }
 

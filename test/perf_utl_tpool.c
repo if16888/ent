@@ -134,7 +134,7 @@ int main(void)
 
     elapsedMs = now_ms() - startMs;
 
-    if(UTL_TPoolClose(pool) != 0)
+    if(UTL_TPoolClose(&pool) != 0)
     {
         UTL_CVClose(&probe.done_cv);
         UTL_LockClose(&probe.done_lock);

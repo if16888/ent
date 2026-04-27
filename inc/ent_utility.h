@@ -91,7 +91,7 @@ typedef MSG_ID_T (*UTL_TP_TASK_F)(void*);
 typedef MSG_ID_T (*UTL_TP_TASK_END_F)(void*,MSG_ID_T*);
 
 ENT_PUBLIC MSG_ID_T  UTL_TPoolInit(UTL_TPOOL*  pool,int num);
-ENT_PUBLIC MSG_ID_T  UTL_TPoolClose(UTL_TPOOL  pool);
+ENT_PUBLIC MSG_ID_T  UTL_TPoolClose(UTL_TPOOL* pool);
 ENT_PUBLIC MSG_ID_T  UTL_TPoolAddTask(UTL_TPOOL pool,UTL_TP_TASK_F taskCb,UTL_TP_TASK_END_F taskEndCb,void* taskData,MSG_ID_T* retVal);
 
 
@@ -140,6 +140,10 @@ ENT_PUBLIC MSG_ID_T  UTL_Listen(
     UTL_D_SOCKET	SocketDesc, 
     int 		    MaxBacklog);
 
+/*
+ * UTL_Accept returns the accepted socket through pSocketDesc.
+ * If addr/addr_size are provided, they receive the peer address length.
+ */
 ENT_PUBLIC MSG_ID_T  UTL_Accept (
     UTL_D_SOCKET	        SocketListen,	 
     struct sockaddr*       addr,

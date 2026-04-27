@@ -83,7 +83,7 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
 
 ENT_PUBLIC MSG_ID_T  ENT_DbOpen(DB_HANDLE dbHandle);
 
-ENT_PUBLIC MSG_ID_T  ENT_DbCloseHandle(DB_HANDLE dbHandle);
+ENT_PUBLIC MSG_ID_T  ENT_DbCloseHandle(DB_HANDLE* dbHandle);
 
 ENT_PUBLIC MSG_ID_T  ENT_DbRead(DB_HANDLE dbHandle,const char* sql,SqlResultCB sqlCb,void* userData);
 

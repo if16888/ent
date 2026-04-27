@@ -23,6 +23,10 @@ static int s_thread_close_calls = 0;
 static int s_thread_wait_calls = 0;
 static int s_use_real_threads = 0;
 
+#ifdef ENT_TPOOL_TEST_HOOKS
+extern void UTL_TPoolTestSetThreadListInsertFailure(BOOL enable);
+#endif
+
 typedef struct
 {
 #ifdef WIN32
@@ -67,6 +71,9 @@ static void reset_thread_counters(void)
     s_thread_close_calls = 0;
     s_thread_wait_calls = 0;
     s_use_real_threads = 0;
+#ifdef ENT_TPOOL_TEST_HOOKS
+    UTL_TPoolTestSetThreadListInsertFailure(FALSE);
+#endif
 }
 
 static int expect_true(int condition, const char* message)
@@ -390,6 +397,70 @@ static int test_tpool_init_fails_when_no_worker_threads_start(void)
                        "UTL_TPoolInit should close the thread context when worker startup fails");
 }
 
+static int test_tpool_init_cleans_up_when_worker_list_insert_fails(void)
+{
+    UTL_TPOOL pool = NULL;
+
+    reset_thread_counters();
+    s_use_real_threads = 1;
+#ifdef ENT_TPOOL_TEST_HOOKS
+    UTL_TPoolTestSetThreadListInsertFailure(TRUE);
+#endif
+
+    if(expect_true(UTL_TPoolInit(&pool, 1) == ENT_TPL_WORKER_CREATEFAIL,
+                   "UTL_TPoolInit should fail when the started worker cannot be inserted into the thread list") != 0)
+    {
+#ifdef ENT_TPOOL_TEST_HOOKS
+        UTL_TPoolTestSetThreadListInsertFailure(FALSE);
+#endif
+        s_use_real_threads = 0;
+        return 1;
+    }
+
+    if(expect_true(pool == NULL, "UTL_TPoolInit should leave pool as NULL when thread list insertion fails") != 0)
+    {
+#ifdef ENT_TPOOL_TEST_HOOKS
+        UTL_TPoolTestSetThreadListInsertFailure(FALSE);
+#endif
+        s_use_real_threads = 0;
+        return 1;
+    }
+
+    if(expect_true(s_thread_create_calls == 1, "UTL_TPoolInit should create exactly one worker for insert-failure coverage") != 0)
+    {
+#ifdef ENT_TPOOL_TEST_HOOKS
+        UTL_TPoolTestSetThreadListInsertFailure(FALSE);
+#endif
+        s_use_real_threads = 0;
+        return 1;
+    }
+
+    if(expect_true(s_thread_wait_calls == 1, "UTL_TPoolInit should wait for the created worker before cleaning up") != 0)
+    {
+#ifdef ENT_TPOOL_TEST_HOOKS
+        UTL_TPoolTestSetThreadListInsertFailure(FALSE);
+#endif
+        s_use_real_threads = 0;
+        return 1;
+    }
+
+    if(expect_true(s_thread_close_calls == 1,
+                   "UTL_TPoolInit should close the shared thread context after insert failure") != 0)
+    {
+#ifdef ENT_TPOOL_TEST_HOOKS
+        UTL_TPoolTestSetThreadListInsertFailure(FALSE);
+#endif
+        s_use_real_threads = 0;
+        return 1;
+    }
+
+#ifdef ENT_TPOOL_TEST_HOOKS
+    UTL_TPoolTestSetThreadListInsertFailure(FALSE);
+#endif
+    s_use_real_threads = 0;
+    return 0;
+}
+
 static int test_tpool_init_uses_default_worker_count_for_non_positive_input(void)
 {
     UTL_TPOOL pool = NULL;
@@ -404,18 +475,18 @@ static int test_tpool_init_uses_default_worker_count_for_non_positive_input(void
 
     if(expect_true(pool != NULL, "UTL_TPoolInit should return a pool when default workers start") != 0)
     {
-        UTL_TPoolClose(pool);
+        UTL_TPoolClose(&pool);
         return 1;
     }
 
     if(expect_true(s_thread_create_calls == 8,
                    "UTL_TPoolInit should attempt to create the default number of workers") != 0)
     {
-        UTL_TPoolClose(pool);
+        UTL_TPoolClose(&pool);
         return 1;
     }
 
-    if(expect_true(UTL_TPoolClose(pool) == 0, "UTL_TPoolClose should close a pool created with default workers") != 0)
+    if(expect_true(UTL_TPoolClose(&pool) == 0, "UTL_TPoolClose should close a pool created with default workers") != 0)
     {
         return 1;
     }
@@ -448,18 +519,18 @@ static int test_tpool_close_reclaims_partially_started_workers(void)
 
     if(expect_true(pool != NULL, "UTL_TPoolInit should return a pool after partial startup success") != 0)
     {
-        UTL_TPoolClose(pool);
+        UTL_TPoolClose(&pool);
         return 1;
     }
 
     if(expect_true(s_thread_create_calls == 3,
                    "UTL_TPoolInit should still attempt each requested worker even after an intermediate failure") != 0)
     {
-        UTL_TPoolClose(pool);
+        UTL_TPoolClose(&pool);
         return 1;
     }
 
-    if(expect_true(UTL_TPoolClose(pool) == 0, "UTL_TPoolClose should close a partially started pool") != 0)
+    if(expect_true(UTL_TPoolClose(&pool) == 0, "UTL_TPoolClose should close a partially started pool") != 0)
     {
         return 1;
     }
@@ -499,7 +570,7 @@ static int test_tpool_executes_task_and_end_callback(void)
     if(expect_true(UTL_TPoolAddTask(pool, test_task_cb, test_task_end_cb, &probe, &retVal) == 0,
                    "UTL_TPoolAddTask should accept a simple task") != 0)
     {
-        UTL_TPoolClose(pool);
+        UTL_TPoolClose(&pool);
         return 1;
     }
 
@@ -510,25 +581,25 @@ static int test_tpool_executes_task_and_end_callback(void)
 
     if(expect_true(probe.task_hits == 1, "task callback should run exactly once") != 0)
     {
-        UTL_TPoolClose(pool);
+        UTL_TPoolClose(&pool);
         return 1;
     }
 
     if(expect_true(probe.end_hits == 1, "task end callback should run exactly once") != 0)
     {
-        UTL_TPoolClose(pool);
+        UTL_TPoolClose(&pool);
         return 1;
     }
 
     if(expect_true(retVal == 42 && probe.observed_ret == 42,
                    "task return value should be observed by both caller and end callback") != 0)
     {
-        UTL_TPoolClose(pool);
+        UTL_TPoolClose(&pool);
         s_use_real_threads = 0;
         return 1;
     }
 
-    if(expect_true(UTL_TPoolClose(pool) == 0,
+    if(expect_true(UTL_TPoolClose(&pool) == 0,
                    "UTL_TPoolClose should succeed after task execution") != 0)
     {
         s_use_real_threads = 0;
@@ -558,7 +629,7 @@ static int test_tpool_close_waits_for_running_task_completion(void)
     if(expect_true(UTL_TPoolAddTask(pool, slow_task_cb, test_task_end_cb, &probe, &retVal) == 0,
                    "UTL_TPoolAddTask should accept the slow task for close checks") != 0)
     {
-        UTL_TPoolClose(pool);
+        UTL_TPoolClose(&pool);
         return 1;
     }
 
@@ -569,12 +640,12 @@ static int test_tpool_close_waits_for_running_task_completion(void)
 
     if(expect_true(probe.task_started == 1, "slow task should begin before pool close") != 0)
     {
-        UTL_TPoolClose(pool);
+        UTL_TPoolClose(&pool);
         s_use_real_threads = 0;
         return 1;
     }
 
-    if(expect_true(UTL_TPoolClose(pool) == 0,
+    if(expect_true(UTL_TPoolClose(&pool) == 0,
                    "UTL_TPoolClose should wait for the running task to finish without deadlock") != 0)
     {
         s_use_real_threads = 0;
@@ -604,7 +675,7 @@ static int test_tpool_close_wakes_idle_workers(void)
 
         UTL_Sleep(10);
 
-        if(expect_true(UTL_TPoolClose(pool) == 0,
+        if(expect_true(UTL_TPoolClose(&pool) == 0,
                        "UTL_TPoolClose should wake and join an idle waiting worker without deadlock") != 0)
         {
             s_use_real_threads = 0;
@@ -624,6 +695,7 @@ int main(void)
     failures += test_tpool_init_rejects_null_output_pointer();
     failures += test_tpool_add_task_rejects_invalid_arguments();
     failures += test_tpool_init_fails_when_no_worker_threads_start();
+    failures += test_tpool_init_cleans_up_when_worker_list_insert_fails();
     failures += test_tpool_init_uses_default_worker_count_for_non_positive_input();
     failures += test_tpool_close_reclaims_partially_started_workers();
     failures += test_tpool_close_rejects_null_pool();

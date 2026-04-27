@@ -362,7 +362,7 @@ static void* db_close_thread_proc(void* data)
 {
     DB_CLOSE_THREAD_CTX* ctx = (DB_CLOSE_THREAD_CTX*)data;
     test_event_signal(&ctx->probe->close_started);
-    ctx->status = ENT_DbCloseHandle(ctx->db_handle);
+    ctx->status = ENT_DbCloseHandle(&ctx->db_handle);
     ctx->probe->close_finished = 1;
 #ifdef WIN32
     return 0;
@@ -476,13 +476,13 @@ static int test_db_close_rejects_live_handles(void)
     if(expect_true(ENT_DbClose() == ENT_DBS_IN_USE,
                    "ENT_DbClose should refuse to tear down the DB service while handles are still live") != 0)
     {
-        ENT_DbCloseHandle(db_handle);
+        ENT_DbCloseHandle(&db_handle);
         ENT_DbClose();
         cleanup_temp_db_path(db_path);
         return 1;
     }
 
-    if(expect_true(ENT_DbCloseHandle(db_handle) == 0,
+    if(expect_true(ENT_DbCloseHandle(&db_handle) == 0,
                    "ENT_DbCloseHandle should close the live SQLite handle after service-close rejection") != 0)
     {
         ENT_DbClose();
@@ -647,7 +647,7 @@ static int test_db_close_handle_waits_for_active_read(void)
             rc = 1;
             goto CLEANUP;
         }
-        if(expect_true(ENT_DbCloseHandle(db_handle) == ENT_DBS_IN_USE,
+        if(expect_true(ENT_DbCloseHandle(&db_handle) == ENT_DBS_IN_USE,
                        "A second ENT_DbCloseHandle should report the handle as already closing") != 0)
         {
             test_event_signal(&probe.callback_release);
@@ -733,7 +733,7 @@ static int test_db_close_handle_waits_for_active_read(void)
             rc = 1;
             goto CLEANUP;
         }
-        if(expect_true(ENT_DbCloseHandle(db_handle) == ENT_DBS_IN_USE,
+        if(expect_true(ENT_DbCloseHandle(&db_handle) == ENT_DBS_IN_USE,
                        "A second ENT_DbCloseHandle should report the handle as already closing") != 0)
         {
             test_event_signal(&probe.callback_release);
@@ -786,7 +786,7 @@ static int test_db_close_handle_waits_for_active_read(void)
 HANDLE_CLEANUP:
     if(db_handle != NULL)
     {
-        ENT_DbCloseHandle(db_handle);
+        ENT_DbCloseHandle(&db_handle);
     }
 CLEANUP:
     test_event_signal(&probe.callback_release);
@@ -930,7 +930,7 @@ static int test_db_reinit_rejects_active_read(void)
 HANDLE_CLEANUP:
     if(db_handle != NULL)
     {
-        if(expect_true(ENT_DbCloseHandle(db_handle) == 0,
+        if(expect_true(ENT_DbCloseHandle(&db_handle) == 0,
                        "ENT_DbCloseHandle should close the SQLite handle after concurrent reinit testing") != 0)
         {
             rc = 1;
@@ -972,12 +972,12 @@ static int test_sqlite_open_rejects_missing_database_path(void)
     if(expect_true(ENT_DbOpen(db_handle) == ENT_DBS_BAD_ARGUMENT,
                    "ENT_DbOpen should reject a SQLite handle without a database path") != 0)
     {
-        ENT_DbCloseHandle(db_handle);
+        ENT_DbCloseHandle(&db_handle);
         ENT_DbClose();
         return 1;
     }
 
-    if(expect_true(ENT_DbCloseHandle(db_handle) == 0,
+    if(expect_true(ENT_DbCloseHandle(&db_handle) == 0,
                    "ENT_DbCloseHandle should clean up a closed SQLite handle") != 0)
     {
         ENT_DbClose();
@@ -1020,7 +1020,7 @@ static int test_sqlite_open_is_idempotent(void)
     if(expect_true(ENT_DbOpen(db_handle) == 0,
                    "ENT_DbOpen should open a valid SQLite handle") != 0)
     {
-        ENT_DbCloseHandle(db_handle);
+        ENT_DbCloseHandle(&db_handle);
         ENT_DbClose();
         cleanup_temp_db_path(db_path);
         return 1;
@@ -1031,14 +1031,14 @@ static int test_sqlite_open_is_idempotent(void)
         if(expect_true(reopen_sts == 0,
                    "ENT_DbOpen should treat an already-open SQLite handle as success") != 0)
         {
-            ENT_DbCloseHandle(db_handle);
+            ENT_DbCloseHandle(&db_handle);
             ENT_DbClose();
             cleanup_temp_db_path(db_path);
             return 1;
         }
     }
 
-    if(expect_true(ENT_DbCloseHandle(db_handle) == 0,
+    if(expect_true(ENT_DbCloseHandle(&db_handle) == 0,
                    "ENT_DbCloseHandle should close the SQLite handle after idempotent open testing") != 0)
     {
         ENT_DbClose();
@@ -1084,7 +1084,7 @@ static int test_sqlite_write_and_read_roundtrip(void)
     if(expect_true(ENT_DbWrite(db_handle, "CREATE TABLE test_user(id INTEGER PRIMARY KEY, name TEXT NOT NULL);", NULL, NULL) == 0,
                    "ENT_DbWrite should create a SQLite table") != 0)
     {
-        ENT_DbCloseHandle(db_handle);
+        ENT_DbCloseHandle(&db_handle);
         ENT_DbClose();
         cleanup_temp_db_path(db_path);
         return 1;
@@ -1093,7 +1093,7 @@ static int test_sqlite_write_and_read_roundtrip(void)
     if(expect_true(ENT_DbWrite(db_handle, "INSERT INTO test_user(name) VALUES('alice');", NULL, NULL) == 0,
                    "ENT_DbWrite should insert a SQLite row") != 0)
     {
-        ENT_DbCloseHandle(db_handle);
+        ENT_DbCloseHandle(&db_handle);
         ENT_DbClose();
         cleanup_temp_db_path(db_path);
         return 1;
@@ -1105,7 +1105,7 @@ static int test_sqlite_write_and_read_roundtrip(void)
                               &capture) == 0,
                    "ENT_DbRead should fetch the inserted SQLite row") != 0)
     {
-        ENT_DbCloseHandle(db_handle);
+        ENT_DbCloseHandle(&db_handle);
         ENT_DbClose();
         cleanup_temp_db_path(db_path);
         return 1;
@@ -1113,7 +1113,7 @@ static int test_sqlite_write_and_read_roundtrip(void)
 
     if(expect_true(capture.called == 1, "ENT_DbRead should invoke the SQLite callback once") != 0)
     {
-        ENT_DbCloseHandle(db_handle);
+        ENT_DbCloseHandle(&db_handle);
         ENT_DbClose();
         cleanup_temp_db_path(db_path);
         return 1;
@@ -1121,7 +1121,7 @@ static int test_sqlite_write_and_read_roundtrip(void)
 
     if(expect_true(capture.column_num == 1, "ENT_DbRead should return one selected column") != 0)
     {
-        ENT_DbCloseHandle(db_handle);
+        ENT_DbCloseHandle(&db_handle);
         ENT_DbClose();
         cleanup_temp_db_path(db_path);
         return 1;
@@ -1129,13 +1129,13 @@ static int test_sqlite_write_and_read_roundtrip(void)
 
     if(expect_true(strcmp(capture.name, "alice") == 0, "ENT_DbRead should return the inserted row contents") != 0)
     {
-        ENT_DbCloseHandle(db_handle);
+        ENT_DbCloseHandle(&db_handle);
         ENT_DbClose();
         cleanup_temp_db_path(db_path);
         return 1;
     }
 
-    if(expect_true(ENT_DbCloseHandle(db_handle) == 0,
+    if(expect_true(ENT_DbCloseHandle(&db_handle) == 0,
                    "ENT_DbCloseHandle should close an open SQLite handle") != 0)
     {
         ENT_DbClose();
@@ -1179,13 +1179,13 @@ static int test_sqlite_write_rejects_invalid_sql(void)
     if(expect_true(ENT_DbWrite(db_handle, "THIS IS NOT SQL", NULL, NULL) == ENT_DBS_QUERY_FAILED,
                    "ENT_DbWrite should return a query failure when SQLite rejects invalid SQL") != 0)
     {
-        ENT_DbCloseHandle(db_handle);
+        ENT_DbCloseHandle(&db_handle);
         ENT_DbClose();
         cleanup_temp_db_path(db_path);
         return 1;
     }
 
-    if(expect_true(ENT_DbCloseHandle(db_handle) == 0,
+    if(expect_true(ENT_DbCloseHandle(&db_handle) == 0,
                    "ENT_DbCloseHandle should close the SQLite handle after invalid SQL") != 0)
     {
         ENT_DbClose();
@@ -1231,7 +1231,7 @@ static int test_sqlite_read_rejects_callback_without_user_data(void)
     if(expect_true(ENT_DbWrite(db_handle, "CREATE TABLE test_user(id INTEGER PRIMARY KEY, name TEXT NOT NULL);", NULL, NULL) == 0,
                    "ENT_DbWrite should create a SQLite table for callback validation") != 0)
     {
-        ENT_DbCloseHandle(db_handle);
+        ENT_DbCloseHandle(&db_handle);
         ENT_DbClose();
         cleanup_temp_db_path(db_path);
         return 1;
@@ -1240,7 +1240,7 @@ static int test_sqlite_read_rejects_callback_without_user_data(void)
     if(expect_true(ENT_DbWrite(db_handle, "INSERT INTO test_user(name) VALUES('bob');", NULL, NULL) == 0,
                    "ENT_DbWrite should insert a SQLite row for callback validation") != 0)
     {
-        ENT_DbCloseHandle(db_handle);
+        ENT_DbCloseHandle(&db_handle);
         ENT_DbClose();
         cleanup_temp_db_path(db_path);
         return 1;
@@ -1252,7 +1252,7 @@ static int test_sqlite_read_rejects_callback_without_user_data(void)
                               NULL) == ENT_DBS_BAD_ARGUMENT,
                    "ENT_DbRead should fail when a callback is provided without user data") != 0)
     {
-        ENT_DbCloseHandle(db_handle);
+        ENT_DbCloseHandle(&db_handle);
         ENT_DbClose();
         cleanup_temp_db_path(db_path);
         return 1;
@@ -1261,13 +1261,13 @@ static int test_sqlite_read_rejects_callback_without_user_data(void)
     if(expect_true(capture.called == 0,
                    "ENT_DbRead should not populate caller state when SQLite aborts the callback") != 0)
     {
-        ENT_DbCloseHandle(db_handle);
+        ENT_DbCloseHandle(&db_handle);
         ENT_DbClose();
         cleanup_temp_db_path(db_path);
         return 1;
     }
 
-    if(expect_true(ENT_DbCloseHandle(db_handle) == 0,
+    if(expect_true(ENT_DbCloseHandle(&db_handle) == 0,
                    "ENT_DbCloseHandle should close the SQLite handle after callback validation") != 0)
     {
         ENT_DbClose();
@@ -1300,7 +1300,7 @@ static int test_pgsql_handle_lifecycle(void)
         return 1;
     }
 
-    sts = ENT_DbCloseHandle(db_handle);
+    sts = ENT_DbCloseHandle(&db_handle);
 #if ENT_ENABLE_PGSQL
     if(expect_true(sts == ENT_SYS_NORMAL,
                    "ENT_DbCloseHandle should clean up the PgSQL handle") != 0)
@@ -1366,7 +1366,7 @@ static int test_pgsql_roundtrip_if_configured(void)
     if(expect_true(sts == 0,
                    "ENT_DbOpen should connect to PostgreSQL when the integration environment is configured") != 0)
     {
-        ENT_DbCloseHandle(db_handle);
+        ENT_DbCloseHandle(&db_handle);
         ENT_DbClose();
         return 1;
     }
@@ -1377,7 +1377,7 @@ static int test_pgsql_roundtrip_if_configured(void)
                                NULL) == 0,
                    "ENT_DbWrite should create a PostgreSQL temp table") != 0)
     {
-        ENT_DbCloseHandle(db_handle);
+        ENT_DbCloseHandle(&db_handle);
         ENT_DbClose();
         return 1;
     }
@@ -1388,7 +1388,7 @@ static int test_pgsql_roundtrip_if_configured(void)
                                NULL) == 0,
                    "ENT_DbWrite should insert a PostgreSQL row") != 0)
     {
-        ENT_DbCloseHandle(db_handle);
+        ENT_DbCloseHandle(&db_handle);
         ENT_DbClose();
         return 1;
     }
@@ -1399,7 +1399,7 @@ static int test_pgsql_roundtrip_if_configured(void)
                               &capture) == 0,
                    "ENT_DbRead should fetch the inserted PostgreSQL row") != 0)
     {
-        ENT_DbCloseHandle(db_handle);
+        ENT_DbCloseHandle(&db_handle);
         ENT_DbClose();
         return 1;
     }
@@ -1407,7 +1407,7 @@ static int test_pgsql_roundtrip_if_configured(void)
     if(expect_true(capture.called == 1,
                    "ENT_DbRead should invoke the PostgreSQL callback once") != 0)
     {
-        ENT_DbCloseHandle(db_handle);
+        ENT_DbCloseHandle(&db_handle);
         ENT_DbClose();
         return 1;
     }
@@ -1415,7 +1415,7 @@ static int test_pgsql_roundtrip_if_configured(void)
     if(expect_true(capture.column_num == 1,
                    "ENT_DbRead should return a single PostgreSQL column") != 0)
     {
-        ENT_DbCloseHandle(db_handle);
+        ENT_DbCloseHandle(&db_handle);
         ENT_DbClose();
         return 1;
     }
@@ -1423,12 +1423,12 @@ static int test_pgsql_roundtrip_if_configured(void)
     if(expect_true(strcmp(capture.name, "carol") == 0,
                    "ENT_DbRead should return the inserted PostgreSQL row contents") != 0)
     {
-        ENT_DbCloseHandle(db_handle);
+        ENT_DbCloseHandle(&db_handle);
         ENT_DbClose();
         return 1;
     }
 
-    if(expect_true(ENT_DbCloseHandle(db_handle) == 0,
+    if(expect_true(ENT_DbCloseHandle(&db_handle) == 0,
                    "ENT_DbCloseHandle should close the PostgreSQL handle after the roundtrip") != 0)
     {
         ENT_DbClose();

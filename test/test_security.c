@@ -542,7 +542,7 @@ static void test_db_sql_injection_drop_table(void)
     ASSERT_EQ(1, cap.called, "table should still contain one row");
 
     /* 清理 */
-    ENT_DbCloseHandle(db);
+    ENT_DbCloseHandle(&db);
     ENT_DbClose();
     cleanup_temp_db_path(db_path);
 
@@ -616,7 +616,7 @@ static void test_db_sql_injection_union_select(void)
     ASSERT_TRUE(strcmp(cap.leaked_data, "Alice") == 0,
                 "benign parameterized query should return the requested row");
 
-    ENT_DbCloseHandle(db);
+    ENT_DbCloseHandle(&db);
     ENT_DbClose();
     cleanup_temp_db_path(db_path);
 
@@ -694,7 +694,7 @@ static void test_db_pgsql_parameterized_queries_if_configured(void)
     ASSERT_TRUE(strcmp(cap.leaked_data, params[0].value.text) == 0,
                 "PostgreSQL parameterized SELECT should preserve bound text");
 
-    ENT_DbCloseHandle(db);
+    ENT_DbCloseHandle(&db);
     ENT_DbClose();
 #else
     fprintf(stdout, "    -> PostgreSQL security test skipped: ENT_ENABLE_PGSQL is disabled in this build.\n");
@@ -774,7 +774,7 @@ static void test_db_mysql_parameterized_queries_if_configured(void)
     ASSERT_TRUE(strcmp(cap.leaked_data, params[0].value.text) == 0,
                 "MySQL parameterized SELECT should preserve bound text");
 
-    ENT_DbCloseHandle(db);
+    ENT_DbCloseHandle(&db);
     ENT_DbClose();
 #else
     fprintf(stdout, "    -> MySQL security test skipped: ENT_ENABLE_MYSQL is disabled in this build.\n");
@@ -810,7 +810,7 @@ static void test_db_null_sql_rejected(void)
     ret = ENT_DbWrite(db, NULL, NULL, NULL);
     ASSERT_EQ(ENT_DBS_BAD_ARGUMENT, ret, "ENT_DbWrite(NULL sql) should return BAD_ARGUMENT");
 
-    ENT_DbCloseHandle(db);
+    ENT_DbCloseHandle(&db);
     ENT_DbClose();
     cleanup_temp_db_path(db_path);
 
