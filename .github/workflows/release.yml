@@ -62,9 +62,20 @@ jobs:
 
   build-windows:
     runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: win32
+            platform: Win32
+            triplet: x86-windows
+          - arch: x64
+            platform: x64
+            triplet: x64-windows
     env:
-      BUILD_DIR: build
-      WINDOWS_CMAKE_PLATFORM: Win32
+      BUILD_DIR: build-${{ matrix.arch }}
+      WINDOWS_CMAKE_PLATFORM: ${{ matrix.platform }}
+      VCPKG_TARGET_TRIPLET: ${{ matrix.triplet }}
       WINDOWS_DISABLE_PGSQL: ON
 
     steps:
@@ -82,7 +93,7 @@ jobs:
       - name: Run log tests (Windows explicit)
         shell: pwsh
         run: |
-          Push-Location build
+          Push-Location $env:BUILD_DIR
           try {
             ctest -C Release --output-on-failure -R "^(test_ent_log|test_ent_log_flush_deadline)$"
           }
@@ -105,25 +116,27 @@ jobs:
       - name: Package runtime and devel SDKs
         shell: pwsh
         run: |
-          if (Test-Path build/package-runtime) { Remove-Item build/package-runtime -Recurse -Force }
-          if (Test-Path build/package-devel) { Remove-Item build/package-devel -Recurse -Force }
-          cmake --install build --config Release --prefix build/package-runtime --component runtime
-          cmake --install build --config Release --prefix build/package-devel --component devel
-          Compress-Archive -Path build/package-runtime\* -DestinationPath ent-${env:GITHUB_REF_NAME}-windows-win32-runtime.zip -Force
-          Compress-Archive -Path build/package-devel\* -DestinationPath ent-${env:GITHUB_REF_NAME}-windows-win32-devel.zip -Force
+          $RuntimePackage = Join-Path $env:BUILD_DIR "package-runtime"
+          $DevelPackage = Join-Path $env:BUILD_DIR "package-devel"
+          if (Test-Path $RuntimePackage) { Remove-Item $RuntimePackage -Recurse -Force }
+          if (Test-Path $DevelPackage) { Remove-Item $DevelPackage -Recurse -Force }
+          cmake --install $env:BUILD_DIR --config Release --prefix $RuntimePackage --component runtime
+          cmake --install $env:BUILD_DIR --config Release --prefix $DevelPackage --component devel
+          Compress-Archive -Path "$RuntimePackage\*" -DestinationPath ent-${env:GITHUB_REF_NAME}-windows-${{ matrix.arch }}-runtime.zip -Force
+          Compress-Archive -Path "$DevelPackage\*" -DestinationPath ent-${env:GITHUB_REF_NAME}-windows-${{ matrix.arch }}-devel.zip -Force
 
       - name: Upload runtime artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-windows-runtime
-          path: ent-${{ github.ref_name }}-windows-win32-runtime.zip
+          name: release-windows-${{ matrix.arch }}-runtime
+          path: ent-${{ github.ref_name }}-windows-${{ matrix.arch }}-runtime.zip
           if-no-files-found: error
 
       - name: Upload devel artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-windows-devel
-          path: ent-${{ github.ref_name }}-windows-win32-devel.zip
+          name: release-windows-${{ matrix.arch }}-devel
+          path: ent-${{ github.ref_name }}-windows-${{ matrix.arch }}-devel.zip
           if-no-files-found: error
 
   publish:

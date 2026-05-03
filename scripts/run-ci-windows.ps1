@@ -1,12 +1,23 @@
 $ErrorActionPreference = "Stop"
 
 $Stage = if ($args.Length -gt 0) { $args[0] } else { "all" }
-$BuildDir = if ($env:BUILD_DIR) { $env:BUILD_DIR } else { "build-ci" }
 $Platform = if ($env:WINDOWS_CMAKE_PLATFORM) { $env:WINDOWS_CMAKE_PLATFORM } else { "Win32" }
+$DefaultTriplet = if ($Platform -eq "x64") { "x64-windows" } else { "x86-windows" }
+$Triplet = if ($env:VCPKG_TARGET_TRIPLET) { $env:VCPKG_TARGET_TRIPLET } else { $DefaultTriplet }
+$BuildDir = if ($env:BUILD_DIR) { $env:BUILD_DIR } else { "build-ci-$Triplet" }
 $DisablePostgreSQL = if ($env:WINDOWS_DISABLE_PGSQL) { $env:WINDOWS_DISABLE_PGSQL } else { "" }
 $InstallDir = if ($env:INSTALL_DIR) { $env:INSTALL_DIR } else { Join-Path $BuildDir "install" }
 $DownstreamBuildDir = if ($env:DOWNSTREAM_BUILD_DIR) { $env:DOWNSTREAM_BUILD_DIR } else { Join-Path $BuildDir "downstream-consumer" }
 $DownstreamSourceDir = if ($env:DOWNSTREAM_SOURCE_DIR) { $env:DOWNSTREAM_SOURCE_DIR } else { "test/downstream_consumer" }
+$ToolchainFile = if ($env:CMAKE_TOOLCHAIN_FILE) {
+    $env:CMAKE_TOOLCHAIN_FILE
+} elseif ($env:VCPKG_ROOT) {
+    Join-Path $env:VCPKG_ROOT "scripts/buildsystems/vcpkg.cmake"
+} elseif (Test-Path "C:\vcpkg\scripts\buildsystems\vcpkg.cmake") {
+    "C:\vcpkg\scripts\buildsystems\vcpkg.cmake"
+} else {
+    ""
+}
 
 function Run-Configure {
     $CmakeArgs = @(
@@ -14,12 +25,15 @@ function Run-Configure {
         "-B", $BuildDir,
         "-A", $Platform,
         "-DCMAKE_BUILD_TYPE=Release",
+        "-DVCPKG_TARGET_TRIPLET=$Triplet",
         "-DENT_ENABLE_SQLITE=ON",
-        "-DENT_ENABLE_MYSQL=ON",
-        "-DENT_ALLOW_VENDORED_DB_LIBS=ON"
+        "-DENT_ENABLE_MYSQL=ON"
     )
+    if ($ToolchainFile) {
+        $CmakeArgs += "-DCMAKE_TOOLCHAIN_FILE=$ToolchainFile"
+    }
     if ($DisablePostgreSQL -and $DisablePostgreSQL.ToLower() -notin @("0", "off", "false")) {
-        $CmakeArgs += "-DCMAKE_DISABLE_FIND_PACKAGE_PostgreSQL=ON"
+        $CmakeArgs += "-DENT_ENABLE_PGSQL=OFF"
     }
     cmake @CmakeArgs
 }
@@ -42,10 +56,11 @@ function Run-Test {
 function Run-InstallConsumer {
     cmake --install $BuildDir --config Release --prefix $InstallDir
     $PrefixPath = [System.IO.Path]::GetFullPath($InstallDir)
+    $EntPackageDir = Join-Path $PrefixPath "CMake"
     $DownstreamSourcePath = [System.IO.Path]::GetFullPath($DownstreamSourceDir)
     $DownstreamBuildPath = [System.IO.Path]::GetFullPath($DownstreamBuildDir)
 
-    cmake -S $DownstreamSourcePath -B $DownstreamBuildPath -A $Platform -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$PrefixPath
+    cmake -S $DownstreamSourcePath -B $DownstreamBuildPath -A $Platform -DCMAKE_BUILD_TYPE=Release "-Dent_DIR=$EntPackageDir"
     cmake --build $DownstreamBuildPath --config Release
     & "$DownstreamBuildPath\Release\ent_downstream_consumer.exe"
 }
@@ -59,38 +74,38 @@ function Invoke-PerfBinary {
 
     $Name = Split-Path $Path -Leaf
     Write-Host "Running $Name"
-    $StdOut = [System.IO.Path]::GetTempFileName()
-    $StdErr = [System.IO.Path]::GetTempFileName()
+    $ResolvedPath = [System.IO.Path]::GetFullPath($Path)
+
+    $StartInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $StartInfo.FileName = $ResolvedPath
+    $StartInfo.WorkingDirectory = Split-Path $ResolvedPath -Parent
+    $StartInfo.UseShellExecute = $false
+    $StartInfo.RedirectStandardOutput = $true
+    $StartInfo.RedirectStandardError = $true
+
+    $Process = [System.Diagnostics.Process]::new()
+    $Process.StartInfo = $StartInfo
 
     try {
-        $Process = Start-Process -FilePath $Path `
-            -RedirectStandardOutput $StdOut `
-            -RedirectStandardError $StdErr `
-            -PassThru
-        if ($null -eq $Process) {
+        if (-not $Process.Start()) {
             throw "Failed to start $Name"
         }
-
         if (-not $Process.WaitForExit($TimeoutSeconds * 1000)) {
             Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
-            if (Test-Path $StdOut) { Get-Content $StdOut }
-            if ((Test-Path $StdErr) -and ((Get-Item $StdErr).Length -gt 0)) {
-                Get-Content $StdErr | ForEach-Object { [Console]::Error.WriteLine($_) }
-            }
             throw "$Name timed out after $TimeoutSeconds seconds"
         }
 
-        if (Test-Path $StdOut) { Get-Content $StdOut }
-        if ((Test-Path $StdErr) -and ((Get-Item $StdErr).Length -gt 0)) {
-            Get-Content $StdErr | ForEach-Object { [Console]::Error.WriteLine($_) }
-        }
+        $StdOutText = $Process.StandardOutput.ReadToEnd()
+        $StdErrText = $Process.StandardError.ReadToEnd()
+        if ($StdOutText) { Write-Output $StdOutText.TrimEnd() }
+        if ($StdErrText) { [Console]::Error.WriteLine($StdErrText.TrimEnd()) }
 
         if ($Process.ExitCode -ne 0) {
             throw "$Name exited with code $($Process.ExitCode)"
         }
     }
     finally {
-        Remove-Item $StdOut, $StdErr -Force -ErrorAction SilentlyContinue
+        $Process.Dispose()
     }
 }
 

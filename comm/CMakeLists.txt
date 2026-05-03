@@ -21,7 +21,6 @@ option(ENT_BUILD_STATIC "Build the static ent library target" ON)
 option(ENT_ENABLE_SQLITE "Enable SQLite backend" ON)
 option(ENT_ENABLE_MYSQL "Enable MySQL backend" ON)
 option(ENT_ENABLE_LUA "Enable Lua scripting backend" OFF)
-option(ENT_ALLOW_VENDORED_DB_LIBS "Allow vendored DB libraries as a fallback" ON)
 set(ENT_LUA_LINK_MODE "static" CACHE STRING "Lua link mode: static or shared")
 set_property(CACHE ENT_LUA_LINK_MODE PROPERTY STRINGS static shared)
 
@@ -37,10 +36,12 @@ else()
   set(ENT_MSG_PYTHON_EXECUTABLE ${Python3_EXECUTABLE})
 endif()
 
-set(ENT_USING_VENDORED_SQLITE OFF CACHE INTERNAL "Using vendored SQLite library")
-set(ENT_USING_VENDORED_MYSQL OFF CACHE INTERNAL "Using vendored MySQL library")
+set(ENT_SQLITE_FOUND OFF CACHE INTERNAL "SQLite backend discovery result")
+set(ENT_MYSQL_FOUND OFF CACHE INTERNAL "MySQL backend discovery result")
+set(ENT_PGSQL_FOUND OFF CACHE INTERNAL "PostgreSQL backend discovery result")
 set(ENT_SQLITE_RUNTIME "" CACHE INTERNAL "SQLite runtime library")
 set(ENT_MYSQL_RUNTIME "" CACHE INTERNAL "MySQL runtime library")
+set(ENT_PGSQL_RUNTIME "" CACHE INTERNAL "PostgreSQL runtime library")
 set(ENT_LUA_INCLUDE_DIR "" CACHE INTERNAL "Lua include directory")
 set(ENT_LUA_LIBRARY "" CACHE INTERNAL "Lua shared library")
 set(ENT_LUA_TARGET "" CACHE INTERNAL "Lua static target")
@@ -97,90 +98,106 @@ function(ent_export_dependency_settings)
   if(DEFINED ENT_MYSQL_LIBRARY)
     set(ENT_MYSQL_LIBRARY "${ENT_MYSQL_LIBRARY}" CACHE FILEPATH "MySQL library" FORCE)
   endif()
+  if(DEFINED ENT_PGSQL_INCLUDE_DIR)
+    set(ENT_PGSQL_INCLUDE_DIR "${ENT_PGSQL_INCLUDE_DIR}" CACHE PATH "PostgreSQL include directory" FORCE)
+  endif()
+  if(DEFINED ENT_PGSQL_LIBRARY)
+    set(ENT_PGSQL_LIBRARY "${ENT_PGSQL_LIBRARY}" CACHE FILEPATH "PostgreSQL library" FORCE)
+  endif()
   set(ENT_ENABLE_SQLITE "${ENT_ENABLE_SQLITE}" CACHE BOOL "Enable SQLite backend" FORCE)
   set(ENT_ENABLE_MYSQL "${ENT_ENABLE_MYSQL}" CACHE BOOL "Enable MySQL backend" FORCE)
+  set(ENT_ENABLE_PGSQL "${ENT_ENABLE_PGSQL}" CACHE BOOL "Enable PostgreSQL backend" FORCE)
   set(ENT_ENABLE_LUA "${ENT_ENABLE_LUA}" CACHE BOOL "Enable Lua scripting backend" FORCE)
   set(ENT_LUA_LINK_MODE "${ENT_LUA_LINK_MODE}" CACHE STRING "Lua link mode: static or shared" FORCE)
 endfunction()
 
+function(ent_prefer_release_library library_var)
+  if(DEFINED ${library_var} AND ${library_var} MATCHES "/debug/lib/")
+    string(REPLACE "/debug/lib/" "/lib/" ENT_RELEASE_LIBRARY_CANDIDATE "${${library_var}}")
+    if(EXISTS "${ENT_RELEASE_LIBRARY_CANDIDATE}")
+      set(${library_var} "${ENT_RELEASE_LIBRARY_CANDIDATE}" CACHE FILEPATH "${library_var}" FORCE)
+      set(${library_var} "${ENT_RELEASE_LIBRARY_CANDIDATE}" PARENT_SCOPE)
+    endif()
+  endif()
+endfunction()
+
+function(ent_target_db_settings target definition_visibility include_visibility)
+  target_compile_definitions(
+    ${target}
+    ${definition_visibility}
+      ENT_ENABLE_SQLITE=$<BOOL:${ENT_ENABLE_SQLITE}>
+      ENT_ENABLE_MYSQL=$<BOOL:${ENT_ENABLE_MYSQL}>
+      ENT_ENABLE_PGSQL=$<BOOL:${ENT_ENABLE_PGSQL}>
+      ENT_SQLITE_FOUND=$<BOOL:${ENT_SQLITE_FOUND}>
+      ENT_MYSQL_FOUND=$<BOOL:${ENT_MYSQL_FOUND}>
+      ENT_PGSQL_FOUND=$<BOOL:${ENT_PGSQL_FOUND}>
+  )
+
+  if(ENT_SQLITE_FOUND AND ENT_SQLITE_INCLUDE_DIR)
+    target_include_directories(${target} ${include_visibility} ${ENT_SQLITE_INCLUDE_DIR})
+  endif()
+  if(ENT_MYSQL_FOUND AND ENT_MYSQL_INCLUDE_DIR)
+    target_include_directories(${target} ${include_visibility} ${ENT_MYSQL_INCLUDE_DIR})
+  endif()
+  if(ENT_PGSQL_FOUND AND ENT_PGSQL_INCLUDE_DIR)
+    target_include_directories(${target} ${include_visibility} ${ENT_PGSQL_INCLUDE_DIR})
+  endif()
+endfunction()
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
   add_definitions(-DUNICODE -D_UNICODE)
-  set(ENT_VENDORED_SQLITE_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../3rd/sqlite)
-  set(ENT_VENDORED_SQLITE_LIBRARY ${CMAKE_CURRENT_SOURCE_DIR}/../3rd/sqlite/sqlite3.lib)
-  set(ENT_VENDORED_SQLITE_RUNTIME ${CMAKE_CURRENT_SOURCE_DIR}/../3rd/sqlite/sqlite3.dll)
-  set(ENT_VENDORED_MYSQL_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../3rd/mysql/include)
-  set(ENT_VENDORED_MYSQL_LIBRARY ${CMAKE_CURRENT_SOURCE_DIR}/../3rd/mysql/lib/libmysql.lib)
-  set(ENT_VENDORED_MYSQL_RUNTIME ${CMAKE_CURRENT_SOURCE_DIR}/../3rd/mysql/lib/libmysql.dll)
-
   if(ENT_ENABLE_SQLITE)
     find_path(ENT_SQLITE_INCLUDE_DIR sqlite3.h)
-    find_library(ENT_SQLITE_LIBRARY NAMES sqlite3 sqlite3.lib)
-    if((NOT ENT_SQLITE_INCLUDE_DIR OR NOT ENT_SQLITE_LIBRARY) AND ENT_ALLOW_VENDORED_DB_LIBS)
-      if(NOT ENT_SQLITE_INCLUDE_DIR AND EXISTS ${ENT_VENDORED_SQLITE_INCLUDE_DIR}/sqlite3.h)
-        set(ENT_SQLITE_INCLUDE_DIR ${ENT_VENDORED_SQLITE_INCLUDE_DIR})
-      endif()
-      if(NOT ENT_SQLITE_LIBRARY AND EXISTS ${ENT_VENDORED_SQLITE_LIBRARY})
-        set(ENT_SQLITE_LIBRARY ${ENT_VENDORED_SQLITE_LIBRARY})
-      endif()
-      if(ENT_SQLITE_INCLUDE_DIR AND ENT_SQLITE_LIBRARY)
-        set(ENT_USING_VENDORED_SQLITE ON CACHE INTERNAL "Using vendored SQLite library" FORCE)
-      endif()
-    endif()
+    find_library(ENT_SQLITE_LIBRARY NAMES sqlite3)
     if(ENT_SQLITE_INCLUDE_DIR AND ENT_SQLITE_LIBRARY)
       include_directories(${ENT_SQLITE_INCLUDE_DIR})
       get_filename_component(ENT_SQLITE_LIBRARY_DIR ${ENT_SQLITE_LIBRARY} DIRECTORY)
-      find_file(ENT_SQLITE_RUNTIME NAMES sqlite3.dll HINTS ${ENT_SQLITE_LIBRARY_DIR} ${ENT_SQLITE_LIBRARY_DIR}/../bin NO_DEFAULT_PATH)
-      if(NOT ENT_SQLITE_RUNTIME AND EXISTS ${ENT_VENDORED_SQLITE_RUNTIME})
-        set(ENT_SQLITE_RUNTIME ${ENT_VENDORED_SQLITE_RUNTIME})
+      if(WIN32)
+        find_file(ENT_SQLITE_RUNTIME NAMES sqlite3.dll HINTS ${ENT_SQLITE_LIBRARY_DIR} ${ENT_SQLITE_LIBRARY_DIR}/../bin)
+        if(ENT_SQLITE_RUNTIME)
+          set(ENT_SQLITE_RUNTIME ${ENT_SQLITE_RUNTIME} CACHE INTERNAL "SQLite runtime library" FORCE)
+        endif()
       endif()
-      if(NOT ENT_SQLITE_RUNTIME)
-        find_file(ENT_SQLITE_RUNTIME NAMES sqlite3.dll)
-      endif()
-      if(ENT_SQLITE_RUNTIME)
-        set(ENT_SQLITE_RUNTIME ${ENT_SQLITE_RUNTIME} CACHE INTERNAL "SQLite runtime library" FORCE)
-      endif()
-      link_directories("${ENT_SQLITE_LIBRARY_DIR}")
+      set(ENT_SQLITE_FOUND ON CACHE INTERNAL "SQLite backend discovery result" FORCE)
     else()
       message(WARNING "SQLite headers or library not found; disabling SQLite backend.")
       set(ENT_ENABLE_SQLITE OFF)
+      set(ENT_SQLITE_FOUND OFF CACHE INTERNAL "SQLite backend discovery result" FORCE)
     endif()
   endif()
 
   if(ENT_ENABLE_MYSQL)
     find_path(ENT_MYSQL_INCLUDE_DIR mysql.h PATH_SUFFIXES mysql mariadb)
-    find_library(ENT_MYSQL_LIBRARY NAMES libmysql mysql libmariadb mariadb)
-    if((NOT ENT_MYSQL_INCLUDE_DIR OR NOT ENT_MYSQL_LIBRARY) AND ENT_ALLOW_VENDORED_DB_LIBS)
-      if(NOT ENT_MYSQL_INCLUDE_DIR AND EXISTS ${ENT_VENDORED_MYSQL_INCLUDE_DIR}/mysql.h)
-        set(ENT_MYSQL_INCLUDE_DIR ${ENT_VENDORED_MYSQL_INCLUDE_DIR})
-      endif()
-      if(NOT ENT_MYSQL_LIBRARY AND EXISTS ${ENT_VENDORED_MYSQL_LIBRARY})
-        set(ENT_MYSQL_LIBRARY ${ENT_VENDORED_MYSQL_LIBRARY})
-      endif()
-      if(ENT_MYSQL_INCLUDE_DIR AND ENT_MYSQL_LIBRARY)
-        set(ENT_USING_VENDORED_MYSQL ON CACHE INTERNAL "Using vendored MySQL library" FORCE)
-      endif()
-    endif()
+    find_library(ENT_MYSQL_LIBRARY NAMES mysqlclient mariadb libmariadb libmysql)
     if(ENT_MYSQL_INCLUDE_DIR AND ENT_MYSQL_LIBRARY)
       include_directories(${ENT_MYSQL_INCLUDE_DIR})
       get_filename_component(ENT_MYSQL_LIBRARY_DIR ${ENT_MYSQL_LIBRARY} DIRECTORY)
-      find_file(ENT_MYSQL_RUNTIME NAMES libmysql.dll mysql.dll libmariadb.dll mariadb.dll HINTS ${ENT_MYSQL_LIBRARY_DIR} ${ENT_MYSQL_LIBRARY_DIR}/../bin NO_DEFAULT_PATH)
-      if(NOT ENT_MYSQL_RUNTIME AND EXISTS ${ENT_VENDORED_MYSQL_RUNTIME})
-        set(ENT_MYSQL_RUNTIME ${ENT_VENDORED_MYSQL_RUNTIME})
+      if(WIN32)
+        find_file(ENT_MYSQL_RUNTIME NAMES libmysql.dll mysql.dll libmariadb.dll mariadb.dll HINTS ${ENT_MYSQL_LIBRARY_DIR} ${ENT_MYSQL_LIBRARY_DIR}/../bin)
+        if(ENT_MYSQL_RUNTIME)
+          set(ENT_MYSQL_RUNTIME ${ENT_MYSQL_RUNTIME} CACHE INTERNAL "MySQL runtime library" FORCE)
+        endif()
       endif()
-      if(NOT ENT_MYSQL_RUNTIME)
-        find_file(ENT_MYSQL_RUNTIME NAMES libmysql.dll mysql.dll libmariadb.dll mariadb.dll)
-      endif()
-      if(ENT_MYSQL_RUNTIME)
-        set(ENT_MYSQL_RUNTIME ${ENT_MYSQL_RUNTIME} CACHE INTERNAL "MySQL runtime library" FORCE)
-      endif()
-      link_directories("${ENT_MYSQL_LIBRARY_DIR}")
+      set(ENT_MYSQL_FOUND ON CACHE INTERNAL "MySQL backend discovery result" FORCE)
     else()
       message(WARNING "MySQL headers or library not found; disabling MySQL backend.")
       set(ENT_ENABLE_MYSQL OFF)
+      set(ENT_MYSQL_FOUND OFF CACHE INTERNAL "MySQL backend discovery result" FORCE)
     endif()
   endif()
 
-  link_directories(${CMAKE_PREFIX_PATH})
+  if(ENT_ENABLE_PGSQL)
+    find_path(ENT_PGSQL_INCLUDE_DIR libpq-fe.h PATH_SUFFIXES postgresql)
+    find_library(ENT_PGSQL_LIBRARY NAMES pq libpq)
+    if(ENT_PGSQL_INCLUDE_DIR AND ENT_PGSQL_LIBRARY)
+      include_directories(${ENT_PGSQL_INCLUDE_DIR})
+      set(ENT_PGSQL_FOUND ON CACHE INTERNAL "PostgreSQL backend discovery result" FORCE)
+    else()
+      message(WARNING "PostgreSQL headers or library not found; disabling PostgreSQL backend.")
+      set(ENT_ENABLE_PGSQL OFF)
+      set(ENT_PGSQL_FOUND OFF CACHE INTERNAL "PostgreSQL backend discovery result" FORCE)
+    endif()
+  endif()
 else()
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC")
   set(ENT_APPLE_SDK_INCLUDE "")
@@ -189,6 +206,8 @@ else()
   set(ENT_PKGCONFIG_MYSQL_LIBRARY_DIRS "")
   set(ENT_PKGCONFIG_SQLITE_INCLUDE_DIRS "")
   set(ENT_PKGCONFIG_SQLITE_LIBRARY_DIRS "")
+  set(ENT_PKGCONFIG_PGSQL_INCLUDE_DIRS "")
+  set(ENT_PKGCONFIG_PGSQL_LIBRARY_DIRS "")
 
   if(APPLE)
     if(CMAKE_OSX_SYSROOT)
@@ -216,6 +235,10 @@ else()
         pkg_check_modules(ENT_PKGCONFIG_MYSQL QUIET mariadb)
       endif()
       pkg_check_modules(ENT_PKGCONFIG_SQLITE QUIET sqlite3)
+      pkg_check_modules(ENT_PKGCONFIG_PGSQL QUIET libpq)
+      if(NOT ENT_PKGCONFIG_PGSQL_FOUND)
+        pkg_check_modules(ENT_PKGCONFIG_PGSQL QUIET postgresql)
+      endif()
     endif()
   endif()
 
@@ -238,9 +261,11 @@ else()
     endif()
     if(ENT_MYSQL_INCLUDE_DIR AND ENT_MYSQL_LIBRARY)
       include_directories(${ENT_MYSQL_INCLUDE_DIR})
+      set(ENT_MYSQL_FOUND ON CACHE INTERNAL "MySQL backend discovery result" FORCE)
     else()
       message(WARNING "MySQL headers or library not found; disabling MySQL backend.")
       set(ENT_ENABLE_MYSQL OFF)
+      set(ENT_MYSQL_FOUND OFF CACHE INTERNAL "MySQL backend discovery result" FORCE)
     endif()
   endif()
 
@@ -259,19 +284,43 @@ else()
         NAMES sqlite3
         HINTS ${ENT_PKGCONFIG_SQLITE_LIBRARY_DIRS}
       )
-      if(NOT ENT_SQLITE_INCLUDE_DIR AND ENT_ALLOW_VENDORED_DB_LIBS AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/../3rd/sqlite/sqlite3.h)
-        set(ENT_SQLITE_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../3rd/sqlite)
-      endif()
     endif()
     if(ENT_SQLITE_INCLUDE_DIR AND ENT_SQLITE_LIBRARY)
       include_directories(${ENT_SQLITE_INCLUDE_DIR})
+      set(ENT_SQLITE_FOUND ON CACHE INTERNAL "SQLite backend discovery result" FORCE)
     else()
       message(WARNING "SQLite headers or library not found; disabling SQLite backend.")
       set(ENT_ENABLE_SQLITE OFF)
+      set(ENT_SQLITE_FOUND OFF CACHE INTERNAL "SQLite backend discovery result" FORCE)
     endif()
   endif()
 
-  link_directories(${CMAKE_PREFIX_PATH})
+  if(ENT_ENABLE_PGSQL)
+    if(APPLE)
+      find_path(ENT_PGSQL_INCLUDE_DIR libpq-fe.h PATHS ${ENT_APPLE_SDK_INCLUDE})
+      find_library(ENT_PGSQL_LIBRARY NAMES pq libpq PATHS ${ENT_APPLE_SDK_LIB})
+    else()
+      find_path(
+        ENT_PGSQL_INCLUDE_DIR
+        libpq-fe.h
+        HINTS ${ENT_PKGCONFIG_PGSQL_INCLUDE_DIRS}
+        PATH_SUFFIXES postgresql
+      )
+      find_library(
+        ENT_PGSQL_LIBRARY
+        NAMES pq libpq
+        HINTS ${ENT_PKGCONFIG_PGSQL_LIBRARY_DIRS}
+      )
+    endif()
+    if(ENT_PGSQL_INCLUDE_DIR AND ENT_PGSQL_LIBRARY)
+      include_directories(${ENT_PGSQL_INCLUDE_DIR})
+      set(ENT_PGSQL_FOUND ON CACHE INTERNAL "PostgreSQL backend discovery result" FORCE)
+    else()
+      message(WARNING "PostgreSQL headers or library not found; disabling PostgreSQL backend.")
+      set(ENT_ENABLE_PGSQL OFF)
+      set(ENT_PGSQL_FOUND OFF CACHE INTERNAL "PostgreSQL backend discovery result" FORCE)
+    endif()
+  endif()
 endif()
 
 if(ENT_ENABLE_LUA)
@@ -369,11 +418,12 @@ if(ENT_ENABLE_LUA)
   endif()
 endif()
 
+ent_prefer_release_library(ENT_SQLITE_LIBRARY)
+ent_prefer_release_library(ENT_MYSQL_LIBRARY)
+ent_prefer_release_library(ENT_PGSQL_LIBRARY)
 ent_export_dependency_settings()
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../inc)
 include_directories(${ENT_MSG_GENERATED_DIR})
-add_definitions(-DENT_ENABLE_SQLITE=$<BOOL:${ENT_ENABLE_SQLITE}>)
-add_definitions(-DENT_ENABLE_MYSQL=$<BOOL:${ENT_ENABLE_MYSQL}>)
 add_definitions(-DENT_ENABLE_LUA=$<BOOL:${ENT_ENABLE_LUA}>)
 
 set(ENT_LIBRARY_SOURCES
@@ -405,12 +455,10 @@ function(ent_add_object_library target export_definition)
   target_compile_definitions(
     ${target}
     PRIVATE
-      ENT_ENABLE_SQLITE=$<BOOL:${ENT_ENABLE_SQLITE}>
-      ENT_ENABLE_MYSQL=$<BOOL:${ENT_ENABLE_MYSQL}>
-      ENT_ENABLE_PGSQL=$<BOOL:${PostgreSQL_FOUND}>
       ENT_ENABLE_LUA=$<BOOL:${ENT_ENABLE_LUA}>
       ${export_definition}
   )
+  ent_target_db_settings(${target} PRIVATE PRIVATE)
   set_target_properties(${target} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endfunction()
 
@@ -432,16 +480,16 @@ function(ent_link_backend_deps target visibility)
     endif()
   endif()
 
-  if(ENT_ENABLE_SQLITE AND ENT_SQLITE_LIBRARY)
+  if(ENT_SQLITE_FOUND AND ENT_SQLITE_LIBRARY)
     target_link_libraries(${target} ${visibility} ${ENT_SQLITE_LIBRARY})
   endif()
 
-  if(ENT_ENABLE_MYSQL AND ENT_MYSQL_LIBRARY)
+  if(ENT_MYSQL_FOUND AND ENT_MYSQL_LIBRARY)
     target_link_libraries(${target} ${visibility} ${ENT_MYSQL_LIBRARY})
   endif()
 
-  if(PostgreSQL_FOUND)
-    target_link_libraries(${target} ${visibility} ${PostgreSQL_LIBRARIES})
+  if(ENT_PGSQL_FOUND AND ENT_PGSQL_LIBRARY)
+    target_link_libraries(${target} ${visibility} ${ENT_PGSQL_LIBRARY})
   endif()
 
   if(ENT_ENABLE_LUA)
@@ -471,11 +519,9 @@ if(ENT_BUILD_SHARED)
   target_compile_definitions(
     ${LIB_NAME_SHARE}
     PUBLIC
-      ENT_ENABLE_SQLITE=$<BOOL:${ENT_ENABLE_SQLITE}>
-      ENT_ENABLE_MYSQL=$<BOOL:${ENT_ENABLE_MYSQL}>
-      ENT_ENABLE_PGSQL=$<BOOL:${PostgreSQL_FOUND}>
       ENT_ENABLE_LUA=$<BOOL:${ENT_ENABLE_LUA}>
   )
+  ent_target_db_settings(${LIB_NAME_SHARE} PUBLIC PRIVATE)
 
   set_target_properties(
     ${LIB_NAME_SHARE}
@@ -504,12 +550,10 @@ if(ENT_BUILD_STATIC)
   target_compile_definitions(
     ${LIB_NAME_STATIC}
     PUBLIC
-      ENT_ENABLE_SQLITE=$<BOOL:${ENT_ENABLE_SQLITE}>
-      ENT_ENABLE_MYSQL=$<BOOL:${ENT_ENABLE_MYSQL}>
-      ENT_ENABLE_PGSQL=$<BOOL:${PostgreSQL_FOUND}>
       ENT_ENABLE_LUA=$<BOOL:${ENT_ENABLE_LUA}>
       LINKING_LIBENT
   )
+  ent_target_db_settings(${LIB_NAME_STATIC} PUBLIC PRIVATE)
 
   set_target_properties(
     ${LIB_NAME_STATIC}

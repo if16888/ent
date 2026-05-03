@@ -82,7 +82,6 @@ WINDOWS_CMAKE_PLATFORM=Win32
 - `-DENT_ENABLE_SQLITE=ON|OFF`
 - `-DENT_ENABLE_MYSQL=ON|OFF`
 - `-DENT_ENABLE_LUA=ON|OFF`
-- `-DENT_ALLOW_VENDORED_DB_LIBS=ON|OFF`
 - `-DENT_LUA_LINK_MODE=static|shared`
 
 示例：只构建库本体，不构建 example / test，且关闭 PostgreSQL：
@@ -637,3 +636,58 @@ cmake -S . -B build -DENT_ENABLE_LUA=ON -DENT_LUA_LINK_MODE=static
 - `ent::ent` / `ent::ent_s` 目标链接
 - runtime / devel 分离分发
 - 与目标位宽一致的第三方库集合（Win32 全链路 32 位 / x64 全链路 64 位）
+## 14. Windows / Linux 依赖与构建
+
+数据库后端统一优先使用系统安装包或 vcpkg 管理的依赖，不再从仓库内的 `3rd` 目录回退取二进制库。
+
+### Windows
+
+按架构分别建立构建目录，不要在同一个 build tree 里混用 x86 和 x64。
+
+```powershell
+cmake -S . -B build-win-x64 -G "Visual Studio 17 2022" -A x64 `
+  -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake `
+  -DVCPKG_TARGET_TRIPLET=x64-windows
+cmake --build build-win-x64 --config Release
+
+cmake -S . -B build-win-x86 -G "Visual Studio 17 2022" -A Win32 `
+  -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake `
+  -DVCPKG_TARGET_TRIPLET=x86-windows
+cmake --build build-win-x86 --config Release
+```
+
+本地 vcpkg 验证记录（2026-05-02）：
+
+- `x86-windows`：`build-win-x86-vcpkg` 使用 `-A Win32`、`-DVCPKG_TARGET_TRIPLET=x86-windows`、`-DENT_ENABLE_SQLITE=ON`、`-DENT_ENABLE_MYSQL=ON`、`-DENT_ENABLE_PGSQL=ON` 配置通过，`cmake --build build-win-x86-vcpkg --config Release` 构建通过。
+- `x64-windows`：`build-win-x64-vcpkg` 使用 `-A x64`、`-DVCPKG_TARGET_TRIPLET=x64-windows`、`-DENT_ENABLE_SQLITE=ON`、`-DENT_ENABLE_MYSQL=ON`、`-DENT_ENABLE_PGSQL=ON` 配置通过，`cmake --build build-win-x64-vcpkg --config Release` 构建通过。
+- vcpkg manifest 依赖为 `sqlite3`、`libmariadb`、`libpq`；两个架构均由 vcpkg 安装对应 triplet 的库，不再混用仓库内 `3rd/mysql` 或 `3rd/sqlite` 二进制。
+- CMake 导出规则中，数据库后端的第三方 include 目录只作为库自身的 `PRIVATE` 编译输入；安装后的 `ent` / `ent_s` target 不应暴露 `vcpkg_installed/<triplet>/include` 这类 build-tree 路径。
+
+### Linux
+
+优先安装发行版开发包，再通过 `pkg-config` 发现库。
+
+```bash
+sudo apt install build-essential cmake pkg-config `
+  libsqlite3-dev libmariadb-dev libpq-dev
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+### WSL
+
+如果要把代码同步到 `/home/lf/workspace` 后再在 WSL 里编译，直接用仓库里的脚本：
+
+```powershell
+scripts\run-ci-wsl.ps1
+```
+
+脚本会把当前仓库同步到 `/home/lf/workspace/ent`，然后在 WSL 内执行 `cmake` 和 `ctest`。
+
+### 说明
+
+- SQLite 对应 `sqlite3`
+- MySQL / MariaDB 对应 `libmariadb` 或 `mysqlclient`
+- PostgreSQL 对应 `libpq`
+- Lua 仍然使用仓库内的 `3rd/lua` 源码目录
