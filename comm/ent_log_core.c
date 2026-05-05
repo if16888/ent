@@ -70,7 +70,7 @@ MSG_ID_T iENT_LogCtxValidate(const struct ENT_LOG_CTX_TAG* ctx, ENT_LOG logHandl
         return ENT_LOG_BAD_HANDLE;
     }
 
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
 MSG_ID_T iENT_LogPathCheck(const char* path)
@@ -145,7 +145,7 @@ MSG_ID_T iENT_LogPathCheck(const char* path)
                         strerror(errno));
                 return ENT_LOG_PATH_FAILED;
             }
-            return 0;
+            return ENT_SYS_NORMAL;
         }
 
         if(!S_ISDIR(st.st_mode))
@@ -160,7 +160,7 @@ MSG_ID_T iENT_LogPathCheck(const char* path)
     }
 #endif
 
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
 static MSG_ID_T iENT_LogInitCtx(ENT_LOG_CTX_INTERNAL* log,
@@ -168,7 +168,7 @@ static MSG_ID_T iENT_LogInitCtx(ENT_LOG_CTX_INTERNAL* log,
                                 const char* logPath)
 {
     size_t len = 0;
-    MSG_ID_T sts = 0;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
 
     if(log == NULL)
     {
@@ -259,7 +259,7 @@ static MSG_ID_T iENT_LogInitCtx(ENT_LOG_CTX_INTERNAL* log,
     log->maxNum = DEF_MAX_NUM_LOG;
     log->tag = ENTLOG_TAG;
     iENT_LogStateSet(log, ENT_LOG_HANDLE_ACTIVE_E);
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
 ENT_LOG_HANDLE_STATE_E iENT_LogStateGet(const ENT_LOG_CTX_INTERNAL* log)
@@ -336,7 +336,7 @@ MSG_ID_T iENT_LogGetCtx(ENT_LOG_CTX_INTERNAL** logCtx, ENT_LOG logHandle)
     }
 
     *logCtx = log;
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
 MSG_ID_T iENT_LogAcquireWriter(ENT_LOG_CTX_INTERNAL** logCtx, ENT_LOG logHandle)
@@ -403,7 +403,7 @@ MSG_ID_T iENT_LogAcquireWriter(ENT_LOG_CTX_INTERNAL** logCtx, ENT_LOG logHandle)
 #else
     pthread_mutex_unlock(&sLogMutex);
 #endif
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
 void iENT_LogReleaseWriter(ENT_LOG_CTX_INTERNAL* log)
@@ -437,7 +437,7 @@ MSG_ID_T iENT_LogInit(void)
 #endif
     fprintf(stderr, "Func [%s] Line [%d],sucessful.\n", "ENT_LogInit", __LINE__);
     sLogMutexInit = true;
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
 MSG_ID_T iENT_LogClose(void)
@@ -470,7 +470,7 @@ MSG_ID_T iENT_LogClose(void)
 #endif
 
     fprintf(stderr, "Func [%s] Line [%d],sucessful.\n", "ENT_LogClose", __LINE__);
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
 MSG_ID_T ENT_LogCtxInit(ENT_LOG_CTX* pCtx)
@@ -500,7 +500,7 @@ MSG_ID_T ENT_LogCtxInit(ENT_LOG_CTX* pCtx)
     ctx->isInit = true;
     ctx->logHandle = NULL;
     *pCtx = ctx;
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
 MSG_ID_T ENT_LogCtxClose(ENT_LOG_CTX ctx)
@@ -522,7 +522,7 @@ MSG_ID_T ENT_LogCtxClose(ENT_LOG_CTX ctx)
     if(logCtx->logHandle != NULL)
     {
         MSG_ID_T closeSts = iENT_LogCloseHandle(logCtx->logHandle);
-        if(closeSts != 0)
+        if(closeSts != ENT_SYS_NORMAL)
         {
             return closeSts;
         }
@@ -531,7 +531,7 @@ MSG_ID_T ENT_LogCtxClose(ENT_LOG_CTX ctx)
 
     logCtx->isInit = false;
     free(logCtx);
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
 MSG_ID_T ENT_LogCtxInitHandle(ENT_LOG_CTX ctx, ENT_LOG* pLogHandle, const char* moduleName, const char* logPath)
@@ -564,7 +564,7 @@ MSG_ID_T ENT_LogCtxInitHandle(ENT_LOG_CTX ctx, ENT_LOG* pLogHandle, const char* 
 
     {
         MSG_ID_T sts = iENT_LogInitHandle(pLogHandle, moduleName, logPath);
-        if(sts == 0)
+        if(sts == ENT_SYS_NORMAL)
         {
             logCtx->logHandle = *pLogHandle;
             ((ENT_LOG_CTX_INTERNAL*)(*pLogHandle))->ownerCtx = logCtx;
@@ -622,7 +622,7 @@ MSG_ID_T ENT_LogCtxCloseHandle(ENT_LOG_CTX ctx, ENT_LOG logHandle)
 
     {
         MSG_ID_T sts = iENT_LogCloseHandle(logHandle);
-        if(sts == 0 && logCtx->logHandle == logHandle)
+        if(sts == ENT_SYS_NORMAL && logCtx->logHandle == logHandle)
         {
             logCtx->logHandle = NULL;
         }
@@ -632,7 +632,7 @@ MSG_ID_T ENT_LogCtxCloseHandle(ENT_LOG_CTX ctx, ENT_LOG logHandle)
 
 MSG_ID_T ENT_LogCtxRaw(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format, ...)
 {
-    MSG_ID_T sts = 0;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
     ENT_LOG_CTX_INTERNAL* logCtx = NULL;
     va_list va_args;
 
@@ -663,7 +663,7 @@ MSG_ID_T ENT_LogCtxRaw(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format, .
 
 MSG_ID_T ENT_LogCtxFatal(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format, ...)
 {
-    MSG_ID_T sts = 0;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
     ENT_LOG_CTX_INTERNAL* logCtx = NULL;
     va_list va_args;
 
@@ -699,7 +699,7 @@ MSG_ID_T ENT_LogCtxFatal(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
 
 MSG_ID_T ENT_LogCtxError(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format, ...)
 {
-    MSG_ID_T sts = 0;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
     ENT_LOG_CTX_INTERNAL* logCtx = NULL;
     va_list va_args;
 
@@ -735,7 +735,7 @@ MSG_ID_T ENT_LogCtxError(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
 
 MSG_ID_T ENT_LogCtxWarn(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format, ...)
 {
-    MSG_ID_T sts = 0;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
     ENT_LOG_CTX_INTERNAL* logCtx = NULL;
     va_list va_args;
 
@@ -771,7 +771,7 @@ MSG_ID_T ENT_LogCtxWarn(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format, 
 
 MSG_ID_T ENT_LogCtxPrint(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format, ...)
 {
-    MSG_ID_T sts = 0;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
     ENT_LOG_CTX_INTERNAL* logCtx = NULL;
     va_list va_args;
 
@@ -807,7 +807,7 @@ MSG_ID_T ENT_LogCtxPrint(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
 
 MSG_ID_T ENT_LogCtxDebug(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format, ...)
 {
-    MSG_ID_T sts = 0;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
     ENT_LOG_CTX_INTERNAL* logCtx = NULL;
     va_list va_args;
 
@@ -843,7 +843,7 @@ MSG_ID_T ENT_LogCtxDebug(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
 
 MSG_ID_T iENT_LogInitHandle(ENT_LOG* pLogHandle, const char* moduleName, const char* logPath)
 {
-    MSG_ID_T sts = 0;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
     ENT_LOG_CTX_INTERNAL* log = NULL;
     ENT_LOG_CTX_INTERNAL* existing = NULL;
 
@@ -914,7 +914,7 @@ END_OF_ROUTINE:
 
 MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
 {
-    MSG_ID_T sts = 0;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
 
     if(sLogMutexInit == false)
     {
