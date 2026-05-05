@@ -168,7 +168,7 @@ MSG_ID_T iENT_LogFormatMessage(const char* format,
     {
         *msgBuf = stackBuf;
         *msgLen = (size_t)writeLen;
-        return 0;
+        return ENT_SYS_NORMAL;
     }
 
     if(writeLen >= 0)
@@ -215,7 +215,7 @@ MSG_ID_T iENT_LogFormatMessage(const char* format,
 
     *msgBuf = targetBuf;
     *msgLen = (size_t)requiredLen;
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
 MSG_ID_T iENT_LogFlushMaybe(ENT_LOG_CTX_INTERNAL* log, FILE* fp, bool forceFlush)
@@ -599,7 +599,7 @@ static void* iENT_LogBufferThreadMain(void* data)
 
 MSG_ID_T iENT_LogStartBufferThread(ENT_LOG_CTX_INTERNAL* log)
 {
-    MSG_ID_T sts = 0;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
 
 #ifdef WIN32
     EnterCriticalSection(&log->cs);
@@ -640,7 +640,7 @@ MSG_ID_T iENT_LogStartBufferThread(ENT_LOG_CTX_INTERNAL* log)
 #else
     pthread_mutex_lock(&log->cs);
 #endif
-    if(sts == 0)
+    if(sts == ENT_SYS_NORMAL)
     {
         log->bufferThreadStarted = true;
     }
@@ -832,7 +832,7 @@ MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX_INTERNAL* log,
     pthread_mutex_unlock(&log->cs);
 #endif
 
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
 MSG_ID_T iENT_LogVRaw(ENT_LOG_CTX_INTERNAL* log, const char* format, va_list va_args)
@@ -840,7 +840,7 @@ MSG_ID_T iENT_LogVRaw(ENT_LOG_CTX_INTERNAL* log, const char* format, va_list va_
     char stackBuf[512];
     char* msgBuf = stackBuf;
     size_t msgLen = 0;
-    MSG_ID_T sts = 0;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
     bool useBuffer = false;
 
     sts = iENT_LogFormatMessage(format, va_args, stackBuf, sizeof(stackBuf), &msgBuf, &msgLen);
@@ -923,7 +923,7 @@ MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_LEV_E logLevel, const
     char* lineBuf = lineStackBuf;
     size_t lineLen = 0;
     time_t rollTime = 0;
-    MSG_ID_T sts = 0;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
     bool debugMirror = false;
     bool useBuffer = false;
 

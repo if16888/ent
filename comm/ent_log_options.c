@@ -20,8 +20,8 @@ MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const voi
 {
     ENT_LOG_CTX_INTERNAL* log = (ENT_LOG_CTX_INTERNAL*)logHandle;
     size_t len;
-    MSG_ID_T sts = 0;
-    MSG_ID_T bufferSts = 0;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
+    MSG_ID_T bufferSts = ENT_SYS_NORMAL;
     bool startBufferThread = false;
 
     if(sLogMutexInit == false)
@@ -168,7 +168,7 @@ END_OF_ROUTINE:
 #else
     pthread_mutex_unlock(&log->cs);
 #endif
-    if(sts == 0 && startBufferThread)
+    if(sts == ENT_SYS_NORMAL && startBufferThread)
     {
         bufferSts = iENT_LogStartBufferThread(log);
         if(bufferSts < 0)
