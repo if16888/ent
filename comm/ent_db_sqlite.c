@@ -32,7 +32,7 @@ static MSG_ID_T iENT_DbBackendUnsupported(DB_TYPE dbType)
 
 MSG_ID_T ENT_DbSqliteInit(DB_HANDLE dbHandle)
 {
-#if !ENT_ENABLE_SQLITE
+#if !ENT_ENABLE_SQLITE || !ENT_SQLITE_FOUND
     (void)dbHandle;
     return iENT_DbBackendUnsupported(SQLITE_TYPE);
 #else
@@ -70,7 +70,7 @@ MSG_ID_T ENT_DbSqliteInit(DB_HANDLE dbHandle)
 
 MSG_ID_T ENT_DbSqliteClose(DB_HANDLE dbHandle)
 {
-#if !ENT_ENABLE_SQLITE
+#if !ENT_ENABLE_SQLITE || !ENT_SQLITE_FOUND
     (void)dbHandle;
     return iENT_DbBackendUnsupported(SQLITE_TYPE);
 #else
@@ -97,7 +97,7 @@ MSG_ID_T ENT_DbSqliteClose(DB_HANDLE dbHandle)
 #endif
 }
 
-#if ENT_ENABLE_SQLITE
+#if ENT_ENABLE_SQLITE && ENT_SQLITE_FOUND
 typedef struct SQLITE_RESULT_TAG
 {
     char** fields;

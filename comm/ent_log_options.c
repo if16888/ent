@@ -12,6 +12,7 @@
 #include <pthread.h>
 #endif
 
+#include "ient_comm.h"
 #include "ent_log.h"
 #include "ient_log.h"
 
@@ -74,7 +75,7 @@ MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const voi
             char* newPath = NULL;
             const char* newPathArg = (const char*)arg;
 
-            newPath = strdup(newPathArg);
+            newPath = ENT_StrDup(newPathArg);
             if(newPath == NULL)
             {
                 sts = ENT_LOG_ALLOC_FAILED;

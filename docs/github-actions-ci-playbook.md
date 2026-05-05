@@ -89,9 +89,9 @@ Windows 优先目标是“先稳定跑通”，再谈最优依赖管理。
 
 这次 ent 最终采用：
 
-- 不走 `vcpkg install`
-- 直接使用仓库内 `3rd/sqlite` 和 `3rd/mysql`
-- 配合 `ENT_ALLOW_VENDORED_DB_LIBS=ON`
+- Windows 通过 vcpkg 或系统安装包发现 SQLite / MySQL / PostgreSQL
+- Linux 通过系统开发包和 `pkg-config` 发现依赖
+- 不再从仓库内 `3rd` 目录回退取数据库二进制库
 
 原因：
 

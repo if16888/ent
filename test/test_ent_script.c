@@ -6,6 +6,7 @@
 #include <pthread.h>
 #endif
 
+#include "ient_comm.h"
 #include "ent_script.h"
 
 static int expect_true(int condition, const char* message)
@@ -158,7 +159,7 @@ int main(void)
     }
 
 #if ENT_ENABLE_LUA
-    fp = fopen(scriptPath, "wb");
+    fp = ENT_FOpen(scriptPath, "wb");
     if(expect_true(fp != NULL, "test should create a temporary lua script file") != 0)
     {
         return EXIT_FAILURE;

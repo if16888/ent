@@ -1,5 +1,55 @@
 add_compile_definitions(LINKING_LIBENT)
 
+get_property(ENT_ENABLE_SQLITE CACHE ENT_ENABLE_SQLITE PROPERTY VALUE)
+get_property(ENT_ENABLE_MYSQL CACHE ENT_ENABLE_MYSQL PROPERTY VALUE)
+get_property(ENT_ENABLE_PGSQL CACHE ENT_ENABLE_PGSQL PROPERTY VALUE)
+get_property(ENT_SQLITE_FOUND CACHE ENT_SQLITE_FOUND PROPERTY VALUE)
+get_property(ENT_MYSQL_FOUND CACHE ENT_MYSQL_FOUND PROPERTY VALUE)
+get_property(ENT_PGSQL_FOUND CACHE ENT_PGSQL_FOUND PROPERTY VALUE)
+
+add_compile_definitions(
+  ENT_ENABLE_SQLITE=$<BOOL:${ENT_ENABLE_SQLITE}>
+  ENT_ENABLE_MYSQL=$<BOOL:${ENT_ENABLE_MYSQL}>
+  ENT_ENABLE_PGSQL=$<BOOL:${ENT_ENABLE_PGSQL}>
+  ENT_SQLITE_FOUND=$<BOOL:${ENT_SQLITE_FOUND}>
+  ENT_MYSQL_FOUND=$<BOOL:${ENT_MYSQL_FOUND}>
+  ENT_PGSQL_FOUND=$<BOOL:${ENT_PGSQL_FOUND}>
+)
+
+function(ent_test_link_db_deps target)
+  if(ENT_SQLITE_FOUND AND ENT_SQLITE_INCLUDE_DIR)
+    target_include_directories(${target} PRIVATE ${ENT_SQLITE_INCLUDE_DIR})
+  endif()
+  if(ENT_MYSQL_FOUND AND ENT_MYSQL_INCLUDE_DIR)
+    target_include_directories(${target} PRIVATE ${ENT_MYSQL_INCLUDE_DIR})
+  endif()
+  if(ENT_PGSQL_FOUND AND ENT_PGSQL_INCLUDE_DIR)
+    target_include_directories(${target} PRIVATE ${ENT_PGSQL_INCLUDE_DIR})
+  endif()
+
+  if(ENT_SQLITE_FOUND AND ENT_SQLITE_LIBRARY)
+    target_link_libraries(${target} PRIVATE ${ENT_SQLITE_LIBRARY})
+  endif()
+  if(ENT_MYSQL_FOUND AND ENT_MYSQL_LIBRARY)
+    target_link_libraries(${target} PRIVATE ${ENT_MYSQL_LIBRARY})
+  endif()
+  if(ENT_PGSQL_FOUND AND ENT_PGSQL_LIBRARY)
+    target_link_libraries(${target} PRIVATE ${ENT_PGSQL_LIBRARY})
+  endif()
+
+  foreach(runtime ${ENT_SQLITE_RUNTIME} ${ENT_MYSQL_RUNTIME} ${ENT_PGSQL_RUNTIME})
+    if(runtime)
+      add_custom_command(
+        TARGET ${target}
+        POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          ${runtime}
+          $<TARGET_FILE_DIR:${target}>
+      )
+    endif()
+  endforeach()
+endfunction()
+
 if(DEFINED ENT_MSG_GENERATED_DIR)
   include_directories(${ENT_MSG_GENERATED_DIR})
 endif()
@@ -303,7 +353,7 @@ endif()
 
 add_test(NAME test_utl_socket COMMAND test_utl_socket)
 
-if(ENT_ENABLE_SQLITE AND (NOT WIN32 OR ENT_SQLITE_LIBRARY))
+if(ENT_SQLITE_FOUND)
   add_executable(
     test_ent_db
     test_ent_db.c
@@ -321,35 +371,9 @@ if(ENT_ENABLE_SQLITE AND (NOT WIN32 OR ENT_SQLITE_LIBRARY))
       ${CMAKE_CURRENT_SOURCE_DIR}/../comm
   )
 
-  target_compile_definitions(
-    test_ent_db
-    PRIVATE
-      ENT_ENABLE_SQLITE=1
-      ENT_ENABLE_MYSQL=0
-      ENT_ENABLE_PGSQL=$<BOOL:${PostgreSQL_FOUND}>
-  )
-
-  if(WIN32)
-    if(ENT_SQLITE_INCLUDE_DIR)
-      target_include_directories(test_ent_db PRIVATE ${ENT_SQLITE_INCLUDE_DIR})
-    endif()
-    target_link_libraries(test_ent_db PRIVATE ${ENT_SQLITE_LIBRARY})
-    if(ENT_SQLITE_RUNTIME)
-      add_custom_command(
-        TARGET test_ent_db
-        POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-          ${ENT_SQLITE_RUNTIME}
-          $<TARGET_FILE_DIR:test_ent_db>
-      )
-    endif()
-  else()
-    target_link_libraries(test_ent_db PRIVATE pthread sqlite3)
-  endif()
-
-  if(PostgreSQL_FOUND)
-      target_include_directories(test_ent_db PRIVATE ${PostgreSQL_INCLUDE_DIRS})
-      target_link_libraries(test_ent_db PRIVATE ${PostgreSQL_LIBRARIES})
+  ent_test_link_db_deps(test_ent_db)
+  if(APPLE OR UNIX)
+    target_link_libraries(test_ent_db PRIVATE pthread)
   endif()
   add_test(NAME test_ent_db COMMAND test_ent_db)
 endif()
@@ -435,12 +459,18 @@ if(ENT_ENABLE_SQLITE AND (NOT WIN32 OR ENT_SQLITE_LIBRARY))
     PRIVATE
       ENT_ENABLE_SQLITE=1
       ENT_ENABLE_MYSQL=$<BOOL:${ENT_ENABLE_MYSQL}>
-      ENT_ENABLE_PGSQL=$<BOOL:${PostgreSQL_FOUND}>
+      ENT_ENABLE_PGSQL=$<BOOL:${ENT_PGSQL_FOUND}>
   )
 
   if(WIN32)
     if(ENT_SQLITE_INCLUDE_DIR)
       target_include_directories(test_security PRIVATE ${ENT_SQLITE_INCLUDE_DIR})
+    endif()
+    if(ENT_MYSQL_INCLUDE_DIR)
+      target_include_directories(test_security PRIVATE ${ENT_MYSQL_INCLUDE_DIR})
+    endif()
+    if(ENT_PGSQL_INCLUDE_DIR)
+      target_include_directories(test_security PRIVATE ${ENT_PGSQL_INCLUDE_DIR})
     endif()
     target_link_libraries(test_security PRIVATE ${ENT_SQLITE_LIBRARY})
     if(ENT_SQLITE_RUNTIME)
@@ -452,13 +482,13 @@ if(ENT_ENABLE_SQLITE AND (NOT WIN32 OR ENT_SQLITE_LIBRARY))
           $<TARGET_FILE_DIR:test_security>
       )
     endif()
-    if(ENT_ENABLE_MYSQL AND ENT_MYSQL_INCLUDE_DIR)
+    if(ENT_MYSQL_INCLUDE_DIR)
       target_include_directories(test_security PRIVATE ${ENT_MYSQL_INCLUDE_DIR})
     endif()
-    if(ENT_ENABLE_MYSQL AND ENT_MYSQL_LIBRARY)
+    if(ENT_MYSQL_LIBRARY)
       target_link_libraries(test_security PRIVATE ${ENT_MYSQL_LIBRARY})
     endif()
-    if(ENT_ENABLE_MYSQL AND ENT_MYSQL_RUNTIME)
+    if(ENT_MYSQL_RUNTIME)
       add_custom_command(
         TARGET test_security
         POST_BUILD
@@ -469,16 +499,16 @@ if(ENT_ENABLE_SQLITE AND (NOT WIN32 OR ENT_SQLITE_LIBRARY))
     endif()
   else()
     target_link_libraries(test_security PRIVATE pthread sqlite3)
-    if(ENT_ENABLE_MYSQL AND ENT_MYSQL_LIBRARY)
+    if(ENT_MYSQL_LIBRARY)
       target_link_libraries(test_security PRIVATE ${ENT_MYSQL_LIBRARY})
     endif()
   endif()
 
-  if(PostgreSQL_FOUND)
-      target_include_directories(test_security PRIVATE ${PostgreSQL_INCLUDE_DIRS})
-      target_link_libraries(test_security PRIVATE ${PostgreSQL_LIBRARIES})
+  if(ENT_PGSQL_FOUND AND ENT_PGSQL_LIBRARY)
+      target_include_directories(test_security PRIVATE ${ENT_PGSQL_INCLUDE_DIR})
+      target_link_libraries(test_security PRIVATE ${ENT_PGSQL_LIBRARY})
   endif()
-  if(ENT_ENABLE_MYSQL AND ENT_MYSQL_INCLUDE_DIR)
+  if(ENT_MYSQL_INCLUDE_DIR)
     target_include_directories(test_security PRIVATE ${ENT_MYSQL_INCLUDE_DIR})
   endif()
   add_test(NAME test_security COMMAND test_security)

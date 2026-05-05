@@ -53,19 +53,14 @@ message(STATUS "Binary  Dir : ${CMAKE_BINARY_DIR}")
 message(STATUS "Install type: ${CMAKE_INSTALL_LIBDIR}")
 message(STATUS "Path :${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}")
 
-if(ENT_ENABLE_PGSQL)
-    find_package(PostgreSQL)
-endif()
-
-if(PostgreSQL_FOUND)
-    add_compile_definitions(ENT_ENABLE_PGSQL=1)
-    include_directories(${PostgreSQL_INCLUDE_DIRS})
-else()
-    add_compile_definitions(ENT_ENABLE_PGSQL=0)
-endif()
-
 # defines targets and sources
 add_subdirectory(comm)
+
+get_property(ENT_ENABLE_SQLITE CACHE ENT_ENABLE_SQLITE PROPERTY VALUE)
+get_property(ENT_ENABLE_MYSQL CACHE ENT_ENABLE_MYSQL PROPERTY VALUE)
+get_property(ENT_ENABLE_PGSQL CACHE ENT_ENABLE_PGSQL PROPERTY VALUE)
+get_property(ENT_ENABLE_LUA CACHE ENT_ENABLE_LUA PROPERTY VALUE)
+
 if(ENT_BUILD_EXAMPLES)
     add_subdirectory(example)
 endif()

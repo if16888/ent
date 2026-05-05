@@ -57,7 +57,7 @@ static void defSqlResultCb(char** fields,char** rowRes,long long rowNum,int colu
     (void)data;
 }
 
-#if ENT_ENABLE_MYSQL
+#if ENT_ENABLE_MYSQL && ENT_MYSQL_FOUND
 typedef struct MYSQL_PARAM_BIND_CTX
 {
     MYSQL_BIND* binds;
@@ -459,7 +459,7 @@ static MSG_ID_T iENT_DbMySQLCollectRows(MYSQL_STMT* stmt,
                 }
                 else
                 {
-                    rows[cellIdx] = strdup(resultCtx.buffers[i]);
+                    rows[cellIdx] = ENT_StrDup(resultCtx.buffers[i]);
                     if(rows[cellIdx] == NULL)
                     {
                         IENT_LOG_ERROR("mysql row cell allocation failed.\n");
@@ -604,7 +604,7 @@ static MSG_ID_T iENT_DbMySQLExecPrepared(MYSQL* dbHandle,
 
 MSG_ID_T ENT_DbMySQLInit(DB_HANDLE dbHandle)
 {
-#if ENT_ENABLE_MYSQL
+#if ENT_ENABLE_MYSQL && ENT_MYSQL_FOUND
     MYSQL* db;
 
     DB_CFG* dbCfg = (DB_CFG*)dbHandle;
@@ -660,7 +660,7 @@ MSG_ID_T ENT_DbMySQLInit(DB_HANDLE dbHandle)
 #endif
 }
 
-#if ENT_ENABLE_MYSQL
+#if ENT_ENABLE_MYSQL && ENT_MYSQL_FOUND
 MSG_ID_T ENT_DbMySQLRead(MYSQL* dbHandle,const char* query,SqlResultCB userCb,void* userData)
 {
     MSG_ID_T sts = ENT_SYS_NORMAL;
@@ -816,7 +816,7 @@ MSG_ID_T ENT_DbMySQLWriteParams(MYSQL* dbHandle,
 
 MSG_ID_T ENT_DbMySQLClose(DB_HANDLE dbHandle)
 {
-#if ENT_ENABLE_MYSQL
+#if ENT_ENABLE_MYSQL && ENT_MYSQL_FOUND
     DB_CFG* dbCfg = (DB_CFG*)dbHandle;
     if(dbHandle == NULL)
     {

@@ -15,6 +15,7 @@
 #endif
 
 #include "ent_log.h"
+#include "ient_comm.h"
 #include "ient_runtime.h"
 
 ENT_CTX gEntCtx;
@@ -180,7 +181,7 @@ static void format_log_file_path(char* buffer, size_t size, const char* dir, con
 
 static int file_contains(const char* filePath, const char* needle)
 {
-    FILE* fp = fopen(filePath, "r");
+    FILE* fp = ENT_FOpen(filePath, "r");
     char buffer[2048];
     size_t bytesRead = 0;
 
@@ -194,6 +195,16 @@ static int file_contains(const char* filePath, const char* needle)
     fclose(fp);
 
     return bytesRead > 0 && strstr(buffer, needle) != NULL;
+}
+
+static int path_exists(const char* filePath)
+{
+#ifdef WIN32
+    DWORD attrs = GetFileAttributesA(filePath);
+    return attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY);
+#else
+    return access(filePath, F_OK) == 0;
+#endif
 }
 
 int main(void)
@@ -272,6 +283,13 @@ int main(void)
             found = 1;
             break;
         }
+#ifdef WIN32
+        if(path_exists(logFilePath))
+        {
+            found = 1;
+            break;
+        }
+#endif
         sleep_ms(10);
     }
 
@@ -296,6 +314,11 @@ cleanup_log:
         logHandle = NULL;
     }
     ENT_LogClose();
+    if(expect_true(file_contains(logFilePath, message),
+                   "Buffered logging should persist the flushed message to disk") != 0)
+    {
+        goto cleanup_dir;
+    }
 cleanup_dir:
     remove_dir_contents(dirPath);
     return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

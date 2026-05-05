@@ -293,21 +293,21 @@ static MSG_ID_T iENT_DbOpenLocked(DB_CFG* dbCfg)
     switch(dbCfg->dbType)
     {
         case SQLITE_TYPE:
-#if ENT_ENABLE_SQLITE
+#if ENT_ENABLE_SQLITE && ENT_SQLITE_FOUND
             return ENT_DbSqliteInit(dbCfg);
 #else
             return iENT_DbBackendUnsupported(SQLITE_TYPE);
 #endif
 
         case MYSQL_TYPE:
-#if ENT_ENABLE_MYSQL
+#if ENT_ENABLE_MYSQL && ENT_MYSQL_FOUND
             return ENT_DbMySQLInit(dbCfg);
 #else
             return iENT_DbBackendUnsupported(MYSQL_TYPE);
 #endif
 
         case PGSQL_TYPE:
-#if ENT_ENABLE_PGSQL
+#if ENT_ENABLE_PGSQL && ENT_PGSQL_FOUND
             return ENT_DbPgSQLInit(dbCfg);
 #else
             return iENT_DbBackendUnsupported(PGSQL_TYPE);
@@ -440,7 +440,7 @@ MSG_ID_T  iENT_DbReInit(DB_HANDLE dbHandle,
 
     if(host != NULL)
     {
-        newHost = strdup(host);
+        newHost = ENT_StrDup(host);
         if(newHost == NULL)
         {
             sts = ENT_DBS_ALLOC_FAILED;
@@ -449,7 +449,7 @@ MSG_ID_T  iENT_DbReInit(DB_HANDLE dbHandle,
     }
     if(database != NULL)
     {
-        newDatabase = strdup(database);
+        newDatabase = ENT_StrDup(database);
         if(newDatabase == NULL)
         {
             sts = ENT_DBS_ALLOC_FAILED;
@@ -458,7 +458,7 @@ MSG_ID_T  iENT_DbReInit(DB_HANDLE dbHandle,
     }
     if(user != NULL)
     {
-        newUser = strdup(user);
+        newUser = ENT_StrDup(user);
         if(newUser == NULL)
         {
             sts = ENT_DBS_ALLOC_FAILED;
@@ -467,7 +467,7 @@ MSG_ID_T  iENT_DbReInit(DB_HANDLE dbHandle,
     }
     if(passwd != NULL)
     {
-        newPasswd = strdup(passwd);
+        newPasswd = ENT_StrDup(passwd);
         if(newPasswd == NULL)
         {
             sts = ENT_DBS_ALLOC_FAILED;
@@ -480,21 +480,21 @@ MSG_ID_T  iENT_DbReInit(DB_HANDLE dbHandle,
         switch(dbCfg->dbType)
         {
             case SQLITE_TYPE:
-#if ENT_ENABLE_SQLITE
+#if ENT_ENABLE_SQLITE && ENT_SQLITE_FOUND
                 sts = ENT_DbSqliteClose(dbCfg);
 #else
                 sts = iENT_DbBackendUnsupported(SQLITE_TYPE);
 #endif
                 break;
             case MYSQL_TYPE:
-#if ENT_ENABLE_MYSQL
+#if ENT_ENABLE_MYSQL && ENT_MYSQL_FOUND
                 sts = ENT_DbMySQLClose(dbCfg);
 #else
                 sts = iENT_DbBackendUnsupported(MYSQL_TYPE);
 #endif
                 break;
             case PGSQL_TYPE:
-#if ENT_ENABLE_PGSQL
+#if ENT_ENABLE_PGSQL && ENT_PGSQL_FOUND
                 sts = ENT_DbPgSQLClose(dbCfg);
 #else
                 sts = iENT_DbBackendUnsupported(PGSQL_TYPE);
@@ -674,7 +674,7 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
             dbCfg->handleState = ENT_DB_HANDLE_CREATED_E;
             if(host)
             {
-                dbCfg->host = strdup(host);
+                dbCfg->host = ENT_StrDup(host);
                 if(dbCfg->host == NULL)
                 {
                     sts = ENT_DBS_ALLOC_FAILED;
@@ -683,7 +683,7 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
             }
             if(database)
             {
-                dbCfg->database = strdup(database);
+                dbCfg->database = ENT_StrDup(database);
                 if(dbCfg->database == NULL)
                 {
                     sts = ENT_DBS_ALLOC_FAILED;
@@ -692,7 +692,7 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
             }
             if(user)
             {
-                dbCfg->userName = strdup(user);
+                dbCfg->userName = ENT_StrDup(user);
                 if(dbCfg->userName == NULL)
                 {
                     sts = ENT_DBS_ALLOC_FAILED;
@@ -701,7 +701,7 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
             }
             if(passwd)
             {
-                dbCfg->passwd = strdup(passwd);
+                dbCfg->passwd = ENT_StrDup(passwd);
                 if(dbCfg->passwd == NULL)
                 {
                     sts = ENT_DBS_ALLOC_FAILED;
@@ -843,7 +843,7 @@ ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE* dbHandle)
     switch(dbCfg->dbType)
     {
         case SQLITE_TYPE:
-#if ENT_ENABLE_SQLITE
+#if ENT_ENABLE_SQLITE && ENT_SQLITE_FOUND
             sts = ENT_DbSqliteClose(dbCfg);
 #else
             sts = iENT_DbBackendUnsupported(SQLITE_TYPE);
@@ -851,14 +851,14 @@ ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE* dbHandle)
             break;
 
         case MYSQL_TYPE:
-#if ENT_ENABLE_MYSQL
+#if ENT_ENABLE_MYSQL && ENT_MYSQL_FOUND
             sts = ENT_DbMySQLClose(dbCfg);
 #else
             sts = iENT_DbBackendUnsupported(MYSQL_TYPE);
 #endif
             break;
         case PGSQL_TYPE:
-#if ENT_ENABLE_PGSQL
+#if ENT_ENABLE_PGSQL && ENT_PGSQL_FOUND
             sts = ENT_DbPgSQLClose(dbCfg);
 #else
             sts = iENT_DbBackendUnsupported(PGSQL_TYPE);
@@ -934,7 +934,7 @@ ENT_PUBLIC MSG_ID_T ENT_DbRead(DB_HANDLE dbHandle,const char* sql,SqlResultCB sq
     switch(dbCfg->dbType)
     {
         case MYSQL_TYPE:
-#if ENT_ENABLE_MYSQL
+#if ENT_ENABLE_MYSQL && ENT_MYSQL_FOUND
             sts = ENT_DbMySQLRead(dbCfg->dbInstance.mysql,sql,sqlCb,userData);
 #else
             sts = iENT_DbBackendUnsupported(MYSQL_TYPE);
@@ -942,14 +942,14 @@ ENT_PUBLIC MSG_ID_T ENT_DbRead(DB_HANDLE dbHandle,const char* sql,SqlResultCB sq
             break;
 
         case SQLITE_TYPE:
-#if ENT_ENABLE_SQLITE
+#if ENT_ENABLE_SQLITE && ENT_SQLITE_FOUND
             sts = ENT_DbSqliteRead(dbCfg->dbInstance.sqlite,sql,sqlCb,userData);
 #else
             sts = iENT_DbBackendUnsupported(SQLITE_TYPE);
 #endif
             break;
         case PGSQL_TYPE:
-#if ENT_ENABLE_PGSQL
+#if ENT_ENABLE_PGSQL && ENT_PGSQL_FOUND
             sts = ENT_DbPgSQLRead(dbCfg->dbInstance.pgsql,sql,sqlCb,userData);
 #else
             sts = iENT_DbBackendUnsupported(PGSQL_TYPE);
@@ -1005,7 +1005,7 @@ ENT_PUBLIC MSG_ID_T ENT_DbWrite(DB_HANDLE dbHandle,const char* sql,SqlResultCB s
     switch(dbCfg->dbType)
     {
         case MYSQL_TYPE:
-#if ENT_ENABLE_MYSQL
+#if ENT_ENABLE_MYSQL && ENT_MYSQL_FOUND
             sts = ENT_DbMySQLWrite(dbCfg->dbInstance.mysql,sql,sqlCb,userData);
 #else
             sts = iENT_DbBackendUnsupported(MYSQL_TYPE);
@@ -1013,14 +1013,14 @@ ENT_PUBLIC MSG_ID_T ENT_DbWrite(DB_HANDLE dbHandle,const char* sql,SqlResultCB s
             break;
 
         case SQLITE_TYPE:
-#if ENT_ENABLE_SQLITE
+#if ENT_ENABLE_SQLITE && ENT_SQLITE_FOUND
             sts = ENT_DbSqliteWrite(dbCfg->dbInstance.sqlite,sql,sqlCb,userData);
 #else
             sts = iENT_DbBackendUnsupported(SQLITE_TYPE);
 #endif
             break;
         case PGSQL_TYPE:
-#if ENT_ENABLE_PGSQL
+#if ENT_ENABLE_PGSQL && ENT_PGSQL_FOUND
             sts = ENT_DbPgSQLWrite(dbCfg->dbInstance.pgsql,sql,sqlCb,userData);
 #else
             sts = iENT_DbBackendUnsupported(PGSQL_TYPE);
@@ -1074,21 +1074,21 @@ ENT_PUBLIC MSG_ID_T ENT_DbReadParams(DB_HANDLE dbHandle,
     switch(dbCfg->dbType)
     {
         case SQLITE_TYPE:
-#if ENT_ENABLE_SQLITE
+#if ENT_ENABLE_SQLITE && ENT_SQLITE_FOUND
             sts = ENT_DbSqliteReadParams(dbCfg->dbInstance.sqlite, sql, params, paramCount, sqlCb, userData);
 #else
             sts = iENT_DbBackendUnsupported(SQLITE_TYPE);
 #endif
             break;
         case MYSQL_TYPE:
-#if ENT_ENABLE_MYSQL
+#if ENT_ENABLE_MYSQL && ENT_MYSQL_FOUND
             sts = ENT_DbMySQLReadParams(dbCfg->dbInstance.mysql, sql, params, paramCount, sqlCb, userData);
 #else
             sts = iENT_DbBackendUnsupported(MYSQL_TYPE);
 #endif
             break;
         case PGSQL_TYPE:
-#if ENT_ENABLE_PGSQL
+#if ENT_ENABLE_PGSQL && ENT_PGSQL_FOUND
             sts = ENT_DbPgSQLReadParams(dbCfg->dbInstance.pgsql, sql, params, paramCount, sqlCb, userData);
 #else
             sts = iENT_DbBackendUnsupported(PGSQL_TYPE);
@@ -1142,21 +1142,21 @@ ENT_PUBLIC MSG_ID_T ENT_DbWriteParams(DB_HANDLE dbHandle,
     switch(dbCfg->dbType)
     {
         case SQLITE_TYPE:
-#if ENT_ENABLE_SQLITE
+#if ENT_ENABLE_SQLITE && ENT_SQLITE_FOUND
             sts = ENT_DbSqliteWriteParams(dbCfg->dbInstance.sqlite, sql, params, paramCount, sqlCb, userData);
 #else
             sts = iENT_DbBackendUnsupported(SQLITE_TYPE);
 #endif
             break;
         case MYSQL_TYPE:
-#if ENT_ENABLE_MYSQL
+#if ENT_ENABLE_MYSQL && ENT_MYSQL_FOUND
             sts = ENT_DbMySQLWriteParams(dbCfg->dbInstance.mysql, sql, params, paramCount, sqlCb, userData);
 #else
             sts = iENT_DbBackendUnsupported(MYSQL_TYPE);
 #endif
             break;
         case PGSQL_TYPE:
-#if ENT_ENABLE_PGSQL
+#if ENT_ENABLE_PGSQL && ENT_PGSQL_FOUND
             sts = ENT_DbPgSQLWriteParams(dbCfg->dbInstance.pgsql, sql, params, paramCount, sqlCb, userData);
 #else
             sts = iENT_DbBackendUnsupported(PGSQL_TYPE);

@@ -42,15 +42,15 @@
 #define ENT_ENABLE_PGSQL 0
 #endif
 
-#if ENT_ENABLE_SQLITE
+#if ENT_ENABLE_SQLITE && ENT_SQLITE_FOUND
 #include "sqlite3.h"
 #endif
 
-#if ENT_ENABLE_MYSQL
+#if ENT_ENABLE_MYSQL && ENT_MYSQL_FOUND
 #include "mysql.h"
 #endif
 
-#if ENT_ENABLE_PGSQL
+#if ENT_ENABLE_PGSQL && ENT_PGSQL_FOUND
 #include <libpq-fe.h>
 #endif
 
@@ -89,13 +89,13 @@ typedef struct DB_CFG
     long activeOps;
     union
     {
-#if ENT_ENABLE_SQLITE
+#if ENT_ENABLE_SQLITE && ENT_SQLITE_FOUND
         sqlite3* sqlite;
 #endif
-#if ENT_ENABLE_MYSQL
+#if ENT_ENABLE_MYSQL && ENT_MYSQL_FOUND
         MYSQL* mysql;
 #endif
-#if ENT_ENABLE_PGSQL
+#if ENT_ENABLE_PGSQL && ENT_PGSQL_FOUND
         PGconn* pgsql;
 #endif
         void* raw;
@@ -111,7 +111,7 @@ typedef struct USER_SQLITE_DATA
 
 MSG_ID_T ENT_DbSqliteInit(DB_HANDLE dbHandle);
 MSG_ID_T ENT_DbSqliteClose(DB_HANDLE dbHandle);
-#if ENT_ENABLE_SQLITE
+#if ENT_ENABLE_SQLITE && ENT_SQLITE_FOUND
 MSG_ID_T ENT_DbSqliteRead(sqlite3* dbHandle,
                           const char* query,
                           SqlResultCB userCb,
@@ -134,7 +134,7 @@ MSG_ID_T ENT_DbSqliteWriteParams(sqlite3* dbHandle,
                                  void* userData);
 #endif
 
-#if ENT_ENABLE_MYSQL
+#if ENT_ENABLE_MYSQL && ENT_MYSQL_FOUND
 MSG_ID_T ENT_DbMySQLInit(DB_HANDLE dbHandle);
 MSG_ID_T ENT_DbMySQLClose(DB_HANDLE dbHandle);
 MSG_ID_T ENT_DbMySQLRead(MYSQL* dbHandle,
@@ -159,7 +159,7 @@ MSG_ID_T ENT_DbMySQLWriteParams(MYSQL* dbHandle,
                                 void* userData);
 #endif
 
-#if ENT_ENABLE_PGSQL
+#if ENT_ENABLE_PGSQL && ENT_PGSQL_FOUND
 MSG_ID_T ENT_DbPgSQLInit(DB_HANDLE dbHandle);
 MSG_ID_T ENT_DbPgSQLClose(DB_HANDLE dbHandle);
 MSG_ID_T ENT_DbPgSQLRead(void* dbHandle,

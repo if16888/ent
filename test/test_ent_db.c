@@ -377,26 +377,47 @@ static int reset_db_service(void)
     return ENT_DbInit();
 }
 
-static const char* read_env_or_null(const char* name)
+static int read_env_or_null(const char* name, char* out, size_t out_len)
 {
-    const char* value = getenv(name);
-    if(value == NULL || value[0] == '\0')
+    char* value = ENT_GetEnvDup(name);
+
+    if(out == NULL || out_len == 0)
     {
-        return NULL;
+        free(value);
+        return 0;
     }
 
-    return value;
+    if(value == NULL)
+    {
+        out[0] = '\0';
+        return 0;
+    }
+
+    if(strlen(value) + 1 > out_len)
+    {
+        free(value);
+        out[0] = '\0';
+        return 0;
+    }
+
+    memcpy(out, value, strlen(value) + 1);
+    free(value);
+    return (out[0] != '\0');
 }
 
 static int read_env_or_default_int(const char* name, int fallback)
 {
-    const char* value = getenv(name);
-    if(value == NULL || value[0] == '\0')
+    char* value = ENT_GetEnvDup(name);
+    int result = fallback;
+
+    if(value == NULL)
     {
         return fallback;
     }
 
-    return atoi(value);
+    result = atoi(value);
+    free(value);
+    return result;
 }
 
 static int test_db_init_handle_rejects_uninitialized_service(void)
@@ -1323,23 +1344,23 @@ static int test_pgsql_roundtrip_if_configured(void)
     DB_HANDLE db_handle = NULL;
     DB_READ_CAPTURE capture;
     MSG_ID_T sts = 0;
-    const char* host;
-    const char* database;
-    const char* user;
-    const char* passwd;
+    char host[256];
+    char database[256];
+    char user[256];
+    char passwd[256];
     int port;
 
-    host = read_env_or_null("ENT_PGSQL_HOST");
-    database = read_env_or_null("ENT_PGSQL_DB");
-    user = read_env_or_null("ENT_PGSQL_USER");
-    passwd = getenv("ENT_PGSQL_PASSWORD");
-    if(passwd == NULL)
-    {
-        passwd = "";
-    }
+    host[0] = '\0';
+    database[0] = '\0';
+    user[0] = '\0';
+    passwd[0] = '\0';
+    read_env_or_null("ENT_PGSQL_HOST", host, sizeof(host));
+    read_env_or_null("ENT_PGSQL_DB", database, sizeof(database));
+    read_env_or_null("ENT_PGSQL_USER", user, sizeof(user));
+    read_env_or_null("ENT_PGSQL_PASSWORD", passwd, sizeof(passwd));
     port = read_env_or_default_int("ENT_PGSQL_PORT", 5432);
 
-    if(host == NULL || database == NULL || user == NULL)
+    if(host[0] == '\0' || database[0] == '\0' || user[0] == '\0')
     {
         printf("PgSQL integration test skipped: set ENT_PGSQL_HOST, ENT_PGSQL_DB, and ENT_PGSQL_USER to run it.\n");
         return 0;

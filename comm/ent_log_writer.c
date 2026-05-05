@@ -14,6 +14,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <time.h>
+#include "ient_comm.h"
 #ifdef WIN32
 #include <sys/timeb.h>
 #include <Windows.h>
@@ -104,7 +105,7 @@ static MSG_ID_T iENT_LogRollCheck(ENT_LOG logHandle, time_t nowTime)
         }
         fileName[sizeof(fileName) - 1] = '\0';
 
-        log->logFp = fopen(fileName, "a");
+        log->logFp = ENT_FOpen(fileName, "a");
         if(log->logFp == NULL)
         {
             fprintf(stderr, "Func [%s] Line [%d],The file %s  was not opened\n", "iENT_LogRollCheck", __LINE__, fileName);
@@ -372,7 +373,7 @@ MSG_ID_T iENT_LogFormatPrefix(ENT_LOG_LEV_E logLevel,
         return ENT_LOG_BAD_ARGUMENT;
     }
 
-    _ftime(&nowTmb);
+    ENT_FTime64(&nowTmb);
     *rollTime = nowTmb.time;
     localtime_s(&nowTm, &nowTmb.time);
     writeLen = _snprintf_s(prefixBuf,

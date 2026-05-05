@@ -889,7 +889,7 @@ static int test_log_path_option_trims_trailing_separator_and_writes_file(void)
         return 1;
     }
 
-    fp = fopen(logFilePath, "r");
+    fp = ENT_FOpen(logFilePath, "r");
     if(expect_true(fp != NULL, "The updated log path should contain a log file") != 0)
     {
         remove_dir_contents(dirPath);
@@ -989,7 +989,7 @@ static int test_log_level_filters_debug_messages(void)
         return 1;
     }
 
-    fp = fopen(logFilePath, "r");
+    fp = ENT_FOpen(logFilePath, "r");
     if(expect_true(fp != NULL, "The filter test log file should exist") != 0)
     {
         remove_dir_contents(dirPath);
@@ -1245,7 +1245,7 @@ static int test_buffered_log_close_flushes_queued_messages(void)
         goto cleanup;
     }
 
-    fp = fopen(logFilePath, "r");
+    fp = ENT_FOpen(logFilePath, "r");
     if(expect_true(fp != NULL, "Buffered logging should create a log file") != 0)
     {
         goto cleanup;
@@ -1386,7 +1386,7 @@ static int test_buffered_log_flush_interval_writes_without_close(void)
 
     for(int i = 0; i < 100; ++i)
     {
-        FILE* fp = fopen(logFilePath, "r");
+        FILE* fp = ENT_FOpen(logFilePath, "r");
         memset(readBuf, 0, sizeof(readBuf));
         if(fp != NULL)
         {
@@ -1430,7 +1430,7 @@ static int test_buffered_log_flush_interval_writes_without_close(void)
     }
 
     {
-        FILE* fp = fopen(logFilePath, "r");
+        FILE* fp = ENT_FOpen(logFilePath, "r");
         memset(readBuf, 0, sizeof(readBuf));
         if(expect_true(fp != NULL, "Flush-interval test should produce a log file") != 0)
         {

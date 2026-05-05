@@ -153,11 +153,11 @@ ENT_PUBLIC MSG_ID_T UTL_LockInit(UTL_LOCK* lock,const char* name)
 
     tmp->lockType = LOCK_MUTEX_E;
 #ifdef WIN32
-    tmp->lockName = (name == NULL) ? NULL : _strdup(name);
+    tmp->lockName = ENT_StrDup(name);
     InitializeCriticalSection(&tmp->lock.cs);
 #else
     int s;
-    tmp->lockName = (name == NULL) ? NULL : strdup(name);
+    tmp->lockName = ENT_StrDup(name);
     s = pthread_mutex_init(&tmp->lock.cs,NULL);
     if(s != 0)
     {
@@ -181,11 +181,11 @@ static MSG_ID_T iUTL_LockInitRW(UTL_LOCK* lock,const char* name)
     }
     tmp->lockType = LOCK_RW_E;
 #ifdef WIN32
-    tmp->lockName = (name == NULL) ? NULL : _strdup(name);
+    tmp->lockName = ENT_StrDup(name);
     InitializeSRWLock(&tmp->lock.rw);
 #else
     int s;
-    tmp->lockName = (name == NULL) ? NULL : strdup(name);
+    tmp->lockName = ENT_StrDup(name);
     s = pthread_rwlock_init(&tmp->lock.rw,NULL);
     if(s != 0)
     {
@@ -210,7 +210,7 @@ static MSG_ID_T iUTL_LockInitSpin(UTL_LOCK* lock,const char* name)
     }
     tmp->lockType = LOCK_SPIN_E;
 #ifdef WIN32
-    tmp->lockName = (name == NULL) ? NULL : _strdup(name);
+    tmp->lockName = ENT_StrDup(name);
     if(!InitializeCriticalSectionAndSpinCount(&tmp->lock.spin,4000))
     {
         IENT_LOG_ERROR("init failed,error [%d]\n",GetLastError());
@@ -221,7 +221,7 @@ static MSG_ID_T iUTL_LockInitSpin(UTL_LOCK* lock,const char* name)
     }
 #else
     int s;
-    tmp->lockName = (name == NULL) ? NULL : strdup(name);
+    tmp->lockName = ENT_StrDup(name);
 #if ENT_HAS_PTHREAD_SPINLOCK
     s = pthread_spin_init(&tmp->lock.spin,PTHREAD_PROCESS_PRIVATE);
 #else
@@ -642,12 +642,12 @@ ENT_PUBLIC MSG_ID_T UTL_CVInit(UTL_CV* cv,const char* name)
     }
 
 #ifdef WIN32
-    tmp->cvName = (name == NULL) ? NULL : _strdup(name);
+    tmp->cvName = ENT_StrDup(name);
     InitializeConditionVariable(&tmp->cv);
 #else
     pthread_condattr_t cvAttr;
     int s;
-    tmp->cvName = (name == NULL) ? NULL : strdup(name);
+    tmp->cvName = ENT_StrDup(name);
     s = pthread_condattr_init(&cvAttr);
     if(s != 0)
     {

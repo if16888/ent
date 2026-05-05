@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a minimal GitHub Actions pipeline that builds, tests, packages, and publishes artifacts for Linux and Windows without depending on vendored database binaries on Windows.
+**Goal:** Add a minimal GitHub Actions pipeline that builds, tests, packages, and publishes artifacts for Linux and Windows using discovered database dependencies.
 
-**Architecture:** Keep the first version intentionally small. CMake will prefer discovered system libraries on Linux and vcpkg-provided libraries on Windows, with vendored Windows libraries only as a fallback outside CI. GitHub Actions will use one CI workflow for push/PR validation and one release workflow for tag-based packaging and artifact publishing.
+**Architecture:** Keep the first version intentionally small. CMake will prefer discovered system libraries on Linux and vcpkg-provided libraries on Windows. GitHub Actions will use one CI workflow for push/PR validation and one release workflow for tag-based packaging and artifact publishing.
 
 **Tech Stack:** CMake, CPack, GitHub Actions, Ubuntu apt packages, Windows vcpkg
 
@@ -23,12 +23,12 @@ Run:
 python3 - <<'PY'
 from pathlib import Path
 text = Path('comm/CMakeLists.txt').read_text()
-print('../3rd/sqlite' in text)
-print('../3rd/mysql' in text)
+print('ENT_SQLITE_FOUND' in text)
+print('ENT_MYSQL_FOUND' in text)
 PY
 ```
 
-Expected: `True` and `True`, proving Windows still depends on vendored libraries.
+Expected: `True` and `True`, proving the backend discovery flags are present.
 
 - [ ] **Step 2: Prefer discovered libraries on every platform**
 
@@ -36,10 +36,10 @@ Update `comm/CMakeLists.txt` so that:
 ```cmake
 option(ENT_ENABLE_SQLITE "Enable SQLite backend" ON)
 option(ENT_ENABLE_MYSQL "Enable MySQL backend" ON)
-option(ENT_ALLOW_VENDORED_DB_LIBS "Allow vendored DB libraries as a fallback" ON)
+option(ENT_ENABLE_PGSQL "Enable PostgreSQL backend" ON)
 ```
 
-Windows path should first try `find_path()` / `find_library()` using the active toolchain and only fall back to `../3rd/...` when `ENT_ALLOW_VENDORED_DB_LIBS` is `ON` and discovery fails.
+Windows path should first try `find_path()` / `find_library()` using the active toolchain and disable the backend if discovery fails.
 
 - [ ] **Step 3: Link using discovered library variables**
 
@@ -54,7 +54,7 @@ if(ENT_ENABLE_MYSQL AND ENT_MYSQL_LIBRARY)
 endif()
 ```
 
-Also update Windows install rules in `CMakeLists.txt` so they only install vendored DLLs when vendored fallback is actually in use.
+Also update Windows install rules in `CMakeLists.txt` so they install only the libraries discovered by CMake.
 
 - [ ] **Step 4: Re-run the red-check command**
 
@@ -63,12 +63,12 @@ Run:
 python3 - <<'PY'
 from pathlib import Path
 text = Path('comm/CMakeLists.txt').read_text()
-print('../3rd/sqlite' in text)
-print('../3rd/mysql' in text)
+print('ENT_SQLITE_FOUND' in text)
+print('ENT_MYSQL_FOUND' in text)
 PY
 ```
 
-Expected: the file still contains fallback references, but discovered-library logic now exists and Windows is no longer hard-wired to vendored libs.
+Expected: the file contains discovered-library logic and no longer references fallback paths.
 
 ### Task 2: Add CI workflow for Linux and Windows
 
@@ -107,7 +107,7 @@ jobs:
             cmake_args: -G Ninja -DENT_ENABLE_SQLITE=ON -DENT_ENABLE_MYSQL=ON
           - os: windows-2022
             build_type: Release
-            cmake_args: -DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows -DENT_ENABLE_SQLITE=ON -DENT_ENABLE_MYSQL=ON -DENT_ALLOW_VENDORED_DB_LIBS=OFF
+            cmake_args: -DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows -DENT_ENABLE_SQLITE=ON -DENT_ENABLE_MYSQL=ON
 ```
 
 Linux must install `ninja-build`, `libsqlite3-dev`, and `default-libmysqlclient-dev`.

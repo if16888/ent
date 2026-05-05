@@ -17,8 +17,12 @@
  */
 #ifndef _I_ENT_COMM_H_
 #define _I_ENT_COMM_H_
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef WIN32
+#include <sys/timeb.h>
+#endif
 #include "ient_runtime.h"
 #include "ent_log.h"
 #include "ent_utility.h"
@@ -86,6 +90,67 @@
  }\
  while(0)
 #endif
+
+static inline char* ENT_StrDup(const char* text)
+{
+    if(text == NULL)
+    {
+        return NULL;
+    }
+#ifdef WIN32
+    return _strdup(text);
+#else
+    return strdup(text);
+#endif
+}
+
+static inline FILE* ENT_FOpen(const char* fileName, const char* mode)
+{
+    if(fileName == NULL || mode == NULL)
+    {
+        return NULL;
+    }
+#ifdef WIN32
+    FILE* fp = NULL;
+    if(fopen_s(&fp, fileName, mode) != 0)
+    {
+        return NULL;
+    }
+    return fp;
+#else
+    return fopen(fileName, mode);
+#endif
+}
+
+#ifdef WIN32
+static inline int ENT_FTime64(struct _timeb* timeBuf)
+{
+    return _ftime64_s(timeBuf);
+}
+#endif
+
+static inline char* ENT_GetEnvDup(const char* name)
+{
+    if(name == NULL || name[0] == '\0')
+    {
+        return NULL;
+    }
+
+#ifdef WIN32
+    char* value = NULL;
+    size_t valueLen = 0;
+
+    if(_dupenv_s(&value, &valueLen, name) != 0 || value == NULL || value[0] == '\0')
+    {
+        free(value);
+        return NULL;
+    }
+    return value;
+#else
+    const char* value = getenv(name);
+    return (value == NULL || value[0] == '\0') ? NULL : ENT_StrDup(value);
+#endif
+}
 
 static inline void* UTL_Malloc(void* oldMem,size_t* num,int size,size_t reqNum)
 {

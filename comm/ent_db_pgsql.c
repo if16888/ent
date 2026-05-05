@@ -57,7 +57,7 @@ static void defSqlResultCb(char** fields,char** rowRes,long long rowNum,int colu
     (void)data;
 }
 
-#if ENT_ENABLE_PGSQL
+#if ENT_ENABLE_PGSQL && ENT_PGSQL_FOUND
 static void iENT_DbPgSQLFreeBoundParams(char** paramValues,
                                         char** paramStorage,
                                         int* paramLengths,
@@ -375,7 +375,7 @@ static MSG_ID_T iENT_DbPgSQLRewriteQuery(const char* query, size_t paramCount, c
         return ENT_DBS_PARAM_COUNT;
     }
 
-    *rewrittenQuery = strdup(query);
+    *rewrittenQuery = ENT_StrDup(query);
     if(*rewrittenQuery == NULL)
     {
         IENT_LOG_ERROR("PgSQL query allocation failed.\n");
@@ -773,7 +773,7 @@ MSG_ID_T ENT_DbPgSQLWriteParams(void* dbHandle,
 
 MSG_ID_T ENT_DbPgSQLInit(DB_HANDLE dbHandle)
 {
-#if ENT_ENABLE_PGSQL
+#if ENT_ENABLE_PGSQL && ENT_PGSQL_FOUND
     DB_CFG* dbCfg = (DB_CFG*)dbHandle;
     PGconn* pgConn;
     char conninfo[1024];
@@ -825,7 +825,7 @@ MSG_ID_T ENT_DbPgSQLInit(DB_HANDLE dbHandle)
 
 MSG_ID_T ENT_DbPgSQLClose(DB_HANDLE dbHandle)
 {
-#if ENT_ENABLE_PGSQL
+#if ENT_ENABLE_PGSQL && ENT_PGSQL_FOUND
     DB_CFG* dbCfg = (DB_CFG*)dbHandle;
     if(dbHandle == NULL)
     {
@@ -856,7 +856,7 @@ MSG_ID_T ENT_DbPgSQLClose(DB_HANDLE dbHandle)
 
 MSG_ID_T ENT_DbPgSQLRead(void* dbHandle, const char* query, SqlResultCB userCb, void* userData)
 {
-#if ENT_ENABLE_PGSQL
+#if ENT_ENABLE_PGSQL && ENT_PGSQL_FOUND
     PGconn* pgConn = (PGconn*)dbHandle;
     PGresult* res;
 
@@ -898,7 +898,7 @@ MSG_ID_T ENT_DbPgSQLRead(void* dbHandle, const char* query, SqlResultCB userCb, 
 
 MSG_ID_T ENT_DbPgSQLWrite(void* dbHandle, const char* query, SqlResultCB userCb, void* userData)
 {
-#if ENT_ENABLE_PGSQL
+#if ENT_ENABLE_PGSQL && ENT_PGSQL_FOUND
     PGconn* pgConn = (PGconn*)dbHandle;
     PGresult* res;
     ExecStatusType status;

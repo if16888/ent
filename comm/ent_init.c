@@ -380,8 +380,8 @@ static MSG_ID_T iENT_CTXInit(ENT_CTX* ctx,
         return ENT_INIT_INVALID_ARGUMENT;
     }
 
-    ctx->workPath = strdup(workPath);
-    ctx->entName  = strdup(name);
+    ctx->workPath = ENT_StrDup(workPath);
+    ctx->entName  = ENT_StrDup(name);
     ctx->logLevel = logLevel;
 
     size_t len     = strlen(workPath);

@@ -177,9 +177,9 @@ static MSG_ID_T iENT_LogInitCtx(ENT_LOG_CTX_INTERNAL* log,
 
     memset(log, 0, sizeof(*log));
     if(moduleName)
-        log->moduleName = strdup(moduleName);
+        log->moduleName = ENT_StrDup(moduleName);
     else
-        log->moduleName = strdup("default");
+        log->moduleName = ENT_StrDup("default");
 
     if(log->moduleName == NULL)
     {
@@ -188,7 +188,7 @@ static MSG_ID_T iENT_LogInitCtx(ENT_LOG_CTX_INTERNAL* log,
 
     if(logPath)
     {
-        log->logPath = strdup(logPath);
+        log->logPath = ENT_StrDup(logPath);
         if(log->logPath == NULL)
         {
             free(log->moduleName);

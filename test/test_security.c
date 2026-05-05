@@ -94,8 +94,13 @@ static void inject_capture_cb(char** fields, char** rowRes,
     cap->column_num = columnNum;
     cap->row_num = rowNum;
     if (rowRes && rowNum > 0 && columnNum > 0 && rowRes[0]) {
-        strncpy(cap->leaked_data, rowRes[0], sizeof(cap->leaked_data) - 1);
-        cap->leaked_data[sizeof(cap->leaked_data) - 1] = '\0';
+        size_t copy_len = strlen(rowRes[0]);
+        if(copy_len >= sizeof(cap->leaked_data))
+        {
+            copy_len = sizeof(cap->leaked_data) - 1;
+        }
+        memcpy(cap->leaked_data, rowRes[0], copy_len);
+        cap->leaked_data[copy_len] = '\0';
     }
 }
 
@@ -215,62 +220,96 @@ static void cleanup_temp_db_path(const char* db_path)
 #endif
 }
 
-static const char* read_env_or_null(const char* name)
+static int read_env_or_null(const char* name, char* out, size_t out_len)
 {
-    const char* value = getenv(name);
-    if(value != NULL && value[0] == '\0')
+    char* value = ENT_GetEnvDup(name);
+
+    if(out == NULL || out_len == 0)
     {
-        return NULL;
+        free(value);
+        return 0;
     }
-    return value;
+
+    if(value == NULL)
+    {
+        out[0] = '\0';
+        return 0;
+    }
+
+    if(strlen(value) + 1 > out_len)
+    {
+        free(value);
+        out[0] = '\0';
+        return 0;
+    }
+
+    memcpy(out, value, strlen(value) + 1);
+    free(value);
+    return (out[0] != '\0');
 }
 
-static int test_security_pgsql_is_configured(const char** host,
-                                             const char** database,
-                                             const char** user,
-                                             const char** passwd,
+static int test_security_pgsql_is_configured(char* host,
+                                             size_t host_len,
+                                             char* database,
+                                             size_t database_len,
+                                             char* user,
+                                             size_t user_len,
+                                             char* passwd,
+                                             size_t passwd_len,
                                              int* port)
 {
-    *host = read_env_or_null("ENT_PGSQL_HOST");
-    *database = read_env_or_null("ENT_PGSQL_DB");
-    *user = read_env_or_null("ENT_PGSQL_USER");
-    *passwd = getenv("ENT_PGSQL_PASSWORD");
-    if(*passwd == NULL)
+    if(port == NULL)
     {
-        *passwd = "";
+        return 0;
     }
     *port = 5432;
 
-    if(read_env_or_null("ENT_PGSQL_PORT") != NULL)
+    read_env_or_null("ENT_PGSQL_HOST", host, host_len);
+    read_env_or_null("ENT_PGSQL_DB", database, database_len);
+    read_env_or_null("ENT_PGSQL_USER", user, user_len);
+    read_env_or_null("ENT_PGSQL_PASSWORD", passwd, passwd_len);
+
     {
-        *port = atoi(getenv("ENT_PGSQL_PORT"));
+        char portBuf[32];
+        if(read_env_or_null("ENT_PGSQL_PORT", portBuf, sizeof(portBuf)))
+        {
+            *port = atoi(portBuf);
+        }
     }
 
-    return (*host != NULL && *database != NULL && *user != NULL);
+    return (host[0] != '\0' && database[0] != '\0' && user[0] != '\0');
 }
 
-static int test_security_mysql_is_configured(const char** host,
-                                             const char** database,
-                                             const char** user,
-                                             const char** passwd,
+static int test_security_mysql_is_configured(char* host,
+                                             size_t host_len,
+                                             char* database,
+                                             size_t database_len,
+                                             char* user,
+                                             size_t user_len,
+                                             char* passwd,
+                                             size_t passwd_len,
                                              int* port)
 {
-    *host = read_env_or_null("ENT_MYSQL_HOST");
-    *database = read_env_or_null("ENT_MYSQL_DB");
-    *user = read_env_or_null("ENT_MYSQL_USER");
-    *passwd = getenv("ENT_MYSQL_PASSWORD");
-    if(*passwd == NULL)
+    if(port == NULL)
     {
-        *passwd = "";
+        return 0;
     }
     *port = 3306;
 
-    if(read_env_or_null("ENT_MYSQL_PORT") != NULL)
+    read_env_or_null("ENT_MYSQL_HOST", host, host_len);
+    read_env_or_null("ENT_MYSQL_DB", database, database_len);
+    read_env_or_null("ENT_MYSQL_USER", user, user_len);
+    read_env_or_null("ENT_MYSQL_PASSWORD", passwd, passwd_len);
+
     {
-        *port = atoi(getenv("ENT_MYSQL_PORT"));
+        char portBuf[32];
+        if(read_env_or_null("ENT_MYSQL_PORT", portBuf, sizeof(portBuf)))
+        {
+            *port = atoi(portBuf);
+        }
     }
 
-    return (*host != NULL && *database != NULL && *user != NULL);
+    return (host[0] != '\0' && database[0] != '\0' && user[0] != '\0');
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -635,17 +674,21 @@ static void test_db_pgsql_parameterized_queries_if_configured(void)
     fprintf(stdout, "  [RUN ] %s\n", _test_name);
 
 #if ENT_ENABLE_PGSQL
-    const char* host;
-    const char* database;
-    const char* user;
-    const char* passwd;
+    char host[256];
+    char database[256];
+    char user[256];
+    char passwd[256];
     int port;
     DB_HANDLE db = NULL;
     MSG_ID_T ret;
     INJECT_CAPTURE cap;
     ENT_DB_PARAM params[1];
 
-    if(test_security_pgsql_is_configured(&host, &database, &user, &passwd, &port) == 0)
+    if(test_security_pgsql_is_configured(host, sizeof(host),
+                                         database, sizeof(database),
+                                         user, sizeof(user),
+                                         passwd, sizeof(passwd),
+                                         &port) == 0)
     {
         fprintf(stdout, "    -> PostgreSQL security test skipped: set ENT_PGSQL_HOST, ENT_PGSQL_DB, and ENT_PGSQL_USER to run it.\n");
         fprintf(stdout, "  [DONE] %s\n", _test_name);
@@ -715,17 +758,21 @@ static void test_db_mysql_parameterized_queries_if_configured(void)
     fprintf(stdout, "  [RUN ] %s\n", _test_name);
 
 #if ENT_ENABLE_MYSQL
-    const char* host;
-    const char* database;
-    const char* user;
-    const char* passwd;
+    char host[256];
+    char database[256];
+    char user[256];
+    char passwd[256];
     int port;
     DB_HANDLE db = NULL;
     MSG_ID_T ret;
     INJECT_CAPTURE cap;
     ENT_DB_PARAM params[1];
 
-    if(test_security_mysql_is_configured(&host, &database, &user, &passwd, &port) == 0)
+    if(test_security_mysql_is_configured(host, sizeof(host),
+                                         database, sizeof(database),
+                                         user, sizeof(user),
+                                         passwd, sizeof(passwd),
+                                         &port) == 0)
     {
         fprintf(stdout, "    -> MySQL security test skipped: set ENT_MYSQL_HOST, ENT_MYSQL_DB, and ENT_MYSQL_USER to run it.\n");
         fprintf(stdout, "  [DONE] %s\n", _test_name);

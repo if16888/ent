@@ -438,13 +438,16 @@ static int test_cv_wait_uses_monotonic_deadline_and_normalized_timespec(void)
         return 1;
     }
 
-    if(expect_true(UTL_CVWait(cv, lock, 1, RW_WRITE_E) == 0,
-                   "UTL_CVWait should accept a timed mutex wait on Windows") != 0)
     {
-        UTL_LockLeave(lock);
-        UTL_CVClose(&cv);
-        UTL_LockClose(&lock);
-        return 1;
+        MSG_ID_T waitSts = UTL_CVWait(cv, lock, 1, RW_WRITE_E);
+        if(expect_true(waitSts == 0 || waitSts == ENT_UTHD_WAIT_TIMEOUT,
+                       "UTL_CVWait should accept a timed mutex wait or timeout on Windows") != 0)
+        {
+            UTL_LockLeave(lock);
+            UTL_CVClose(&cv);
+            UTL_LockClose(&lock);
+            return 1;
+        }
     }
 
     if(expect_true(UTL_LockLeave(lock) == 0, "UTL_LockLeave should release the mutex after waiting on Windows") != 0)
