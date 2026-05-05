@@ -426,6 +426,22 @@ endif()
 
 add_test(NAME test_ent_log_flush_deadline COMMAND test_ent_log_flush_deadline)
 
+add_executable(
+  test_ent_shm
+  test_ent_shm.c
+)
+
+target_include_directories(
+  test_ent_shm
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../comm
+)
+
+target_link_libraries(test_ent_shm PRIVATE ent_s)
+
+add_test(NAME test_ent_shm COMMAND test_ent_shm)
+
 if(ENT_ENABLE_SQLITE AND (NOT WIN32 OR ENT_SQLITE_LIBRARY))
   add_executable(
   test_security

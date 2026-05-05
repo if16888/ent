@@ -429,13 +429,13 @@ add_definitions(-DENT_ENABLE_LUA=$<BOOL:${ENT_ENABLE_LUA}>)
 set(ENT_LIBRARY_SOURCES
   ent_init.c ent_db.c ent_db_sqlite.c ent_db_mysql.c ent_db_pgsql.c
   ent_log_core.c ent_log_writer.c ent_log_options.c ent_log_compat.c
-  ent_thread.c ent_msg.c ent_script.c
+  ent_thread.c ent_msg.c ent_script.c ent_shm.c
   utl_socket.c utl_thread.c utl_timer.c utl_dll.c utl_tpool.c
   ${ENT_MSG_GENERATED_SOURCE}
 )
 
 set(ENT_PUBLIC_HEADERS
-  "../inc/ent_comm.h;../inc/ent_init.h;../inc/ent_types.h;../inc/ent_db.h;../inc/ent_log.h;../inc/ent_thread.h;../inc/ent_utility.h;../inc/ent_msg.h;../inc/ent_script.h;${ENT_MSG_GENERATED_HEADER}"
+  "../inc/ent_comm.h;../inc/ent_init.h;../inc/ent_types.h;../inc/ent_db.h;../inc/ent_log.h;../inc/ent_thread.h;../inc/ent_utility.h;../inc/ent_msg.h;../inc/ent_script.h;../inc/ent_shm.h;${ENT_MSG_GENERATED_HEADER}"
 )
 
 function(ent_add_object_library target export_definition)
