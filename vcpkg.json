@@ -1,0 +1,10 @@
+{
+  "name": "ent",
+  "version-string": "0.1.0",
+  "description": "ent C library",
+  "dependencies": [
+    "sqlite3",
+    "libmariadb",
+    "libpq"
+  ]
+}
