@@ -57,6 +57,24 @@ static int path_exists(const char* path)
 #endif
 }
 
+static int file_contains(const char* path, const char* needle)
+{
+    FILE* fp = ENT_FOpen(path, "r");
+    char buffer[2048];
+    size_t bytesRead = 0;
+
+    if(fp == NULL)
+    {
+        return 0;
+    }
+
+    memset(buffer, 0, sizeof(buffer));
+    bytesRead = fread(buffer, 1, sizeof(buffer) - 1, fp);
+    fclose(fp);
+
+    return bytesRead > 0 && strstr(buffer, needle) != NULL;
+}
+
 static void remove_dir_contents(const char* path)
 {
 #ifdef WIN32
@@ -409,6 +427,85 @@ static int test_log_rejects_uninitialized_calls(void)
                        "ENT_LogCloseHandle should reject use before ENT_LogInit");
 }
 
+static int test_log_close_service_boundaries(void)
+{
+    int serviceOpen = 0;
+    int defaultOpen = 0;
+    int rc = 1;
+
+    if(expect_true(ENT_LogClose() == ENT_LOG_NOT_INITIALIZED,
+                   "ENT_LogClose should reject close before ENT_LogInit") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(ENT_LogInit() == ENT_SYS_NORMAL,
+                   "ENT_LogInit should initialize for service boundary checks") != 0)
+    {
+        return 1;
+    }
+    serviceOpen = 1;
+
+    if(expect_true(ENT_LogClose() == ENT_SYS_NORMAL,
+                   "ENT_LogClose should close an initialized service without handles") != 0)
+    {
+        goto cleanup;
+    }
+    serviceOpen = 0;
+
+    if(expect_true(ENT_LogClose() == ENT_LOG_NOT_INITIALIZED,
+                   "repeated ENT_LogClose should report not initialized") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(ENT_LogInit() == ENT_SYS_NORMAL,
+                   "ENT_LogInit should reinitialize for default live-handle checks") != 0)
+    {
+        return 1;
+    }
+    serviceOpen = 1;
+
+    if(expect_true(ENT_LogInitHandle(NULL, "DefaultLiveModule", ".") == ENT_SYS_NORMAL,
+                   "ENT_LogInitHandle should create the default handle") != 0)
+    {
+        goto cleanup;
+    }
+    defaultOpen = 1;
+
+    if(expect_true(ENT_LogClose() == ENT_LOG_IN_USE,
+                   "ENT_LogClose should reject service close while default handle is live") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogCloseHandle(NULL) == ENT_SYS_NORMAL,
+                   "ENT_LogCloseHandle should close the default handle") != 0)
+    {
+        goto cleanup;
+    }
+    defaultOpen = 0;
+
+    if(expect_true(ENT_LogClose() == ENT_SYS_NORMAL,
+                   "ENT_LogClose should succeed after default handle closes") != 0)
+    {
+        goto cleanup;
+    }
+    serviceOpen = 0;
+    rc = 0;
+
+cleanup:
+    if(defaultOpen)
+    {
+        ENT_LogCloseHandle(NULL);
+    }
+    if(serviceOpen)
+    {
+        ENT_LogClose();
+    }
+    return rc;
+}
+
 static int test_explicit_context_isolated_from_default(void)
 {
     ENT_LOG_CTX ctx = NULL;
@@ -510,6 +607,197 @@ static int test_explicit_context_isolated_from_default(void)
     return expect_true(ENT_LogClose() == 0, "ENT_LogClose should shut down the log subsystem");
 }
 
+static int test_log_ctx_close_auto_closes_owned_handle(void)
+{
+    ENT_LOG_CTX ctx = NULL;
+    ENT_LOG privateLog = NULL;
+    ENT_LOG_LEV_E level = LOG_LEV_INFO_E;
+    char dirPath[256];
+    int serviceOpen = 0;
+    int tempDirCreated = 0;
+    int rc = 1;
+
+    if(make_temp_dir(dirPath, sizeof(dirPath)) != 0)
+    {
+        fprintf(stderr, "failed to create temp ctx-auto-close directory\n");
+        return 1;
+    }
+    tempDirCreated = 1;
+
+    if(expect_true(ENT_LogInit() == ENT_SYS_NORMAL,
+                   "ENT_LogInit should initialize before ctx auto-close testing") != 0)
+    {
+        goto cleanup;
+    }
+    serviceOpen = 1;
+
+    if(expect_true(ENT_LogCtxInit(&ctx) == ENT_SYS_NORMAL,
+                   "ENT_LogCtxInit should create a context for auto-close testing") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogCtxInitHandle(ctx, &privateLog, "CtxAutoCloseModule", dirPath) == ENT_SYS_NORMAL,
+                   "ENT_LogCtxInitHandle should create a ctx-owned handle") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogCtxSetOption(ctx, privateLog, ENT_LOG_LEVEL_E, &level) == ENT_SYS_NORMAL,
+                   "ENT_LogCtxSetOption should accept a ctx-owned handle") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogCtxPrint(ctx, privateLog, "ctx auto close message\n") == ENT_SYS_NORMAL,
+                   "ENT_LogCtxPrint should write through the ctx-owned handle") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogCtxClose(ctx) == ENT_SYS_NORMAL,
+                   "ENT_LogCtxClose should auto-close a live ctx-owned handle") != 0)
+    {
+        goto cleanup;
+    }
+    ctx = NULL;
+    privateLog = NULL;
+
+    if(expect_true(ENT_LogClose() == ENT_SYS_NORMAL,
+                   "ENT_LogClose should succeed after ctx auto-closes its handle") != 0)
+    {
+        goto cleanup;
+    }
+    serviceOpen = 0;
+    rc = 0;
+
+cleanup:
+    if(ctx != NULL)
+    {
+        ENT_LogCtxClose(ctx);
+    }
+    if(serviceOpen)
+    {
+        ENT_LogClose();
+    }
+    if(tempDirCreated)
+    {
+        remove_dir_contents(dirPath);
+    }
+    return rc;
+}
+
+static int test_log_ctx_rejects_wrong_handle(void)
+{
+    ENT_LOG_CTX ctx1 = NULL;
+    ENT_LOG_CTX ctx2 = NULL;
+    ENT_LOG handle1 = NULL;
+    ENT_LOG handle2 = NULL;
+    char dirPath[256];
+    int serviceOpen = 0;
+    int tempDirCreated = 0;
+    int rc = 1;
+
+    if(make_temp_dir(dirPath, sizeof(dirPath)) != 0)
+    {
+        fprintf(stderr, "failed to create temp ctx-wrong-handle directory\n");
+        return 1;
+    }
+    tempDirCreated = 1;
+
+    if(expect_true(ENT_LogInit() == ENT_SYS_NORMAL,
+                   "ENT_LogInit should initialize before ctx wrong-handle testing") != 0)
+    {
+        goto cleanup;
+    }
+    serviceOpen = 1;
+
+    if(expect_true(ENT_LogCtxInit(&ctx1) == ENT_SYS_NORMAL,
+                   "ENT_LogCtxInit should create ctx1") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogCtxInit(&ctx2) == ENT_SYS_NORMAL,
+                   "ENT_LogCtxInit should create ctx2") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogCtxInitHandle(ctx1, &handle1, "CtxWrongHandleModule", dirPath) == ENT_SYS_NORMAL,
+                   "ENT_LogCtxInitHandle should create a handle owned by ctx1") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogCtxInitHandle(ctx2, &handle2, "CtxWrongHandlePeerModule", dirPath) == ENT_SYS_NORMAL,
+                   "ENT_LogCtxInitHandle should create a handle owned by ctx2") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogCtxCloseHandle(ctx2, handle1) == ENT_LOG_BAD_HANDLE,
+                   "ENT_LogCtxCloseHandle should reject a handle owned by another ctx") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogCtxCloseHandle(ctx1, handle1) == ENT_SYS_NORMAL,
+                   "ENT_LogCtxCloseHandle should close the handle through its owner ctx") != 0)
+    {
+        goto cleanup;
+    }
+    handle1 = NULL;
+
+    if(expect_true(ENT_LogCtxCloseHandle(ctx2, handle2) == ENT_SYS_NORMAL,
+                   "ENT_LogCtxCloseHandle should close the handle through ctx2") != 0)
+    {
+        goto cleanup;
+    }
+    handle2 = NULL;
+
+    if(expect_true(ENT_LogCtxClose(ctx1) == ENT_SYS_NORMAL,
+                   "ENT_LogCtxClose should close ctx1 after its handle is closed") != 0)
+    {
+        goto cleanup;
+    }
+    ctx1 = NULL;
+
+    if(expect_true(ENT_LogCtxClose(ctx2) == ENT_SYS_NORMAL,
+                   "ENT_LogCtxClose should close ctx2 after wrong-handle rejection") != 0)
+    {
+        goto cleanup;
+    }
+    ctx2 = NULL;
+
+    if(expect_true(ENT_LogClose() == ENT_SYS_NORMAL,
+                   "ENT_LogClose should succeed after ctx wrong-handle testing") != 0)
+    {
+        goto cleanup;
+    }
+    serviceOpen = 0;
+    rc = 0;
+
+cleanup:
+    if(ctx1 != NULL)
+    {
+        ENT_LogCtxClose(ctx1);
+    }
+    if(ctx2 != NULL)
+    {
+        ENT_LogCtxClose(ctx2);
+    }
+    if(serviceOpen)
+    {
+        ENT_LogClose();
+    }
+    if(tempDirCreated)
+    {
+        remove_dir_contents(dirPath);
+    }
+    return rc;
+}
+
 static int test_default_log_handle_lifecycle(void)
 {
     ENT_LOG_LEV_E level = LOG_LEV_INFO_E;
@@ -557,6 +845,59 @@ static int test_default_log_handle_lifecycle(void)
     }
 
     return expect_true(ENT_LogClose() == 0, "ENT_LogClose should shut down the log subsystem");
+}
+
+static int test_default_handle_close_boundaries(void)
+{
+    int serviceOpen = 0;
+    int defaultOpen = 0;
+    int rc = 1;
+
+    if(expect_true(ENT_LogInit() == ENT_SYS_NORMAL,
+                   "ENT_LogInit should initialize before default close boundary checks") != 0)
+    {
+        return 1;
+    }
+    serviceOpen = 1;
+
+    if(expect_true(ENT_LogInitHandle(NULL, "DefaultCloseModule", ".") == ENT_SYS_NORMAL,
+                   "ENT_LogInitHandle should create the default handle for close boundary checks") != 0)
+    {
+        goto cleanup;
+    }
+    defaultOpen = 1;
+
+    if(expect_true(ENT_LogCloseHandle(NULL) == ENT_SYS_NORMAL,
+                   "ENT_LogCloseHandle should close the default handle first time") != 0)
+    {
+        goto cleanup;
+    }
+    defaultOpen = 0;
+
+    if(expect_true(ENT_LogCloseHandle(NULL) == ENT_LOG_BAD_HANDLE,
+                   "repeated ENT_LogCloseHandle(NULL) should report bad handle") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogClose() == ENT_SYS_NORMAL,
+                   "ENT_LogClose should shut down after repeated default close check") != 0)
+    {
+        goto cleanup;
+    }
+    serviceOpen = 0;
+    rc = 0;
+
+cleanup:
+    if(defaultOpen)
+    {
+        ENT_LogCloseHandle(NULL);
+    }
+    if(serviceOpen)
+    {
+        ENT_LogClose();
+    }
+    return rc;
 }
 
 static int test_log_service_close_rejects_live_handle(void)
@@ -1311,6 +1652,114 @@ cleanup:
     return rc;
 }
 
+static int test_buffered_log_interval_zero_flushes_on_close(void)
+{
+    ENT_LOG logHandle = NULL;
+    ENT_LOG_LEV_E level = LOG_LEV_INFO_E;
+    bool buffered = true;
+    int flushBatch = 10000;
+    int flushIntervalMs = 0;
+    char dirPath[256];
+    char logFilePath[512];
+    const char* token = "interval zero close-drain token ent002";
+    int serviceOpen = 0;
+    int tempDirCreated = 0;
+    int rc = 1;
+
+    if(make_temp_dir(dirPath, sizeof(dirPath)) != 0)
+    {
+        fprintf(stderr, "failed to create temp interval-zero directory\n");
+        return 1;
+    }
+    tempDirCreated = 1;
+    format_log_file_path(logFilePath, sizeof(logFilePath), dirPath, "IntervalZeroModule");
+
+    if(expect_true(ENT_LogInit() == ENT_SYS_NORMAL,
+                   "ENT_LogInit should initialize before interval-zero testing") != 0)
+    {
+        goto cleanup;
+    }
+    serviceOpen = 1;
+
+    if(expect_true(ENT_LogInitHandle(&logHandle, "IntervalZeroModule", ".") == ENT_SYS_NORMAL,
+                   "ENT_LogInitHandle should create a handle for interval-zero testing") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_PATH_E, dirPath) == ENT_SYS_NORMAL,
+                   "ENT_LogSetOption should set the interval-zero log path") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_LEVEL_E, &level) == ENT_SYS_NORMAL,
+                   "ENT_LogSetOption should enable INFO writes for interval-zero testing") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_BUFFER_E, &buffered) == ENT_SYS_NORMAL,
+                   "ENT_LogSetOption should enable buffered logging for interval-zero testing") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_FLUSH_BATCH_E, &flushBatch) == ENT_SYS_NORMAL,
+                   "ENT_LogSetOption should apply a high flush batch for interval-zero testing") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogSetOption(logHandle, ENT_LOG_FLUSH_INTERVAL_E, &flushIntervalMs) == ENT_SYS_NORMAL,
+                   "ENT_LogSetOption should accept flush interval zero") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogPrint(logHandle, "%s\n", token) == ENT_SYS_NORMAL,
+                   "ENT_LogPrint should enqueue the interval-zero message") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogCloseHandle(logHandle) == ENT_SYS_NORMAL,
+                   "ENT_LogCloseHandle should drain buffered interval-zero messages on close") != 0)
+    {
+        goto cleanup;
+    }
+    logHandle = NULL;
+
+    if(expect_true(file_contains(logFilePath, token),
+                   "interval-zero buffered message should be present after close") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogClose() == ENT_SYS_NORMAL,
+                   "ENT_LogClose should shut down after interval-zero testing") != 0)
+    {
+        goto cleanup;
+    }
+    serviceOpen = 0;
+    rc = 0;
+
+cleanup:
+    if(logHandle != NULL)
+    {
+        ENT_LogCloseHandle(logHandle);
+    }
+    if(serviceOpen)
+    {
+        ENT_LogClose();
+    }
+    if(tempDirCreated)
+    {
+        remove_dir_contents(dirPath);
+    }
+    return rc;
+}
+
 static int test_buffered_log_flush_interval_writes_without_close(void)
 {
     ENT_LOG logHandle = NULL;
@@ -1466,8 +1915,12 @@ int main(void)
     int failures = 0;
 
     failures += test_log_rejects_uninitialized_calls();
+    failures += test_log_close_service_boundaries();
     failures += test_explicit_context_isolated_from_default();
+    failures += test_log_ctx_close_auto_closes_owned_handle();
+    failures += test_log_ctx_rejects_wrong_handle();
     failures += test_default_log_handle_lifecycle();
+    failures += test_default_handle_close_boundaries();
     failures += test_log_service_close_rejects_live_handle();
     failures += test_log_close_handle_blocks_until_active_writer_released();
     failures += test_log_close_rejects_invalid_handle();
@@ -1476,6 +1929,7 @@ int main(void)
     failures += test_log_level_filters_debug_messages();
     failures += test_log_close_handle_waits_for_active_writers();
     failures += test_buffered_log_close_flushes_queued_messages();
+    failures += test_buffered_log_interval_zero_flushes_on_close();
     failures += test_buffered_log_flush_interval_writes_without_close();
 
     if(failures != 0)
