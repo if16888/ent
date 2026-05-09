@@ -614,7 +614,7 @@ MSG_ID_T ENT_LogCtxCloseHandle(ENT_LOG_CTX ctx, ENT_LOG logHandle)
         return ENT_LOG_BAD_HANDLE;
     }
 
-    if(logCtx->logHandle != NULL && logHandle != logCtx->logHandle)
+    if(logCtx->logHandle == NULL || logHandle != logCtx->logHandle)
     {
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxCloseHandle", __LINE__);
         return ENT_LOG_BAD_HANDLE;
