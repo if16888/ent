@@ -798,6 +798,103 @@ cleanup:
     return rc;
 }
 
+static int test_log_ctx_empty_ctx_rejects_foreign_handle_close(void)
+{
+    ENT_LOG_CTX ctx1 = NULL;
+    ENT_LOG_CTX ctx2 = NULL;
+    ENT_LOG handle1 = NULL;
+    char dirPath[256];
+    int serviceOpen = 0;
+    int tempDirCreated = 0;
+    int rc = 1;
+
+    if(make_temp_dir(dirPath, sizeof(dirPath)) != 0)
+    {
+        fprintf(stderr, "failed to create temp ctx-empty-foreign-close directory\n");
+        return 1;
+    }
+    tempDirCreated = 1;
+
+    if(expect_true(ENT_LogInit() == ENT_SYS_NORMAL,
+                   "ENT_LogInit should initialize before ctx empty-foreign-close testing") != 0)
+    {
+        goto cleanup;
+    }
+    serviceOpen = 1;
+
+    if(expect_true(ENT_LogCtxInit(&ctx1) == ENT_SYS_NORMAL,
+                   "ENT_LogCtxInit should create ctx1") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogCtxInit(&ctx2) == ENT_SYS_NORMAL,
+                   "ENT_LogCtxInit should create empty ctx2") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogCtxInitHandle(ctx1, &handle1, "CtxEmptyRejectModule", dirPath) == ENT_SYS_NORMAL,
+                   "ENT_LogCtxInitHandle should create a handle owned by ctx1") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogCtxCloseHandle(ctx2, handle1) == ENT_LOG_BAD_HANDLE,
+                   "ENT_LogCtxCloseHandle should reject foreign handle when ctx2 owns no handle") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogCtxCloseHandle(ctx1, handle1) == ENT_SYS_NORMAL,
+                   "ENT_LogCtxCloseHandle should still close the handle through ctx1") != 0)
+    {
+        goto cleanup;
+    }
+    handle1 = NULL;
+
+    if(expect_true(ENT_LogCtxClose(ctx1) == ENT_SYS_NORMAL,
+                   "ENT_LogCtxClose should close ctx1 after its handle is closed") != 0)
+    {
+        goto cleanup;
+    }
+    ctx1 = NULL;
+
+    if(expect_true(ENT_LogCtxClose(ctx2) == ENT_SYS_NORMAL,
+                   "ENT_LogCtxClose should close empty ctx2 after rejection") != 0)
+    {
+        goto cleanup;
+    }
+    ctx2 = NULL;
+
+    if(expect_true(ENT_LogClose() == ENT_SYS_NORMAL,
+                   "ENT_LogClose should succeed after ctx empty-foreign-close testing") != 0)
+    {
+        goto cleanup;
+    }
+    serviceOpen = 0;
+    rc = 0;
+
+cleanup:
+    if(ctx1 != NULL)
+    {
+        ENT_LogCtxClose(ctx1);
+    }
+    if(ctx2 != NULL)
+    {
+        ENT_LogCtxClose(ctx2);
+    }
+    if(serviceOpen)
+    {
+        ENT_LogClose();
+    }
+    if(tempDirCreated)
+    {
+        remove_dir_contents(dirPath);
+    }
+    return rc;
+}
+
 static int test_default_log_handle_lifecycle(void)
 {
     ENT_LOG_LEV_E level = LOG_LEV_INFO_E;
@@ -1919,6 +2016,7 @@ int main(void)
     failures += test_explicit_context_isolated_from_default();
     failures += test_log_ctx_close_auto_closes_owned_handle();
     failures += test_log_ctx_rejects_wrong_handle();
+    failures += test_log_ctx_empty_ctx_rejects_foreign_handle_close();
     failures += test_default_log_handle_lifecycle();
     failures += test_default_handle_close_boundaries();
     failures += test_log_service_close_rejects_live_handle();
