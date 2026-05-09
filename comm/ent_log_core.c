@@ -73,6 +73,21 @@ MSG_ID_T iENT_LogCtxValidate(const struct ENT_LOG_CTX_TAG* ctx, ENT_LOG logHandl
     return ENT_SYS_NORMAL;
 }
 
+static MSG_ID_T iENT_LogCtxValidateOwnedHandle(const struct ENT_LOG_CTX_TAG* ctx, ENT_LOG logHandle)
+{
+    if(ctx == NULL || ctx->tag != ENTLOG_CTX_TAG || ctx->isInit == false)
+    {
+        return ENT_LOG_BAD_HANDLE;
+    }
+
+    if(ctx->logHandle == NULL || ctx->logHandle != logHandle)
+    {
+        return ENT_LOG_BAD_HANDLE;
+    }
+
+    return ENT_SYS_NORMAL;
+}
+
 MSG_ID_T iENT_LogPathCheck(const char* path)
 {
     if(path == NULL || path[0] == '\0')
@@ -583,13 +598,7 @@ MSG_ID_T ENT_LogCtxSetOption(ENT_LOG_CTX ctx, ENT_LOG logHandle, ENT_LOG_OPTIONS
         return ENT_LOG_NOT_INITIALIZED;
     }
 
-    if(iENT_LogCtxValidate(logCtx, logHandle) != 0)
-    {
-        fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxSetOption", __LINE__);
-        return ENT_LOG_BAD_HANDLE;
-    }
-
-    if(logCtx->logHandle != NULL && logHandle != logCtx->logHandle)
+    if(iENT_LogCtxValidateOwnedHandle(logCtx, logHandle) != 0)
     {
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxSetOption", __LINE__);
         return ENT_LOG_BAD_HANDLE;
@@ -608,13 +617,7 @@ MSG_ID_T ENT_LogCtxCloseHandle(ENT_LOG_CTX ctx, ENT_LOG logHandle)
         return ENT_LOG_NOT_INITIALIZED;
     }
 
-    if(logCtx == NULL || logCtx->tag != ENTLOG_CTX_TAG || logCtx->isInit == false)
-    {
-        fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxCloseHandle", __LINE__);
-        return ENT_LOG_BAD_HANDLE;
-    }
-
-    if(logCtx->logHandle == NULL || logHandle != logCtx->logHandle)
+    if(iENT_LogCtxValidateOwnedHandle(logCtx, logHandle) != 0)
     {
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxCloseHandle", __LINE__);
         return ENT_LOG_BAD_HANDLE;
@@ -642,7 +645,7 @@ MSG_ID_T ENT_LogCtxRaw(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format, .
         return ENT_LOG_NOT_INITIALIZED;
     }
 
-    if(iENT_LogCtxValidate((struct ENT_LOG_CTX_TAG*)ctx, logHandle) != 0)
+    if(iENT_LogCtxValidateOwnedHandle((struct ENT_LOG_CTX_TAG*)ctx, logHandle) != 0)
     {
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxRaw", __LINE__);
         return ENT_LOG_BAD_HANDLE;
@@ -673,7 +676,7 @@ MSG_ID_T ENT_LogCtxFatal(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
         return ENT_LOG_NOT_INITIALIZED;
     }
 
-    if(iENT_LogCtxValidate((struct ENT_LOG_CTX_TAG*)ctx, logHandle) != 0)
+    if(iENT_LogCtxValidateOwnedHandle((struct ENT_LOG_CTX_TAG*)ctx, logHandle) != 0)
     {
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxFatal", __LINE__);
         return ENT_LOG_BAD_HANDLE;
@@ -709,7 +712,7 @@ MSG_ID_T ENT_LogCtxError(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
         return ENT_LOG_NOT_INITIALIZED;
     }
 
-    if(iENT_LogCtxValidate((struct ENT_LOG_CTX_TAG*)ctx, logHandle) != 0)
+    if(iENT_LogCtxValidateOwnedHandle((struct ENT_LOG_CTX_TAG*)ctx, logHandle) != 0)
     {
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxError", __LINE__);
         return ENT_LOG_BAD_HANDLE;
@@ -745,7 +748,7 @@ MSG_ID_T ENT_LogCtxWarn(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format, 
         return ENT_LOG_NOT_INITIALIZED;
     }
 
-    if(iENT_LogCtxValidate((struct ENT_LOG_CTX_TAG*)ctx, logHandle) != 0)
+    if(iENT_LogCtxValidateOwnedHandle((struct ENT_LOG_CTX_TAG*)ctx, logHandle) != 0)
     {
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxWarn", __LINE__);
         return ENT_LOG_BAD_HANDLE;
@@ -781,7 +784,7 @@ MSG_ID_T ENT_LogCtxPrint(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
         return ENT_LOG_NOT_INITIALIZED;
     }
 
-    if(iENT_LogCtxValidate((struct ENT_LOG_CTX_TAG*)ctx, logHandle) != 0)
+    if(iENT_LogCtxValidateOwnedHandle((struct ENT_LOG_CTX_TAG*)ctx, logHandle) != 0)
     {
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxPrint", __LINE__);
         return ENT_LOG_BAD_HANDLE;
@@ -817,7 +820,7 @@ MSG_ID_T ENT_LogCtxDebug(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
         return ENT_LOG_NOT_INITIALIZED;
     }
 
-    if(iENT_LogCtxValidate((struct ENT_LOG_CTX_TAG*)ctx, logHandle) != 0)
+    if(iENT_LogCtxValidateOwnedHandle((struct ENT_LOG_CTX_TAG*)ctx, logHandle) != 0)
     {
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxDebug", __LINE__);
         return ENT_LOG_BAD_HANDLE;
