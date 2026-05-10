@@ -77,6 +77,30 @@ int main(void)
         return EXIT_FAILURE;
     }
 
+    if(expect_true(ENT_MsgGetSubmodule(ENT_SHM_BAD_ARGUMENT) == 12u,
+                   "SHM submodule id decode mismatch") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
+    if(expect_true(strcmp(ENT_MsgSubmoduleName(ENT_SHM_BAD_ARGUMENT), "SHM") == 0,
+                   "SHM submodule name lookup mismatch") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
+    if(expect_true(strcmp(ENT_MsgText(ENT_SHM_BAD_ARGUMENT), "invalid shared-map argument") == 0,
+                   "SHM message text lookup mismatch") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
+    if(expect_true(ENT_MsgIsError(ENT_SHM_BAD_ARGUMENT) == true,
+                   "SHM message should be an error code") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
     if(expect_true(strcmp(ENT_MsgText(ENT_INIT_INVALID_ARGUMENT), "invalid init argument: name[%s] workPath[%s]") == 0,
                    "ENT message text lookup mismatch") != 0)
     {

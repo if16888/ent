@@ -15,7 +15,7 @@ code can reuse the same implementation on Windows, Linux, and macOS.
 
 ## Platform Mapping
 
-`ENT_SharedMapOpen` maps to the native primitives on each platform:
+`ENT_SharedMapOpen` returns `MSG_ID_T` and maps to the native primitives on each platform:
 
 - Windows
   - `CreateFileA`
@@ -40,6 +40,19 @@ code can reuse the same implementation on Windows, Linux, and macOS.
 
 Lock failure does not fail the open call.
 
+## Return Codes
+
+- `ENT_SYS_NORMAL`: success.
+- `ENT_SHM_BAD_ARGUMENT`: invalid options, NULL output pointer, or NULL map passed to flush.
+- `ENT_SHM_BAD_SIZE`: invalid mapping size or flush span size.
+- `ENT_SHM_PATH_FAILED`: path/open/stat access failed.
+- `ENT_SHM_ALLOC_FAILED`: internal allocation failed.
+- `ENT_SHM_RESIZE_FAILED`: backing file resize failed.
+- `ENT_SHM_MAP_FAILED`: mapping creation failed.
+- `ENT_SHM_RANGE_FAILED`: flush range is out of bounds.
+- `ENT_SHM_FLUSH_FAILED`: flush to disk failed.
+- `ENT_SHM_CLOSE_FAILED`: release of mapping resources failed.
+
 ## API Example
 
 ```c
@@ -59,15 +72,22 @@ int main(void)
     opts.mode = ENT_SHM_MODE_READ_WRITE;
     opts.flags = ENT_SHM_F_CREATE_IF_MISSING | ENT_SHM_F_TRUNCATE_IF_EXISTS;
 
-    if(ENT_SharedMapOpen(&opts, &map) != 0)
+    if(ENT_SharedMapOpen(&opts, &map) != ENT_SYS_NORMAL)
     {
         return 1;
     }
 
     data = (char*)ENT_SharedMapPtr(map);
     strcpy(data, "hello snapshot");
-    ENT_SharedMapFlush(map, (ENT_OFFSET)0u, (ENT_SIZE)0u);
-    ENT_SharedMapClose(map);
+    if(ENT_SharedMapFlush(map, (ENT_OFFSET)0u, (ENT_SIZE)0u) != ENT_SYS_NORMAL)
+    {
+        ENT_SharedMapClose(map);
+        return 1;
+    }
+    if(ENT_SharedMapClose(map) != ENT_SYS_NORMAL)
+    {
+        return 1;
+    }
     return 0;
 }
 ```
@@ -85,7 +105,7 @@ opts.size = (ENT_SIZE)0u;
 opts.mode = ENT_SHM_MODE_READ_ONLY;
 opts.flags = 0;
 
-if(ENT_SharedMapOpen(&opts, &map) == 0)
+if(ENT_SharedMapOpen(&opts, &map) == ENT_SYS_NORMAL)
 {
     data = (const char*)ENT_SharedMapPtr(map);
     puts(data);

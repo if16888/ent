@@ -76,6 +76,7 @@ Current `ENT` submodules:
 - `SCR`
 - `DBS`
 - `LOG`
+- `SHM`
 
 ## Generated Macros
 
@@ -94,6 +95,7 @@ ENT_SOCK_CONNECT_FAILED
 ENT_TMR_NOT_INITIALIZED
 ENT_TPL_WORKER_CREATEFAIL
 ENT_LOG_OK
+ENT_SHM_BAD_ARGUMENT
 ```
 
 Generated files:
