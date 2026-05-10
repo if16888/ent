@@ -36,6 +36,17 @@ The log module now uses the repository-wide `msg/ent.msg` message-code system. I
 | `ENT_LogCtxCloseHandle()` | `ENT_SYS_NORMAL` | N/A | N/A | `ENT_LOG_NOT_INITIALIZED` | `ENT_LOG_BAD_HANDLE` for invalid context/handle relationship | `ENT_LOG_IN_USE` when the handle is already closing | N/A | N/A | N/A | `ENT_LOG_THREAD_FAILED` | `ENT_LOG_IO_FAILED` |
 | `ENT_LogCtxRaw()` / level-specific `ENT_LogCtx*()` | `ENT_SYS_NORMAL` | `ENT_LOG_NON_FATAL` when filtered by log level | `ENT_LOG_BAD_ARGUMENT` for malformed format input | `ENT_LOG_NOT_INITIALIZED` | `ENT_LOG_BAD_HANDLE` for invalid context/handle relationship | `ENT_LOG_IN_USE` when the handle is closing | `ENT_LOG_ALLOC_FAILED` when format expansion or line buffering fails | N/A | `ENT_LOG_FORMAT_FAILED` for format/prefix failures | N/A | `ENT_LOG_IO_FAILED` for write/flush failures |
 
+## Context Handle Ownership
+
+`ENT_LOG_CTX` APIs enforce same-context handle ownership:
+
+- `ENT_LogCtxInitHandle(ctx, &handle, ...)` creates a handle owned by `ctx`.
+- `ENT_LogCtxSetOption(ctx, handle, ...)`, `ENT_LogCtxCloseHandle(ctx, handle)`, and `ENT_LogCtxRaw()` / level-specific `ENT_LogCtx*()` only accept handles owned by the same `ctx`.
+- An empty context has no owned handle and cannot proxy the default handle or another context's handle.
+- Passing a foreign context-owned handle, a non-context explicit handle, or `NULL` default-handle proxy to a context API returns `ENT_LOG_BAD_HANDLE`.
+- Use the non-context `ENT_LogSetOption()`, `ENT_LogCloseHandle()`, and `ENT_LogRaw()` / level-specific `ENT_Log*()` APIs for the default handle and handles created by `ENT_LogInitHandle()`.
+- `ENT_LogCtxClose(ctx)` closes the context and automatically closes its live context-owned handle before releasing the context.
+
 ## Lifecycle Summary
 
 - `ACTIVE`: writes and option updates are allowed.

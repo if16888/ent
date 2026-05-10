@@ -591,6 +591,17 @@ process
 
 `ENT_LogClose()` 只负责 service 级别资源收口，不会替代 `ENT_LogCloseHandle()` 去强行回收仍在使用中的句柄。
 
+#### `ENT_LogCtx*()` 的 ownership 语义
+
+显式 context API 只能操作同一个 context 创建的句柄：
+
+- `ENT_LogCtxInitHandle(ctx, &handle, ...)` 创建由 `ctx` 拥有的句柄
+- `ENT_LogCtxSetOption()`、`ENT_LogCtxCloseHandle()` 和 `ENT_LogCtxRaw/Fatal/Error/Warn/Print/Debug()` 只接受同一个 `ctx` 拥有的句柄
+- 空 context 不能代理默认句柄，也不能操作其他 context 的句柄
+- 将 foreign handle、非 context 显式句柄或默认句柄 `NULL` 传给 context API，会返回 `ENT_LOG_BAD_HANDLE`
+- 默认句柄和 `ENT_LogInitHandle()` 创建的非 context 显式句柄，应使用非 context 的 `ENT_Log*()` API
+- `ENT_LogCtxClose(ctx)` 会在释放 context 前自动关闭仍然 live 的 context-owned handle
+
 #### closing 状态下的拒绝行为
 
 日志句柄进入 `CLOSING` 后：
