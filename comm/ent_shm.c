@@ -38,7 +38,7 @@
 struct ENT_SharedMap
 {
     void*              ptr;
-    unsigned long long size;
+    ENT_SIZE           size;
     ENT_SharedMapMode  mode;
     int                memory_locked;
 #ifdef WIN32
@@ -54,10 +54,10 @@ static int iENT_SharedMapRelease(ENT_SharedMap* map);
 
 #ifdef WIN32
 static int iENT_SharedMapOpenWindows(const ENT_SharedMapOptions* options, ENT_SharedMap** out_map);
-static int iENT_SharedMapFlushWindows(ENT_SharedMap* map, unsigned long long offset, unsigned long long length);
+static int iENT_SharedMapFlushWindows(ENT_SharedMap* map, ENT_OFFSET offset, ENT_SIZE length);
 #else
 static int iENT_SharedMapOpenPosix(const ENT_SharedMapOptions* options, ENT_SharedMap** out_map);
-static int iENT_SharedMapFlushPosix(ENT_SharedMap* map, unsigned long long offset, unsigned long long length);
+static int iENT_SharedMapFlushPosix(ENT_SharedMap* map, ENT_OFFSET offset, ENT_SIZE length);
 #endif
 
 static int iENT_SharedMapValidateOptions(const ENT_SharedMapOptions* options)
@@ -73,8 +73,15 @@ static int iENT_SharedMapValidateOptions(const ENT_SharedMapOptions* options)
         return -1;
     }
 
+    if((options->flags & ~(ENT_SHM_F_CREATE_IF_MISSING |
+                           ENT_SHM_F_TRUNCATE_IF_EXISTS |
+                           ENT_SHM_F_LOCK_MEMORY)) != 0)
+    {
+        return -1;
+    }
+
     if(options->mode == ENT_SHM_MODE_READ_ONLY &&
-       (options->create_if_missing || options->truncate_if_exists))
+       (options->flags & (ENT_SHM_F_CREATE_IF_MISSING | ENT_SHM_F_TRUNCATE_IF_EXISTS)))
     {
         return -1;
     }
@@ -82,9 +89,9 @@ static int iENT_SharedMapValidateOptions(const ENT_SharedMapOptions* options)
     return 0;
 }
 
-static int iENT_SharedMapValidateNativeSize(unsigned long long size, size_t* native_size)
+static int iENT_SharedMapValidateNativeSize(ENT_SIZE size, size_t* native_size)
 {
-    if(native_size == NULL || size == 0ULL || size > (unsigned long long)SIZE_MAX)
+    if(native_size == NULL || size == 0ULL || size > (ENT_SIZE)SIZE_MAX)
     {
         return -1;
     }
@@ -177,13 +184,17 @@ static int iENT_SharedMapOpenWindows(const ENT_SharedMapOptions* options, ENT_Sh
     DWORD protect = 0;
     DWORD map_access = 0;
     LARGE_INTEGER file_size;
-    unsigned long long final_size = 0ULL;
+    ENT_SIZE final_size = 0ULL;
     size_t native_size = 0;
     BOOL created_new = FALSE;
+    int create_if_missing = 0;
+    int truncate_if_exists = 0;
 
+    create_if_missing = (options->flags & ENT_SHM_F_CREATE_IF_MISSING) != 0;
+    truncate_if_exists = (options->flags & ENT_SHM_F_TRUNCATE_IF_EXISTS) != 0;
     desired_access = (options->mode == ENT_SHM_MODE_READ_ONLY) ?
         GENERIC_READ : (GENERIC_READ | GENERIC_WRITE);
-    creation_disposition = options->create_if_missing ? OPEN_ALWAYS : OPEN_EXISTING;
+    creation_disposition = create_if_missing ? OPEN_ALWAYS : OPEN_EXISTING;
 
     file_handle = CreateFileA(options->path,
                               desired_access,
@@ -205,21 +216,21 @@ static int iENT_SharedMapOpenWindows(const ENT_SharedMapOptions* options, ENT_Sh
             CloseHandle(file_handle);
             return -1;
         }
-        final_size = (unsigned long long)file_size.QuadPart;
+        final_size = (ENT_SIZE)file_size.QuadPart;
     }
     else
     {
-        if(options->create_if_missing &&
+        if(create_if_missing &&
            create_error != ERROR_ALREADY_EXISTS &&
            create_error != ERROR_FILE_EXISTS)
         {
             created_new = TRUE;
         }
 
-        if(options->truncate_if_exists || created_new)
+        if(truncate_if_exists || created_new)
         {
             final_size = options->size;
-            if(final_size == 0ULL || final_size > (unsigned long long)LLONG_MAX)
+            if(final_size == 0ULL || final_size > (ENT_SIZE)LLONG_MAX)
             {
                 CloseHandle(file_handle);
                 return -1;
@@ -240,7 +251,7 @@ static int iENT_SharedMapOpenWindows(const ENT_SharedMapOptions* options, ENT_Sh
                 CloseHandle(file_handle);
                 return -1;
             }
-            final_size = (unsigned long long)file_size.QuadPart;
+            final_size = (ENT_SIZE)file_size.QuadPart;
         }
     }
 
@@ -290,7 +301,7 @@ static int iENT_SharedMapOpenWindows(const ENT_SharedMapOptions* options, ENT_Sh
     map->file_handle = file_handle;
     map->mapping_handle = mapping_handle;
     map->memory_locked = 0;
-    if(options->lock_memory)
+    if(options->flags & ENT_SHM_F_LOCK_MEMORY)
     {
         if(VirtualLock(view_ptr, native_size))
         {
@@ -302,7 +313,7 @@ static int iENT_SharedMapOpenWindows(const ENT_SharedMapOptions* options, ENT_Sh
     return 0;
 }
 
-static int iENT_SharedMapFlushWindows(ENT_SharedMap* map, unsigned long long offset, unsigned long long length)
+static int iENT_SharedMapFlushWindows(ENT_SharedMap* map, ENT_OFFSET offset, ENT_SIZE length)
 {
     SIZE_T native_length = 0;
     void* flush_ptr = NULL;
@@ -354,10 +365,14 @@ static int iENT_SharedMapOpenPosix(const ENT_SharedMapOptions* options, ENT_Shar
     int fd = -1;
     int open_flags = 0;
     int prot = 0;
-    unsigned long long final_size = 0ULL;
+    ENT_SIZE final_size = 0ULL;
     size_t native_size = 0;
     void* view_ptr = NULL;
+    int create_if_missing = 0;
+    int truncate_if_exists = 0;
 
+    create_if_missing = (options->flags & ENT_SHM_F_CREATE_IF_MISSING) != 0;
+    truncate_if_exists = (options->flags & ENT_SHM_F_TRUNCATE_IF_EXISTS) != 0;
     if(stat(options->path, &st) == 0)
     {
         file_existed = 1;
@@ -381,11 +396,11 @@ static int iENT_SharedMapOpenPosix(const ENT_SharedMapOptions* options, ENT_Shar
     {
         open_flags = O_RDWR;
         prot = PROT_READ | PROT_WRITE;
-        if(options->create_if_missing)
+        if(create_if_missing)
         {
             open_flags |= O_CREAT;
         }
-        if(!file_existed && !options->create_if_missing)
+        if(!file_existed && !create_if_missing)
         {
             return -1;
         }
@@ -404,14 +419,14 @@ static int iENT_SharedMapOpenPosix(const ENT_SharedMapOptions* options, ENT_Shar
             close(fd);
             return -1;
         }
-        final_size = (unsigned long long)st.st_size;
+        final_size = (ENT_SIZE)st.st_size;
     }
     else
     {
-        if(options->truncate_if_exists || !file_existed)
+        if(truncate_if_exists || !file_existed)
         {
             final_size = options->size;
-            if(final_size == 0ULL || final_size > (unsigned long long)LLONG_MAX)
+            if(final_size == 0ULL || final_size > (ENT_SIZE)LLONG_MAX)
             {
                 close(fd);
                 return -1;
@@ -429,7 +444,7 @@ static int iENT_SharedMapOpenPosix(const ENT_SharedMapOptions* options, ENT_Shar
                 close(fd);
                 return -1;
             }
-            final_size = (unsigned long long)st.st_size;
+            final_size = (ENT_SIZE)st.st_size;
         }
     }
 
@@ -460,7 +475,7 @@ static int iENT_SharedMapOpenPosix(const ENT_SharedMapOptions* options, ENT_Shar
     map->mode = options->mode;
     map->fd = fd;
     map->memory_locked = 0;
-    if(options->lock_memory)
+    if(options->flags & ENT_SHM_F_LOCK_MEMORY)
     {
         if(mlock(view_ptr, native_size) == 0)
         {
@@ -472,9 +487,9 @@ static int iENT_SharedMapOpenPosix(const ENT_SharedMapOptions* options, ENT_Shar
     return 0;
 }
 
-static int iENT_SharedMapFlushPosix(ENT_SharedMap* map, unsigned long long offset, unsigned long long length)
+static int iENT_SharedMapFlushPosix(ENT_SharedMap* map, ENT_OFFSET offset, ENT_SIZE length)
 {
-    unsigned long long flush_offset = 0ULL;
+    ENT_OFFSET flush_offset = 0ULL;
     size_t native_length = 0;
     void* flush_ptr = NULL;
 
@@ -543,7 +558,7 @@ ENT_PUBLIC void* ENT_SharedMapPtr(ENT_SharedMap* map)
     return map->ptr;
 }
 
-ENT_PUBLIC unsigned long long ENT_SharedMapSize(ENT_SharedMap* map)
+ENT_PUBLIC ENT_SIZE ENT_SharedMapSize(ENT_SharedMap* map)
 {
     if(map == NULL)
     {
@@ -553,7 +568,7 @@ ENT_PUBLIC unsigned long long ENT_SharedMapSize(ENT_SharedMap* map)
     return map->size;
 }
 
-ENT_PUBLIC int ENT_SharedMapFlush(ENT_SharedMap* map, unsigned long long offset, unsigned long long length)
+ENT_PUBLIC int ENT_SharedMapFlush(ENT_SharedMap* map, ENT_OFFSET offset, ENT_SIZE length)
 {
     if(map == NULL)
     {

@@ -32,20 +32,22 @@ typedef enum ENT_SharedMapMode
     ENT_SHM_MODE_READ_WRITE = 1
 } ENT_SharedMapMode;
 
+#define ENT_SHM_F_CREATE_IF_MISSING ((ENT_FLAGS)0x00000001u)
+#define ENT_SHM_F_TRUNCATE_IF_EXISTS ((ENT_FLAGS)0x00000002u)
+#define ENT_SHM_F_LOCK_MEMORY        ((ENT_FLAGS)0x00000004u)
+
 typedef struct ENT_SharedMapOptions
 {
     const char* path;
-    unsigned long long size;
+    ENT_SIZE size;
     ENT_SharedMapMode mode;
-    int create_if_missing;
-    int truncate_if_exists;
-    int lock_memory;
+    ENT_FLAGS flags;
 } ENT_SharedMapOptions;
 
 ENT_PUBLIC int ENT_SharedMapOpen(const ENT_SharedMapOptions* options, ENT_SharedMap** out_map);
 ENT_PUBLIC void* ENT_SharedMapPtr(ENT_SharedMap* map);
-ENT_PUBLIC unsigned long long ENT_SharedMapSize(ENT_SharedMap* map);
-ENT_PUBLIC int ENT_SharedMapFlush(ENT_SharedMap* map, unsigned long long offset, unsigned long long length);
+ENT_PUBLIC ENT_SIZE ENT_SharedMapSize(ENT_SharedMap* map);
+ENT_PUBLIC int ENT_SharedMapFlush(ENT_SharedMap* map, ENT_OFFSET offset, ENT_SIZE length);
 ENT_PUBLIC int ENT_SharedMapClose(ENT_SharedMap* map);
 
 #ifdef __cplusplus

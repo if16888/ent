@@ -33,7 +33,7 @@ code can reuse the same implementation on Windows, Linux, and macOS.
   - `munmap`
   - `close`
 
-`lock_memory` is best effort:
+`ENT_SHM_F_LOCK_MEMORY` is best effort:
 
 - Windows uses `VirtualLock`
 - POSIX uses `mlock`
@@ -55,11 +55,9 @@ int main(void)
 
     memset(&opts, 0, sizeof(opts));
     opts.path = "demo.fgnshm";
-    opts.size = 4096ULL;
+    opts.size = (ENT_SIZE)4096u;
     opts.mode = ENT_SHM_MODE_READ_WRITE;
-    opts.create_if_missing = 1;
-    opts.truncate_if_exists = 1;
-    opts.lock_memory = 0;
+    opts.flags = ENT_SHM_F_CREATE_IF_MISSING | ENT_SHM_F_TRUNCATE_IF_EXISTS;
 
     if(ENT_SharedMapOpen(&opts, &map) != 0)
     {
@@ -68,7 +66,7 @@ int main(void)
 
     data = (char*)ENT_SharedMapPtr(map);
     strcpy(data, "hello snapshot");
-    ENT_SharedMapFlush(map, 0ULL, 0ULL);
+    ENT_SharedMapFlush(map, (ENT_OFFSET)0u, (ENT_SIZE)0u);
     ENT_SharedMapClose(map);
     return 0;
 }
@@ -83,11 +81,9 @@ const char* data = NULL;
 
 memset(&opts, 0, sizeof(opts));
 opts.path = "demo.fgnshm";
-opts.size = 0ULL;
+opts.size = (ENT_SIZE)0u;
 opts.mode = ENT_SHM_MODE_READ_ONLY;
-opts.create_if_missing = 0;
-opts.truncate_if_exists = 0;
-opts.lock_memory = 0;
+opts.flags = 0;
 
 if(ENT_SharedMapOpen(&opts, &map) == 0)
 {
@@ -116,4 +112,3 @@ the snapshot schema and update policy.
 - No typed or versioned snapshot schema yet.
 - No crash-consistent double-buffer or journal yet.
 - No UTF-16 Windows path support yet; the API currently uses `CreateFileA`.
-
