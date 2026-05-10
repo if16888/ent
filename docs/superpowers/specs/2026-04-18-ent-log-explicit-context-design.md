@@ -153,6 +153,14 @@ An advanced caller can create a private context and keep it isolated:
 
 That is the main new capability: the default model stays simple, but it is no longer the only model.
 
+Current ownership contract:
+
+- A handle is owned by a context only when it is created by `ENT_LogCtxInitHandle()` for that context.
+- `ENT_LogCtxSetOption()`, `ENT_LogCtxCloseHandle()`, and `ENT_LogCtxRaw()` / level-specific `ENT_LogCtx*()` require a handle owned by the same context.
+- An empty context must not proxy the default handle or operate on a handle owned by another context.
+- Context APIs reject foreign handles, non-context explicit handles, and the `NULL` default-handle proxy with `ENT_LOG_BAD_HANDLE`.
+- The compatibility `ENT_Log*()` APIs remain the path for default-handle usage and handles created by `ENT_LogInitHandle()`.
+
 ## 6. Migration Plan
 
 ### Phase 1: Introduce the context layer

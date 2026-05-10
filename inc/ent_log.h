@@ -55,6 +55,14 @@ ENT_PUBLIC MSG_ID_T  ENT_LogClose();
 
 ENT_PUBLIC MSG_ID_T  ENT_LogInitHandle(ENT_LOG* pLogHandle,const char* moduleName,const char* logPath);
 
+/*
+ * Explicit-context APIs only operate on handles owned by the same context.
+ * A handle becomes context-owned when it is created by ENT_LogCtxInitHandle().
+ * ENT_LogCtxSetOption(), ENT_LogCtxCloseHandle(), and ENT_LogCtx* write APIs
+ * reject empty contexts, foreign handles, default handles, and non-context
+ * explicit handles with ENT_LOG_BAD_HANDLE. Use the non-context ENT_Log* APIs
+ * for default handles and handles created by ENT_LogInitHandle().
+ */
 ENT_PUBLIC MSG_ID_T  ENT_LogCtxInit(ENT_LOG_CTX* pCtx);
 
 ENT_PUBLIC MSG_ID_T  ENT_LogCtxClose(ENT_LOG_CTX ctx);
