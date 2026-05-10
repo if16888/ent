@@ -33,6 +33,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "ent_msg.h"
 #include "ent_shm.h"
 
 struct ENT_SharedMap
@@ -49,64 +50,64 @@ struct ENT_SharedMap
 #endif
 };
 
-static int iENT_SharedMapValidateOptions(const ENT_SharedMapOptions* options);
-static int iENT_SharedMapRelease(ENT_SharedMap* map);
+static MSG_ID_T iENT_SharedMapValidateOptions(const ENT_SharedMapOptions* options);
+static MSG_ID_T iENT_SharedMapRelease(ENT_SharedMap* map);
 
 #ifdef WIN32
-static int iENT_SharedMapOpenWindows(const ENT_SharedMapOptions* options, ENT_SharedMap** out_map);
-static int iENT_SharedMapFlushWindows(ENT_SharedMap* map, ENT_OFFSET offset, ENT_SIZE length);
+static MSG_ID_T iENT_SharedMapOpenWindows(const ENT_SharedMapOptions* options, ENT_SharedMap** out_map);
+static MSG_ID_T iENT_SharedMapFlushWindows(ENT_SharedMap* map, ENT_OFFSET offset, ENT_SIZE length);
 #else
-static int iENT_SharedMapOpenPosix(const ENT_SharedMapOptions* options, ENT_SharedMap** out_map);
-static int iENT_SharedMapFlushPosix(ENT_SharedMap* map, ENT_OFFSET offset, ENT_SIZE length);
+static MSG_ID_T iENT_SharedMapOpenPosix(const ENT_SharedMapOptions* options, ENT_SharedMap** out_map);
+static MSG_ID_T iENT_SharedMapFlushPosix(ENT_SharedMap* map, ENT_OFFSET offset, ENT_SIZE length);
 #endif
 
-static int iENT_SharedMapValidateOptions(const ENT_SharedMapOptions* options)
+static MSG_ID_T iENT_SharedMapValidateOptions(const ENT_SharedMapOptions* options)
 {
     if(options == NULL || options->path == NULL || options->path[0] == '\0')
     {
-        return -1;
+        return ENT_SHM_BAD_ARGUMENT;
     }
 
     if(options->mode != ENT_SHM_MODE_READ_ONLY &&
        options->mode != ENT_SHM_MODE_READ_WRITE)
     {
-        return -1;
+        return ENT_SHM_BAD_ARGUMENT;
     }
 
     if((options->flags & ~(ENT_SHM_F_CREATE_IF_MISSING |
                            ENT_SHM_F_TRUNCATE_IF_EXISTS |
                            ENT_SHM_F_LOCK_MEMORY)) != 0)
     {
-        return -1;
+        return ENT_SHM_BAD_ARGUMENT;
     }
 
     if(options->mode == ENT_SHM_MODE_READ_ONLY &&
        (options->flags & (ENT_SHM_F_CREATE_IF_MISSING | ENT_SHM_F_TRUNCATE_IF_EXISTS)))
     {
-        return -1;
+        return ENT_SHM_BAD_ARGUMENT;
     }
 
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
-static int iENT_SharedMapValidateNativeSize(ENT_SIZE size, size_t* native_size)
+static MSG_ID_T iENT_SharedMapValidateNativeSize(ENT_SIZE size, size_t* native_size)
 {
     if(native_size == NULL || size == 0ULL || size > (ENT_SIZE)SIZE_MAX)
     {
-        return -1;
+        return ENT_SHM_BAD_SIZE;
     }
 
     *native_size = (size_t)size;
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
-static int iENT_SharedMapRelease(ENT_SharedMap* map)
+static MSG_ID_T iENT_SharedMapRelease(ENT_SharedMap* map)
 {
-    int sts = 0;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
 
     if(map == NULL)
     {
-        return 0;
+        return ENT_SYS_NORMAL;
     }
 
     if(map->ptr != NULL)
@@ -116,24 +117,24 @@ static int iENT_SharedMapRelease(ENT_SharedMap* map)
         {
             if(!VirtualUnlock(map->ptr, (SIZE_T)map->size))
             {
-                sts = -1;
+                sts = ENT_SHM_CLOSE_FAILED;
             }
         }
         if(!UnmapViewOfFile(map->ptr))
         {
-            sts = -1;
+            sts = ENT_SHM_CLOSE_FAILED;
         }
 #else
         if(map->memory_locked)
         {
             if(munlock(map->ptr, (size_t)map->size) != 0)
             {
-                sts = -1;
+                sts = ENT_SHM_CLOSE_FAILED;
             }
         }
         if(munmap(map->ptr, (size_t)map->size) != 0)
         {
-            sts = -1;
+            sts = ENT_SHM_CLOSE_FAILED;
         }
 #endif
         map->ptr = NULL;
@@ -144,7 +145,7 @@ static int iENT_SharedMapRelease(ENT_SharedMap* map)
     {
         if(!CloseHandle(map->mapping_handle))
         {
-            sts = -1;
+            sts = ENT_SHM_CLOSE_FAILED;
         }
         map->mapping_handle = NULL;
     }
@@ -152,7 +153,7 @@ static int iENT_SharedMapRelease(ENT_SharedMap* map)
     {
         if(!CloseHandle(map->file_handle))
         {
-            sts = -1;
+            sts = ENT_SHM_CLOSE_FAILED;
         }
         map->file_handle = INVALID_HANDLE_VALUE;
     }
@@ -161,7 +162,7 @@ static int iENT_SharedMapRelease(ENT_SharedMap* map)
     {
         if(close(map->fd) != 0)
         {
-            sts = -1;
+            sts = ENT_SHM_CLOSE_FAILED;
         }
         map->fd = -1;
     }
@@ -171,7 +172,7 @@ static int iENT_SharedMapRelease(ENT_SharedMap* map)
 }
 
 #ifdef WIN32
-static int iENT_SharedMapOpenWindows(const ENT_SharedMapOptions* options, ENT_SharedMap** out_map)
+static MSG_ID_T iENT_SharedMapOpenWindows(const ENT_SharedMapOptions* options, ENT_SharedMap** out_map)
 {
     ENT_SharedMap* map = NULL;
     HANDLE file_handle = INVALID_HANDLE_VALUE;
@@ -205,16 +206,21 @@ static int iENT_SharedMapOpenWindows(const ENT_SharedMapOptions* options, ENT_Sh
                               NULL);
     if(file_handle == INVALID_HANDLE_VALUE)
     {
-        return -1;
+        return ENT_SHM_PATH_FAILED;
     }
 
     create_error = GetLastError();
     if(options->mode == ENT_SHM_MODE_READ_ONLY)
     {
-        if(!GetFileSizeEx(file_handle, &file_size) || file_size.QuadPart <= 0)
+        if(!GetFileSizeEx(file_handle, &file_size))
         {
             CloseHandle(file_handle);
-            return -1;
+            return ENT_SHM_PATH_FAILED;
+        }
+        if(file_size.QuadPart <= 0)
+        {
+            CloseHandle(file_handle);
+            return ENT_SHM_BAD_SIZE;
         }
         final_size = (ENT_SIZE)file_size.QuadPart;
     }
@@ -233,7 +239,7 @@ static int iENT_SharedMapOpenWindows(const ENT_SharedMapOptions* options, ENT_Sh
             if(final_size == 0ULL || final_size > (ENT_SIZE)LLONG_MAX)
             {
                 CloseHandle(file_handle);
-                return -1;
+                return ENT_SHM_BAD_SIZE;
             }
 
             file_size.QuadPart = (LONGLONG)final_size;
@@ -241,24 +247,29 @@ static int iENT_SharedMapOpenWindows(const ENT_SharedMapOptions* options, ENT_Sh
                !SetEndOfFile(file_handle))
             {
                 CloseHandle(file_handle);
-                return -1;
+                return ENT_SHM_RESIZE_FAILED;
             }
         }
         else
         {
-            if(!GetFileSizeEx(file_handle, &file_size) || file_size.QuadPart <= 0)
+            if(!GetFileSizeEx(file_handle, &file_size))
             {
                 CloseHandle(file_handle);
-                return -1;
+                return ENT_SHM_PATH_FAILED;
+            }
+            if(file_size.QuadPart <= 0)
+            {
+                CloseHandle(file_handle);
+                return ENT_SHM_BAD_SIZE;
             }
             final_size = (ENT_SIZE)file_size.QuadPart;
         }
     }
 
-    if(iENT_SharedMapValidateNativeSize(final_size, &native_size) != 0)
+    if(iENT_SharedMapValidateNativeSize(final_size, &native_size) != ENT_SYS_NORMAL)
     {
         CloseHandle(file_handle);
-        return -1;
+        return ENT_SHM_BAD_SIZE;
     }
 
     protect = (options->mode == ENT_SHM_MODE_READ_ONLY) ? PAGE_READONLY : PAGE_READWRITE;
@@ -274,7 +285,7 @@ static int iENT_SharedMapOpenWindows(const ENT_SharedMapOptions* options, ENT_Sh
     if(mapping_handle == NULL)
     {
         CloseHandle(file_handle);
-        return -1;
+        return ENT_SHM_MAP_FAILED;
     }
 
     view_ptr = MapViewOfFile(mapping_handle, map_access, 0, 0, native_size);
@@ -282,7 +293,7 @@ static int iENT_SharedMapOpenWindows(const ENT_SharedMapOptions* options, ENT_Sh
     {
         CloseHandle(mapping_handle);
         CloseHandle(file_handle);
-        return -1;
+        return ENT_SHM_MAP_FAILED;
     }
 
     map = (ENT_SharedMap*)malloc(sizeof(*map));
@@ -291,7 +302,7 @@ static int iENT_SharedMapOpenWindows(const ENT_SharedMapOptions* options, ENT_Sh
         UnmapViewOfFile(view_ptr);
         CloseHandle(mapping_handle);
         CloseHandle(file_handle);
-        return -1;
+        return ENT_SHM_ALLOC_FAILED;
     }
 
     memset(map, 0, sizeof(*map));
@@ -310,17 +321,17 @@ static int iENT_SharedMapOpenWindows(const ENT_SharedMapOptions* options, ENT_Sh
     }
 
     *out_map = map;
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
-static int iENT_SharedMapFlushWindows(ENT_SharedMap* map, ENT_OFFSET offset, ENT_SIZE length)
+static MSG_ID_T iENT_SharedMapFlushWindows(ENT_SharedMap* map, ENT_OFFSET offset, ENT_SIZE length)
 {
     SIZE_T native_length = 0;
     void* flush_ptr = NULL;
 
     if(map == NULL || map->ptr == NULL)
     {
-        return -1;
+        return ENT_SHM_BAD_ARGUMENT;
     }
 
     if(length == 0ULL)
@@ -332,32 +343,32 @@ static int iENT_SharedMapFlushWindows(ENT_SharedMap* map, ENT_OFFSET offset, ENT
     {
         if(offset > map->size || length > (map->size - offset))
         {
-            return -1;
+            return ENT_SHM_RANGE_FAILED;
         }
-        if(iENT_SharedMapValidateNativeSize(length, &native_length) != 0)
+        if(iENT_SharedMapValidateNativeSize(length, &native_length) != ENT_SYS_NORMAL)
         {
-            return -1;
+            return ENT_SHM_BAD_SIZE;
         }
         flush_ptr = (void*)((unsigned char*)map->ptr + (SIZE_T)offset);
     }
 
     if(!FlushViewOfFile(flush_ptr, native_length))
     {
-        return -1;
+        return ENT_SHM_FLUSH_FAILED;
     }
 
     if(map->mode == ENT_SHM_MODE_READ_WRITE && map->file_handle != INVALID_HANDLE_VALUE)
     {
         if(!FlushFileBuffers(map->file_handle))
         {
-            return -1;
+            return ENT_SHM_FLUSH_FAILED;
         }
     }
 
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 #else
-static int iENT_SharedMapOpenPosix(const ENT_SharedMapOptions* options, ENT_SharedMap** out_map)
+static MSG_ID_T iENT_SharedMapOpenPosix(const ENT_SharedMapOptions* options, ENT_SharedMap** out_map)
 {
     ENT_SharedMap* map = NULL;
     struct stat st;
@@ -379,14 +390,14 @@ static int iENT_SharedMapOpenPosix(const ENT_SharedMapOptions* options, ENT_Shar
     }
     else if(errno != ENOENT)
     {
-        return -1;
+        return ENT_SHM_PATH_FAILED;
     }
 
     if(options->mode == ENT_SHM_MODE_READ_ONLY)
     {
         if(!file_existed)
         {
-            return -1;
+            return ENT_SHM_PATH_FAILED;
         }
 
         open_flags = O_RDONLY;
@@ -402,22 +413,27 @@ static int iENT_SharedMapOpenPosix(const ENT_SharedMapOptions* options, ENT_Shar
         }
         if(!file_existed && !create_if_missing)
         {
-            return -1;
+            return ENT_SHM_PATH_FAILED;
         }
     }
 
     fd = open(options->path, open_flags, 0666);
     if(fd < 0)
     {
-        return -1;
+        return ENT_SHM_PATH_FAILED;
     }
 
     if(options->mode == ENT_SHM_MODE_READ_ONLY)
     {
-        if(fstat(fd, &st) != 0 || st.st_size <= 0)
+        if(fstat(fd, &st) != 0)
         {
             close(fd);
-            return -1;
+            return ENT_SHM_PATH_FAILED;
+        }
+        if(st.st_size <= 0)
+        {
+            close(fd);
+            return ENT_SHM_BAD_SIZE;
         }
         final_size = (ENT_SIZE)st.st_size;
     }
@@ -429,36 +445,41 @@ static int iENT_SharedMapOpenPosix(const ENT_SharedMapOptions* options, ENT_Shar
             if(final_size == 0ULL || final_size > (ENT_SIZE)LLONG_MAX)
             {
                 close(fd);
-                return -1;
+                return ENT_SHM_BAD_SIZE;
             }
             if(ftruncate(fd, (off_t)final_size) != 0)
             {
                 close(fd);
-                return -1;
+                return ENT_SHM_RESIZE_FAILED;
             }
         }
         else
         {
-            if(fstat(fd, &st) != 0 || st.st_size <= 0)
+            if(fstat(fd, &st) != 0)
             {
                 close(fd);
-                return -1;
+                return ENT_SHM_PATH_FAILED;
+            }
+            if(st.st_size <= 0)
+            {
+                close(fd);
+                return ENT_SHM_BAD_SIZE;
             }
             final_size = (ENT_SIZE)st.st_size;
         }
     }
 
-    if(iENT_SharedMapValidateNativeSize(final_size, &native_size) != 0)
+    if(iENT_SharedMapValidateNativeSize(final_size, &native_size) != ENT_SYS_NORMAL)
     {
         close(fd);
-        return -1;
+        return ENT_SHM_BAD_SIZE;
     }
 
     view_ptr = mmap(NULL, native_size, prot, MAP_SHARED, fd, 0);
     if(view_ptr == MAP_FAILED)
     {
         close(fd);
-        return -1;
+        return ENT_SHM_MAP_FAILED;
     }
 
     map = (ENT_SharedMap*)malloc(sizeof(*map));
@@ -466,7 +487,7 @@ static int iENT_SharedMapOpenPosix(const ENT_SharedMapOptions* options, ENT_Shar
     {
         munmap(view_ptr, native_size);
         close(fd);
-        return -1;
+        return ENT_SHM_ALLOC_FAILED;
     }
 
     memset(map, 0, sizeof(*map));
@@ -484,10 +505,10 @@ static int iENT_SharedMapOpenPosix(const ENT_SharedMapOptions* options, ENT_Shar
     }
 
     *out_map = map;
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 
-static int iENT_SharedMapFlushPosix(ENT_SharedMap* map, ENT_OFFSET offset, ENT_SIZE length)
+static MSG_ID_T iENT_SharedMapFlushPosix(ENT_SharedMap* map, ENT_OFFSET offset, ENT_SIZE length)
 {
     ENT_OFFSET flush_offset = 0ULL;
     size_t native_length = 0;
@@ -495,41 +516,41 @@ static int iENT_SharedMapFlushPosix(ENT_SharedMap* map, ENT_OFFSET offset, ENT_S
 
     if(map == NULL || map->ptr == NULL)
     {
-        return -1;
+        return ENT_SHM_BAD_ARGUMENT;
     }
 
     if(length == 0ULL)
     {
         flush_offset = 0ULL;
-        if(iENT_SharedMapValidateNativeSize(map->size, &native_length) != 0)
+        if(iENT_SharedMapValidateNativeSize(map->size, &native_length) != ENT_SYS_NORMAL)
         {
-            return -1;
+            return ENT_SHM_BAD_SIZE;
         }
     }
     else
     {
         if(offset > map->size || length > (map->size - offset))
         {
-            return -1;
+            return ENT_SHM_RANGE_FAILED;
         }
         flush_offset = offset;
-        if(iENT_SharedMapValidateNativeSize(length, &native_length) != 0)
+        if(iENT_SharedMapValidateNativeSize(length, &native_length) != ENT_SYS_NORMAL)
         {
-            return -1;
+            return ENT_SHM_BAD_SIZE;
         }
     }
 
     flush_ptr = (void*)((unsigned char*)map->ptr + (size_t)flush_offset);
     if(msync(flush_ptr, native_length, MS_SYNC) != 0)
     {
-        return -1;
+        return ENT_SHM_FLUSH_FAILED;
     }
 
-    return 0;
+    return ENT_SYS_NORMAL;
 }
 #endif
 
-ENT_PUBLIC int ENT_SharedMapOpen(const ENT_SharedMapOptions* options, ENT_SharedMap** out_map)
+ENT_PUBLIC MSG_ID_T ENT_SharedMapOpen(const ENT_SharedMapOptions* options, ENT_SharedMap** out_map)
 {
     if(out_map != NULL)
     {
@@ -538,7 +559,7 @@ ENT_PUBLIC int ENT_SharedMapOpen(const ENT_SharedMapOptions* options, ENT_Shared
 
     if(iENT_SharedMapValidateOptions(options) != 0 || out_map == NULL)
     {
-        return -1;
+        return ENT_SHM_BAD_ARGUMENT;
     }
 
 #ifdef WIN32
@@ -568,11 +589,11 @@ ENT_PUBLIC ENT_SIZE ENT_SharedMapSize(ENT_SharedMap* map)
     return map->size;
 }
 
-ENT_PUBLIC int ENT_SharedMapFlush(ENT_SharedMap* map, ENT_OFFSET offset, ENT_SIZE length)
+ENT_PUBLIC MSG_ID_T ENT_SharedMapFlush(ENT_SharedMap* map, ENT_OFFSET offset, ENT_SIZE length)
 {
     if(map == NULL)
     {
-        return -1;
+        return ENT_SHM_BAD_ARGUMENT;
     }
 
 #ifdef WIN32
@@ -582,17 +603,17 @@ ENT_PUBLIC int ENT_SharedMapFlush(ENT_SharedMap* map, ENT_OFFSET offset, ENT_SIZ
 #endif
 }
 
-ENT_PUBLIC int ENT_SharedMapClose(ENT_SharedMap* map)
+ENT_PUBLIC MSG_ID_T ENT_SharedMapClose(ENT_SharedMap* map)
 {
-    int sts = 0;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
 
     if(map == NULL)
     {
-        return 0;
+        return ENT_SYS_NORMAL;
     }
 
     sts = iENT_SharedMapRelease(map);
     memset(map, 0, sizeof(*map));
     free(map);
-    return (sts < 0) ? -1 : 0;
+    return sts;
 }

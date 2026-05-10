@@ -102,11 +102,12 @@ Windows native build 必须保持 toolchain 环境 shell-local：
 - `module` 和 `submodule` 必须大写，长度不得超过 4。
 - `module` 优先使用 3 个字符，便于长期一致性。
 - message symbol 保持 `ENT_<SUBMODULE>_<NAME>` 约定。
-- 当前 ENT submodules：`SYS`、`INIT`、`RT`、`THRD`、`UTHD`、`SOCK`、`TMR`、`TPL`、`DLL`、`SCR`、`DBS`、`LOG`。
+- 当前 ENT submodules：`SYS`、`INIT`、`RT`、`THRD`、`UTHD`、`SOCK`、`TMR`、`TPL`、`DLL`、`SCR`、`DBS`、`LOG`、`SHM`。
 - `SCR` 预留给 script runtime 生命周期与执行错误。
 - `DBS` 预留给 database service 与 backend 生命周期错误。
 - 参数化 DB API 也使用 `DBS` submodule；扩展 DB surface 时保持 `BAD_PARAMS`、`PARAM_COUNT`、`PREPARE_FAILED`、`BIND_FAILED`、`EXEC_FAILED` 与 `msg/ent.msg` 对齐。
 - `LOG` 预留给 log service 与 handle 生命周期错误。
+- `SHM` 预留给 shared memory service、file mapping 与 flush / close 生命周期错误。
 - 任何 message-code 变更，包括新增、删除、重命名 submodule、code 或 text，都必须在同一变更集中同步本文档。
 
 ## Testing Guidelines

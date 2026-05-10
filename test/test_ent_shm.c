@@ -106,14 +106,14 @@ static int test_invalid_args(void)
     options.mode = ENT_SHM_MODE_READ_WRITE;
     options.flags = ENT_SHM_F_CREATE_IF_MISSING | ENT_SHM_F_TRUNCATE_IF_EXISTS;
 
-    if(expect_true(ENT_SharedMapOpen(NULL, &map) < 0,
+    if(expect_true(ENT_SharedMapOpen(NULL, &map) == ENT_SHM_BAD_ARGUMENT,
                    "ENT_SharedMapOpen should reject NULL options") != 0)
     {
         cleanup_temp_path(path);
         return 1;
     }
 
-    if(expect_true(ENT_SharedMapOpen(&options, NULL) < 0,
+    if(expect_true(ENT_SharedMapOpen(&options, NULL) == ENT_SHM_BAD_ARGUMENT,
                    "ENT_SharedMapOpen should reject NULL out_map") != 0)
     {
         cleanup_temp_path(path);
@@ -121,7 +121,7 @@ static int test_invalid_args(void)
     }
 
     options.path = NULL;
-    if(expect_true(ENT_SharedMapOpen(&options, &map) < 0,
+    if(expect_true(ENT_SharedMapOpen(&options, &map) == ENT_SHM_BAD_ARGUMENT,
                    "ENT_SharedMapOpen should reject NULL path") != 0)
     {
         cleanup_temp_path(path);
@@ -130,8 +130,8 @@ static int test_invalid_args(void)
 
     options.path = path;
     options.size = TEST_SHM_SIZE_ZERO;
-    options.flags = 0;
-    if(expect_true(ENT_SharedMapOpen(&options, &map) < 0,
+    options.flags = ENT_SHM_F_CREATE_IF_MISSING | ENT_SHM_F_TRUNCATE_IF_EXISTS;
+    if(expect_true(ENT_SharedMapOpen(&options, &map) == ENT_SHM_BAD_SIZE,
                    "ENT_SharedMapOpen should reject zero-sized missing files") != 0)
     {
         cleanup_temp_path(path);
@@ -140,15 +140,69 @@ static int test_invalid_args(void)
 
     options.size = TEST_SHM_SMALL_SIZE;
     options.flags = (ENT_FLAGS)0x80000000u;
-    if(expect_true(ENT_SharedMapOpen(&options, &map) < 0,
+    if(expect_true(ENT_SharedMapOpen(&options, &map) == ENT_SHM_BAD_ARGUMENT,
                    "ENT_SharedMapOpen should reject unknown flags") != 0)
     {
         cleanup_temp_path(path);
         return 1;
     }
 
-    if(expect_true(ENT_SharedMapClose(NULL) == 0,
+    if(expect_true(ENT_SharedMapFlush(NULL, TEST_SHM_OFFSET_ZERO, TEST_SHM_SIZE_ZERO) == ENT_SHM_BAD_ARGUMENT,
+                   "ENT_SharedMapFlush should reject NULL map") != 0)
+    {
+        cleanup_temp_path(path);
+        return 1;
+    }
+
+    if(expect_true(ENT_SharedMapClose(NULL) == ENT_SYS_NORMAL,
                    "ENT_SharedMapClose should accept NULL") != 0)
+    {
+        cleanup_temp_path(path);
+        return 1;
+    }
+
+    cleanup_temp_path(path);
+    return 0;
+}
+
+static int test_flush_rejects_out_of_range(void)
+{
+    ENT_SharedMapOptions options;
+    ENT_SharedMap* map = NULL;
+    char path[512];
+
+    memset(&options, 0, sizeof(options));
+    memset(path, 0, sizeof(path));
+
+    if(prepare_temp_path(path, sizeof(path)) != 0)
+    {
+        return 1;
+    }
+
+    options.path = path;
+    options.size = TEST_SHM_SMALL_SIZE;
+    options.mode = ENT_SHM_MODE_READ_WRITE;
+    options.flags = ENT_SHM_F_CREATE_IF_MISSING | ENT_SHM_F_TRUNCATE_IF_EXISTS;
+
+    if(expect_true(ENT_SharedMapOpen(&options, &map) == ENT_SYS_NORMAL,
+                   "ENT_SharedMapOpen should create a writable mapping") != 0)
+    {
+        cleanup_temp_path(path);
+        return 1;
+    }
+
+    if(expect_true(ENT_SharedMapFlush(map,
+                                      (ENT_OFFSET)(TEST_SHM_SMALL_SIZE + 1u),
+                                      (ENT_SIZE)1u) == ENT_SHM_RANGE_FAILED,
+                   "ENT_SharedMapFlush should reject an out-of-range span") != 0)
+    {
+        ENT_SharedMapClose(map);
+        cleanup_temp_path(path);
+        return 1;
+    }
+
+    if(expect_true(ENT_SharedMapClose(map) == ENT_SYS_NORMAL,
+                   "ENT_SharedMapClose should close the writable mapping") != 0)
     {
         cleanup_temp_path(path);
         return 1;
@@ -181,7 +235,7 @@ static int test_create_map_write_read(void)
     options.mode = ENT_SHM_MODE_READ_WRITE;
     options.flags = ENT_SHM_F_CREATE_IF_MISSING | ENT_SHM_F_TRUNCATE_IF_EXISTS;
 
-    if(expect_true(ENT_SharedMapOpen(&options, &map) == 0,
+    if(expect_true(ENT_SharedMapOpen(&options, &map) == ENT_SYS_NORMAL,
                    "ENT_SharedMapOpen should create a writable mapping") != 0)
     {
         cleanup_temp_path(path);
@@ -205,7 +259,7 @@ static int test_create_map_write_read(void)
     }
 
     memcpy(ptr, magic, strlen(magic) + 1);
-    if(expect_true(ENT_SharedMapFlush(map, TEST_SHM_OFFSET_ZERO, TEST_SHM_SIZE_ZERO) == 0,
+    if(expect_true(ENT_SharedMapFlush(map, TEST_SHM_OFFSET_ZERO, TEST_SHM_SIZE_ZERO) == ENT_SYS_NORMAL,
                    "ENT_SharedMapFlush should flush the full map when length is zero") != 0)
     {
         ENT_SharedMapClose(map);
@@ -213,7 +267,7 @@ static int test_create_map_write_read(void)
         return 1;
     }
 
-    if(expect_true(ENT_SharedMapClose(map) == 0,
+    if(expect_true(ENT_SharedMapClose(map) == ENT_SYS_NORMAL,
                    "ENT_SharedMapClose should close the writable mapping") != 0)
     {
         cleanup_temp_path(path);
@@ -225,7 +279,7 @@ static int test_create_map_write_read(void)
     options.size = TEST_SHM_SIZE_ZERO;
     options.flags = 0;
 
-    if(expect_true(ENT_SharedMapOpen(&options, &read_only_map) == 0,
+    if(expect_true(ENT_SharedMapOpen(&options, &read_only_map) == ENT_SYS_NORMAL,
                    "ENT_SharedMapOpen should reopen the file read-only") != 0)
     {
         cleanup_temp_path(path);
@@ -256,7 +310,7 @@ static int test_create_map_write_read(void)
         return 1;
     }
 
-    if(expect_true(ENT_SharedMapClose(read_only_map) == 0,
+    if(expect_true(ENT_SharedMapClose(read_only_map) == ENT_SYS_NORMAL,
                    "ENT_SharedMapClose should close the read-only mapping") != 0)
     {
         cleanup_temp_path(path);
@@ -287,7 +341,7 @@ static int test_open_existing_without_truncate(void)
     options.mode = ENT_SHM_MODE_READ_WRITE;
     options.flags = ENT_SHM_F_CREATE_IF_MISSING | ENT_SHM_F_TRUNCATE_IF_EXISTS;
 
-    if(expect_true(ENT_SharedMapOpen(&options, &map) == 0,
+    if(expect_true(ENT_SharedMapOpen(&options, &map) == ENT_SYS_NORMAL,
                    "ENT_SharedMapOpen should create the 8192-byte file") != 0)
     {
         cleanup_temp_path(path);
@@ -303,7 +357,7 @@ static int test_open_existing_without_truncate(void)
     }
 
     ptr[0] = 'x';
-    if(expect_true(ENT_SharedMapFlush(map, TEST_SHM_OFFSET_ZERO, TEST_SHM_SIZE_ZERO) == 0,
+    if(expect_true(ENT_SharedMapFlush(map, TEST_SHM_OFFSET_ZERO, TEST_SHM_SIZE_ZERO) == ENT_SYS_NORMAL,
                    "ENT_SharedMapFlush should succeed on a writable mapping") != 0)
     {
         ENT_SharedMapClose(map);
@@ -311,7 +365,7 @@ static int test_open_existing_without_truncate(void)
         return 1;
     }
 
-    if(expect_true(ENT_SharedMapClose(map) == 0,
+    if(expect_true(ENT_SharedMapClose(map) == ENT_SYS_NORMAL,
                    "ENT_SharedMapClose should close the initial mapping") != 0)
     {
         cleanup_temp_path(path);
@@ -322,7 +376,7 @@ static int test_open_existing_without_truncate(void)
     options.size = TEST_SHM_SIZE_ZERO;
     options.flags = 0;
 
-    if(expect_true(ENT_SharedMapOpen(&options, &map) == 0,
+    if(expect_true(ENT_SharedMapOpen(&options, &map) == ENT_SYS_NORMAL,
                    "ENT_SharedMapOpen should reopen an existing file without truncation") != 0)
     {
         cleanup_temp_path(path);
@@ -337,7 +391,7 @@ static int test_open_existing_without_truncate(void)
         return 1;
     }
 
-    if(expect_true(ENT_SharedMapClose(map) == 0,
+    if(expect_true(ENT_SharedMapClose(map) == ENT_SYS_NORMAL,
                    "ENT_SharedMapClose should close the reopened mapping") != 0)
     {
         cleanup_temp_path(path);
@@ -373,7 +427,7 @@ static int test_multiple_map_same_file(void)
     writer_options.mode = ENT_SHM_MODE_READ_WRITE;
     writer_options.flags = ENT_SHM_F_CREATE_IF_MISSING | ENT_SHM_F_TRUNCATE_IF_EXISTS;
 
-    if(expect_true(ENT_SharedMapOpen(&writer_options, &writer) == 0,
+    if(expect_true(ENT_SharedMapOpen(&writer_options, &writer) == ENT_SYS_NORMAL,
                    "writer map should open") != 0)
     {
         cleanup_temp_path(path);
@@ -385,7 +439,7 @@ static int test_multiple_map_same_file(void)
     reader_options.mode = ENT_SHM_MODE_READ_ONLY;
     reader_options.flags = 0;
 
-    if(expect_true(ENT_SharedMapOpen(&reader_options, &reader) == 0,
+    if(expect_true(ENT_SharedMapOpen(&reader_options, &reader) == ENT_SYS_NORMAL,
                    "reader map should open the same file") != 0)
     {
         ENT_SharedMapClose(writer);
@@ -406,7 +460,7 @@ static int test_multiple_map_same_file(void)
     }
 
     memcpy(writer_ptr, payload, strlen(payload) + 1);
-    if(expect_true(ENT_SharedMapFlush(writer, TEST_SHM_OFFSET_ZERO, TEST_SHM_SIZE_ZERO) == 0,
+    if(expect_true(ENT_SharedMapFlush(writer, TEST_SHM_OFFSET_ZERO, TEST_SHM_SIZE_ZERO) == ENT_SYS_NORMAL,
                    "writer flush should succeed") != 0)
     {
         ENT_SharedMapClose(reader);
@@ -424,7 +478,7 @@ static int test_multiple_map_same_file(void)
         return 1;
     }
 
-    if(expect_true(ENT_SharedMapClose(reader) == 0,
+    if(expect_true(ENT_SharedMapClose(reader) == ENT_SYS_NORMAL,
                    "reader mapping should close") != 0)
     {
         ENT_SharedMapClose(writer);
@@ -432,7 +486,7 @@ static int test_multiple_map_same_file(void)
         return 1;
     }
 
-    if(expect_true(ENT_SharedMapClose(writer) == 0,
+    if(expect_true(ENT_SharedMapClose(writer) == ENT_SYS_NORMAL,
                    "writer mapping should close") != 0)
     {
         cleanup_temp_path(path);
@@ -448,6 +502,7 @@ int main(void)
     int failures = 0;
 
     failures += test_invalid_args();
+    failures += test_flush_rejects_out_of_range();
     failures += test_create_map_write_read();
     failures += test_open_existing_without_truncate();
     failures += test_multiple_map_same_file();

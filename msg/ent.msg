@@ -203,3 +203,17 @@ PATH_FAILED     err 6  log path check or creation failed
 FORMAT_FAILED   err 7  log message format failed
 THREAD_FAILED   err 8  log background thread operation failed
 IO_FAILED       err 9  log file io operation failed
+
+# ----------------------------------------------------------------------------
+# SHM: shared memory service and mapping lifecycle
+# ----------------------------------------------------------------------------
+submodule SHM 12
+BAD_ARGUMENT  err 1  invalid shared-map argument
+BAD_SIZE      err 2  invalid shared-map size
+PATH_FAILED   err 3  shared-map path or open failed
+ALLOC_FAILED  err 4  allocate shared-map resource failed
+RESIZE_FAILED err 5  resize shared-map backing file failed
+MAP_FAILED    err 6  map shared memory failed
+RANGE_FAILED  err 7  shared-map flush range is invalid
+FLUSH_FAILED  err 8  flush shared-map data failed
+CLOSE_FAILED  err 9  close shared-map resource failed
