@@ -21,7 +21,21 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef int32_t MSG_ID_T;
+typedef int8_t   ENT_I8;
+typedef uint8_t  ENT_U8;
+typedef int16_t  ENT_I16;
+typedef uint16_t ENT_U16;
+typedef int32_t  ENT_I32;
+typedef uint32_t ENT_U32;
+typedef int64_t  ENT_I64;
+typedef uint64_t ENT_U64;
+
+typedef ENT_I32 MSG_ID_T;
+typedef ENT_I32 ENT_STATUS;
+typedef ENT_U32 ENT_BOOL;
+typedef ENT_U32 ENT_FLAGS;
+typedef ENT_U64 ENT_SIZE;
+typedef ENT_U64 ENT_OFFSET;
 
 typedef void *DB_HANDLE;
 
