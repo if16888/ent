@@ -53,6 +53,9 @@ Lock failure does not fail the open call.
 - `ENT_SHM_FLUSH_FAILED`: flush to disk failed.
 - `ENT_SHM_CLOSE_FAILED`: release of mapping resources failed.
 
+`ENT_SharedMapClose(&map)` accepts a pointer to the map handle and sets `map`
+to `NULL` after releasing the mapping.
+
 ## API Example
 
 ```c
@@ -81,10 +84,10 @@ int main(void)
     strcpy(data, "hello snapshot");
     if(ENT_SharedMapFlush(map, (ENT_OFFSET)0u, (ENT_SIZE)0u) != ENT_SYS_NORMAL)
     {
-        ENT_SharedMapClose(map);
+        ENT_SharedMapClose(&map);
         return 1;
     }
-    if(ENT_SharedMapClose(map) != ENT_SYS_NORMAL)
+    if(ENT_SharedMapClose(&map) != ENT_SYS_NORMAL)
     {
         return 1;
     }
@@ -109,7 +112,7 @@ if(ENT_SharedMapOpen(&opts, &map) == ENT_SYS_NORMAL)
 {
     data = (const char*)ENT_SharedMapPtr(map);
     puts(data);
-    ENT_SharedMapClose(map);
+    ENT_SharedMapClose(&map);
 }
 ```
 

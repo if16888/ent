@@ -160,6 +160,7 @@ MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const voi
         }
 
         default:
+            sts = ENT_LOG_BAD_ARGUMENT;
             break;
     }
 END_OF_ROUTINE:
