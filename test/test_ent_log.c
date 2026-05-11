@@ -1357,6 +1357,14 @@ static int test_log_set_option_validates_arguments(void)
         return 1;
     }
 
+    if(expect_true(ENT_LogSetOption(logHandle, (ENT_LOG_OPTIONS_E)999, &level) == ENT_LOG_BAD_ARGUMENT,
+                   "ENT_LogSetOption should reject an unknown option") != 0)
+    {
+        ENT_LogCloseHandle(logHandle);
+        ENT_LogClose();
+        return 1;
+    }
+
     if(expect_true(ENT_LogSetOption((ENT_LOG)&badLog, ENT_LOG_LEVEL_E, &level) == ENT_LOG_BAD_HANDLE,
                    "ENT_LogSetOption should reject an invalid log handle") != 0)
     {

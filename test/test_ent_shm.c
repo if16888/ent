@@ -161,6 +161,13 @@ static int test_invalid_args(void)
         return 1;
     }
 
+    if(expect_true(ENT_SharedMapClose(&map) == ENT_SYS_NORMAL,
+                   "ENT_SharedMapClose should accept a NULL map handle") != 0)
+    {
+        cleanup_temp_path(path);
+        return 1;
+    }
+
     cleanup_temp_path(path);
     return 0;
 }
@@ -196,13 +203,19 @@ static int test_flush_rejects_out_of_range(void)
                                       (ENT_SIZE)1u) == ENT_SHM_RANGE_FAILED,
                    "ENT_SharedMapFlush should reject an out-of-range span") != 0)
     {
-        ENT_SharedMapClose(map);
+        ENT_SharedMapClose(&map);
         cleanup_temp_path(path);
         return 1;
     }
 
-    if(expect_true(ENT_SharedMapClose(map) == ENT_SYS_NORMAL,
+    if(expect_true(ENT_SharedMapClose(&map) == ENT_SYS_NORMAL,
                    "ENT_SharedMapClose should close the writable mapping") != 0)
+    {
+        cleanup_temp_path(path);
+        return 1;
+    }
+    if(expect_true(map == NULL,
+                   "ENT_SharedMapClose should NULL the closed writable mapping") != 0)
     {
         cleanup_temp_path(path);
         return 1;
@@ -245,7 +258,7 @@ static int test_create_map_write_read(void)
     if(expect_true(ENT_SharedMapSize(map) == TEST_SHM_SMALL_SIZE,
                    "ENT_SharedMapSize should report the requested size") != 0)
     {
-        ENT_SharedMapClose(map);
+        ENT_SharedMapClose(&map);
         cleanup_temp_path(path);
         return 1;
     }
@@ -253,7 +266,7 @@ static int test_create_map_write_read(void)
     ptr = (char*)ENT_SharedMapPtr(map);
     if(expect_true(ptr != NULL, "ENT_SharedMapPtr should return a valid pointer") != 0)
     {
-        ENT_SharedMapClose(map);
+        ENT_SharedMapClose(&map);
         cleanup_temp_path(path);
         return 1;
     }
@@ -262,12 +275,12 @@ static int test_create_map_write_read(void)
     if(expect_true(ENT_SharedMapFlush(map, TEST_SHM_OFFSET_ZERO, TEST_SHM_SIZE_ZERO) == ENT_SYS_NORMAL,
                    "ENT_SharedMapFlush should flush the full map when length is zero") != 0)
     {
-        ENT_SharedMapClose(map);
+        ENT_SharedMapClose(&map);
         cleanup_temp_path(path);
         return 1;
     }
 
-    if(expect_true(ENT_SharedMapClose(map) == ENT_SYS_NORMAL,
+    if(expect_true(ENT_SharedMapClose(&map) == ENT_SYS_NORMAL,
                    "ENT_SharedMapClose should close the writable mapping") != 0)
     {
         cleanup_temp_path(path);
@@ -289,7 +302,7 @@ static int test_create_map_write_read(void)
     if(expect_true(ENT_SharedMapSize(read_only_map) == TEST_SHM_SMALL_SIZE,
                    "ENT_SharedMapSize should report the existing file size") != 0)
     {
-        ENT_SharedMapClose(read_only_map);
+        ENT_SharedMapClose(&read_only_map);
         cleanup_temp_path(path);
         return 1;
     }
@@ -297,7 +310,7 @@ static int test_create_map_write_read(void)
     read_ptr = (char*)ENT_SharedMapPtr(read_only_map);
     if(expect_true(read_ptr != NULL, "read-only map should expose a pointer") != 0)
     {
-        ENT_SharedMapClose(read_only_map);
+        ENT_SharedMapClose(&read_only_map);
         cleanup_temp_path(path);
         return 1;
     }
@@ -305,12 +318,12 @@ static int test_create_map_write_read(void)
     if(expect_true(strcmp(read_ptr, magic) == 0,
                    "read-only mapping should still contain the flushed magic string") != 0)
     {
-        ENT_SharedMapClose(read_only_map);
+        ENT_SharedMapClose(&read_only_map);
         cleanup_temp_path(path);
         return 1;
     }
 
-    if(expect_true(ENT_SharedMapClose(read_only_map) == ENT_SYS_NORMAL,
+    if(expect_true(ENT_SharedMapClose(&read_only_map) == ENT_SYS_NORMAL,
                    "ENT_SharedMapClose should close the read-only mapping") != 0)
     {
         cleanup_temp_path(path);
@@ -351,7 +364,7 @@ static int test_open_existing_without_truncate(void)
     ptr = (char*)ENT_SharedMapPtr(map);
     if(expect_true(ptr != NULL, "writable mapping should expose a pointer") != 0)
     {
-        ENT_SharedMapClose(map);
+        ENT_SharedMapClose(&map);
         cleanup_temp_path(path);
         return 1;
     }
@@ -360,12 +373,12 @@ static int test_open_existing_without_truncate(void)
     if(expect_true(ENT_SharedMapFlush(map, TEST_SHM_OFFSET_ZERO, TEST_SHM_SIZE_ZERO) == ENT_SYS_NORMAL,
                    "ENT_SharedMapFlush should succeed on a writable mapping") != 0)
     {
-        ENT_SharedMapClose(map);
+        ENT_SharedMapClose(&map);
         cleanup_temp_path(path);
         return 1;
     }
 
-    if(expect_true(ENT_SharedMapClose(map) == ENT_SYS_NORMAL,
+    if(expect_true(ENT_SharedMapClose(&map) == ENT_SYS_NORMAL,
                    "ENT_SharedMapClose should close the initial mapping") != 0)
     {
         cleanup_temp_path(path);
@@ -386,12 +399,12 @@ static int test_open_existing_without_truncate(void)
     if(expect_true(ENT_SharedMapSize(map) >= TEST_SHM_LARGE_SIZE,
                    "ENT_SharedMapSize should preserve the existing file size") != 0)
     {
-        ENT_SharedMapClose(map);
+        ENT_SharedMapClose(&map);
         cleanup_temp_path(path);
         return 1;
     }
 
-    if(expect_true(ENT_SharedMapClose(map) == ENT_SYS_NORMAL,
+    if(expect_true(ENT_SharedMapClose(&map) == ENT_SYS_NORMAL,
                    "ENT_SharedMapClose should close the reopened mapping") != 0)
     {
         cleanup_temp_path(path);
@@ -442,7 +455,7 @@ static int test_multiple_map_same_file(void)
     if(expect_true(ENT_SharedMapOpen(&reader_options, &reader) == ENT_SYS_NORMAL,
                    "reader map should open the same file") != 0)
     {
-        ENT_SharedMapClose(writer);
+        ENT_SharedMapClose(&writer);
         cleanup_temp_path(path);
         return 1;
     }
@@ -453,8 +466,8 @@ static int test_multiple_map_same_file(void)
     if(expect_true(writer_ptr != NULL && reader_ptr != NULL,
                    "both mappings should expose pointers") != 0)
     {
-        ENT_SharedMapClose(reader);
-        ENT_SharedMapClose(writer);
+        ENT_SharedMapClose(&reader);
+        ENT_SharedMapClose(&writer);
         cleanup_temp_path(path);
         return 1;
     }
@@ -463,8 +476,8 @@ static int test_multiple_map_same_file(void)
     if(expect_true(ENT_SharedMapFlush(writer, TEST_SHM_OFFSET_ZERO, TEST_SHM_SIZE_ZERO) == ENT_SYS_NORMAL,
                    "writer flush should succeed") != 0)
     {
-        ENT_SharedMapClose(reader);
-        ENT_SharedMapClose(writer);
+        ENT_SharedMapClose(&reader);
+        ENT_SharedMapClose(&writer);
         cleanup_temp_path(path);
         return 1;
     }
@@ -472,21 +485,21 @@ static int test_multiple_map_same_file(void)
     if(expect_true(strcmp(reader_ptr, payload) == 0,
                    "reader should observe the flushed payload") != 0)
     {
-        ENT_SharedMapClose(reader);
-        ENT_SharedMapClose(writer);
+        ENT_SharedMapClose(&reader);
+        ENT_SharedMapClose(&writer);
         cleanup_temp_path(path);
         return 1;
     }
 
-    if(expect_true(ENT_SharedMapClose(reader) == ENT_SYS_NORMAL,
+    if(expect_true(ENT_SharedMapClose(&reader) == ENT_SYS_NORMAL,
                    "reader mapping should close") != 0)
     {
-        ENT_SharedMapClose(writer);
+        ENT_SharedMapClose(&writer);
         cleanup_temp_path(path);
         return 1;
     }
 
-    if(expect_true(ENT_SharedMapClose(writer) == ENT_SYS_NORMAL,
+    if(expect_true(ENT_SharedMapClose(&writer) == ENT_SYS_NORMAL,
                    "writer mapping should close") != 0)
     {
         cleanup_temp_path(path);

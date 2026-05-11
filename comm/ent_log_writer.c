@@ -1011,6 +1011,18 @@ MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_LEV_E logLevel, const
 #endif
 
 END_OF_ROUTINE:
+#ifdef WIN32
+    if(sts < 0)
+    {
+        LeaveCriticalSection(&log->cs);
+    }
+#else
+    if(sts < 0)
+    {
+        pthread_mutex_unlock(&log->cs);
+    }
+#endif
+
     if(lineBuf != lineStackBuf)
     {
         free(lineBuf);

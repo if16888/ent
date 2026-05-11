@@ -49,7 +49,7 @@ ENT_PUBLIC MSG_ID_T ENT_SharedMapOpen(const ENT_SharedMapOptions* options, ENT_S
 ENT_PUBLIC void* ENT_SharedMapPtr(ENT_SharedMap* map);
 ENT_PUBLIC ENT_SIZE ENT_SharedMapSize(ENT_SharedMap* map);
 ENT_PUBLIC MSG_ID_T ENT_SharedMapFlush(ENT_SharedMap* map, ENT_OFFSET offset, ENT_SIZE length);
-ENT_PUBLIC MSG_ID_T ENT_SharedMapClose(ENT_SharedMap* map);
+ENT_PUBLIC MSG_ID_T ENT_SharedMapClose(ENT_SharedMap** map);
 
 #ifdef __cplusplus
 }

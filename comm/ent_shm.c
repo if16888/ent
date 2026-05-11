@@ -603,17 +603,20 @@ ENT_PUBLIC MSG_ID_T ENT_SharedMapFlush(ENT_SharedMap* map, ENT_OFFSET offset, EN
 #endif
 }
 
-ENT_PUBLIC MSG_ID_T ENT_SharedMapClose(ENT_SharedMap* map)
+ENT_PUBLIC MSG_ID_T ENT_SharedMapClose(ENT_SharedMap** map)
 {
     MSG_ID_T sts = ENT_SYS_NORMAL;
+    ENT_SharedMap* map_to_close = NULL;
 
-    if(map == NULL)
+    if(map == NULL || *map == NULL)
     {
         return ENT_SYS_NORMAL;
     }
 
-    sts = iENT_SharedMapRelease(map);
-    memset(map, 0, sizeof(*map));
-    free(map);
+    map_to_close = *map;
+    sts = iENT_SharedMapRelease(map_to_close);
+    memset(map_to_close, 0, sizeof(*map_to_close));
+    free(map_to_close);
+    *map = NULL;
     return sts;
 }
