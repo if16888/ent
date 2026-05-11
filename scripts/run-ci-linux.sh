@@ -28,6 +28,7 @@ run_configure() {
     -DCMAKE_BUILD_TYPE=Release
     -DENT_ENABLE_SQLITE=ON
     -DENT_ENABLE_MYSQL=ON
+    -DENT_ENABLE_PGSQL=ON
   )
 
   if command -v ninja >/dev/null 2>&1; then
