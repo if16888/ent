@@ -43,6 +43,11 @@ typedef struct ENT_CTX
     UTL_CV         entCV;
 } ENT_CTX;
 
+typedef struct ENT_HANDLE_TAG
+{
+    ENT_CTX ctx;
+} ENT_HANDLE_CTX_T;
+
 extern ENT_CTX gEntCtx;
 
 ENT_CTX* iENT_RuntimeActiveCtx(void);

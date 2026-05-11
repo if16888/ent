@@ -1,12 +1,12 @@
 /*-----------------------------------------------------------------------------
  *   Copyright 2019 Fei Li
- * 
+ *
  *   Licensed under the Apache License, Version 2.0 (the "License");
  *   you may not use this file except in compliance with the License.
  *   You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  *   Unless required by applicable law or agreed to in writing, software
  *   distributed under the License is distributed on an "AS IS" BASIS,
  *   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -34,6 +34,7 @@
 #define _MAX_PATH PATH_MAX
 #endif
 #include <stdio.h>
+#include "ient_log.h"
 #include "ient_comm.h"
 #include "ient_runtime.h"
 #include "ent_init.h"
@@ -48,11 +49,6 @@
 
 ENT_CTX gEntCtx;
 static ENT_THREAD_LOCAL ENT_CTX* sEntActiveCtx = NULL;
-
-typedef struct ENT_RUNTIME_CTX_TAG
-{
-    ENT_CTX ctx;
-} ENT_RUNTIME_CTX_T;
 
 #ifdef WIN32
 static SRWLOCK sEntRuntimeLock = SRWLOCK_INIT;
@@ -97,9 +93,119 @@ static ENT_CTX* iENT_RuntimeSetActiveCtx(ENT_CTX* ctx)
     return prev;
 }
 
-static bool iENT_CTXUsesDefaultLog(const ENT_CTX* ctx)
+static MSG_ID_T iENT_CTXApplyRtAttributes(ENT_CTX* ctx,
+                                          int rtCpu,
+                                          ENT_RT_POLICY_E rtPolicy,
+                                          int rtPriority);
+static MSG_ID_T iENT_CTXInit(ENT_CTX* ctx,
+                             const char* name,
+                             const char* workPath,
+                             ENT_LOG_LEV_E logLevel,
+                             ENT_MODE_E mode);
+static MSG_ID_T iENT_CTXClose(ENT_CTX* ctx);
+static MSG_ID_T iENT_CTXRun(ENT_CTX* ctx);
+
+static MSG_ID_T iENT_HandleInit(ENT_HANDLE* handle,
+                                const char* name,
+                                const char* workPath,
+                                ENT_LOG_LEV_E logLevel,
+                                ENT_MODE_E mode)
 {
-    return ctx == &gEntCtx;
+    ENT_HANDLE_CTX_T* handleCtx = NULL;
+    ENT_CTX* prevCtx = NULL;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
+
+    if(handle == NULL)
+    {
+        return ENT_INIT_INVALID_ARGUMENT;
+    }
+
+    *handle = NULL;
+
+    handleCtx = (ENT_HANDLE_CTX_T*)calloc(1, sizeof(*handleCtx));
+    if(handleCtx == NULL)
+    {
+        return ENT_INIT_LOGPATH_ALLOCFAIL;
+    }
+
+    prevCtx = iENT_RuntimeSetActiveCtx(&handleCtx->ctx);
+    sts = iENT_CTXInit(&handleCtx->ctx, name, workPath, logLevel, mode);
+    iENT_RuntimeSetActiveCtx(prevCtx);
+    if(sts != ENT_SYS_NORMAL)
+    {
+        free(handleCtx);
+        return sts;
+    }
+
+    *handle = (ENT_HANDLE)handleCtx;
+    return ENT_SYS_NORMAL;
+}
+
+static MSG_ID_T iENT_HandleClose(ENT_HANDLE* handle)
+{
+    ENT_HANDLE_CTX_T* handleCtx = NULL;
+    ENT_CTX* prevCtx = NULL;
+    MSG_ID_T sts = ENT_SYS_CLOSE_UNINITIALIZED;
+
+    if(handle == NULL)
+    {
+        return ENT_INIT_INVALID_ARGUMENT;
+    }
+
+    handleCtx = (ENT_HANDLE_CTX_T*)(*handle);
+    if(handleCtx == NULL || !handleCtx->ctx.isInit)
+    {
+        return ENT_SYS_CLOSE_UNINITIALIZED;
+    }
+
+    prevCtx = iENT_RuntimeSetActiveCtx(&handleCtx->ctx);
+    sts = iENT_CTXClose(&handleCtx->ctx);
+    iENT_RuntimeSetActiveCtx(prevCtx);
+    free(handleCtx);
+    *handle = NULL;
+    return sts;
+}
+
+static MSG_ID_T iENT_HandleRun(ENT_HANDLE handle)
+{
+    ENT_HANDLE_CTX_T* handleCtx = (ENT_HANDLE_CTX_T*)handle;
+    ENT_CTX* prevCtx = NULL;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
+
+    if(handleCtx == NULL || !handleCtx->ctx.isInit)
+    {
+        return ENT_SYS_RUN_UNINITIALIZED;
+    }
+
+    prevCtx = iENT_RuntimeSetActiveCtx(&handleCtx->ctx);
+    sts = iENT_CTXRun(&handleCtx->ctx);
+    iENT_RuntimeSetActiveCtx(prevCtx);
+    return sts;
+}
+
+static MSG_ID_T iENT_HandleSetRtAttributes(ENT_HANDLE handle,
+                                           int rtCpu,
+                                           ENT_RT_POLICY_E rtPolicy,
+                                           int rtPriority)
+{
+    ENT_HANDLE_CTX_T* handleCtx = (ENT_HANDLE_CTX_T*)handle;
+    ENT_CTX* prevCtx = NULL;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
+
+    if(handleCtx == NULL || !handleCtx->ctx.isInit)
+    {
+        return ENT_RT_NOT_INITIALIZED;
+    }
+
+    if(handleCtx->ctx.rtRequested == false)
+    {
+        return ENT_RT_NOTRT;
+    }
+
+    prevCtx = iENT_RuntimeSetActiveCtx(&handleCtx->ctx);
+    sts = iENT_CTXApplyRtAttributes(&handleCtx->ctx, rtCpu, rtPolicy, rtPriority);
+    iENT_RuntimeSetActiveCtx(prevCtx);
+    return sts;
 }
 
 static MSG_ID_T iENT_RuntimeAcquireLogService(void)
@@ -355,7 +461,6 @@ static MSG_ID_T iENT_CTXInit(ENT_CTX* ctx,
                              ENT_MODE_E mode)
 {
     MSG_ID_T  sts = ENT_SYS_NORMAL;
-    bool createDefaultLog = iENT_CTXUsesDefaultLog(ctx);
 
     if(ctx == NULL)
     {
@@ -430,33 +535,11 @@ static MSG_ID_T iENT_CTXInit(ENT_CTX* ctx,
         return ENT_INIT_LOG_INITFAIL;
     }
 
-    if(createDefaultLog)
-    {
-        sts = ENT_LogInitHandle(NULL,name,ctx->logPath);
-        if(sts<0)
-        {
-            fprintf(stderr,"ENT_LogInitHandle failed,sts [%d].\n",sts);
-            iENT_RuntimeReleaseLogService();
-            iENT_CTXFree(ctx);
-            iENT_CTXResetRuntime(ctx);
-            return ENT_INIT_DEFAULT_HANDLEFAIL;
-        }
-        sts = ENT_LogSetOption(NULL,ENT_LOG_LEVEL_E,&logLevel);
-        if(sts < 0)
-        {
-            fprintf(stderr,"ENT_LogSetOption failed,sts [%d].\n",sts);
-            iENT_CTXCloseLog(ctx,false,true);
-            iENT_CTXFree(ctx);
-            iENT_CTXResetRuntime(ctx);
-            return ENT_INIT_DEFAULT_LEVELFAIL;
-        }
-    }
-
     sts = ENT_LogInitHandle(&ctx->entLog,ctx->logName,ctx->logPath);
     if(sts<0)
     {
         fprintf(stderr,"ENT_LogInitHandle failed,sts [%d].\n",sts);
-        iENT_CTXCloseLog(ctx,false,createDefaultLog);
+        iENT_CTXCloseLog(ctx,false,false);
         iENT_CTXFree(ctx);
         iENT_CTXResetRuntime(ctx);
         return ENT_INIT_ENTITY_HANDLEFAIL;
@@ -465,7 +548,7 @@ static MSG_ID_T iENT_CTXInit(ENT_CTX* ctx,
     if(sts < 0)
     {
         fprintf(stderr,"ENT_LogSetOption failed,sts [%d].\n",sts);
-        iENT_CTXCloseLog(ctx,true,createDefaultLog);
+        iENT_CTXCloseLog(ctx,true,false);
         iENT_CTXFree(ctx);
         iENT_CTXResetRuntime(ctx);
         return ENT_INIT_ENTITY_LEVELFAIL;
@@ -476,7 +559,7 @@ static MSG_ID_T iENT_CTXInit(ENT_CTX* ctx,
     {
         IENT_LOG_ERROR("UTL_LockInit failed,sts [%d]\n",sts);
         iENT_CTXFree(ctx);
-        iENT_CTXCloseLog(ctx,true,createDefaultLog);
+        iENT_CTXCloseLog(ctx,true,false);
         iENT_CTXResetRuntime(ctx);
         return ENT_INIT_LOCK_INITFAIL;
     }
@@ -488,7 +571,7 @@ static MSG_ID_T iENT_CTXInit(ENT_CTX* ctx,
         iENT_CTXFree(ctx);
         UTL_LockClose(&ctx->entLock);
         ctx->entLock = NULL;
-        iENT_CTXCloseLog(ctx,true,createDefaultLog);
+        iENT_CTXCloseLog(ctx,true,false);
         iENT_CTXResetRuntime(ctx);
         return ENT_INIT_CV_INITFAIL;
     }
@@ -527,7 +610,7 @@ static MSG_ID_T iENT_CTXClose(ENT_CTX* ctx)
     UTL_LockClose(&ctx->entLock);
     ctx->entLock = NULL;
 
-    iENT_CTXCloseLog(ctx, true, iENT_CTXUsesDefaultLog(ctx));
+    iENT_CTXCloseLog(ctx, true, false);
 
     iENT_CTXFree(ctx);
     iENT_CTXResetRuntime(ctx);
@@ -555,24 +638,25 @@ static MSG_ID_T iENT_CTXRun(ENT_CTX* ctx)
  *
  * NAME        :ENT_Init
  *
- * DESCRIPTION :   
- *                 
- *                  
+ * DESCRIPTION :
+ *
+ *
  *
  * COMPLETION
  * STATUS      :  0
- *                Success; Service has completed successfully.           
+ *                Success; Service has completed successfully.
  *
- *                            
+ *
  *
  *-----------------------------------------------------------------------------
  */
-ENT_PUBLIC MSG_ID_T  ENT_Init(const char* name,
+ENT_PUBLIC MSG_ID_T  ENT_Init(ENT_HANDLE* handle,
+                              const char* name,
                               const char* workPath,
                               ENT_LOG_LEV_E logLevel,
                               ENT_MODE_E mode)
 {
-    return iENT_CTXInit(iENT_RuntimeActiveCtx(), name, workPath, logLevel, mode);
+    return iENT_HandleInit(handle, name, workPath, logLevel, mode);
 }
 
 ENT_PUBLIC MSG_ID_T ENT_RuntimeInit(ENT_RUNTIME* runtime,
@@ -581,92 +665,42 @@ ENT_PUBLIC MSG_ID_T ENT_RuntimeInit(ENT_RUNTIME* runtime,
                                     ENT_LOG_LEV_E logLevel,
                                     ENT_MODE_E mode)
 {
-    ENT_RUNTIME_CTX_T* runtimeCtx = NULL;
-    ENT_CTX* prevCtx = NULL;
-    MSG_ID_T sts = ENT_SYS_NORMAL;
-
-    if(runtime == NULL)
-    {
-        return ENT_INIT_INVALID_ARGUMENT;
-    }
-
-    runtimeCtx = (ENT_RUNTIME_CTX_T*)calloc(1, sizeof(*runtimeCtx));
-    if(runtimeCtx == NULL)
-    {
-        return ENT_INIT_LOGPATH_ALLOCFAIL;
-    }
-
-    prevCtx = iENT_RuntimeSetActiveCtx(&runtimeCtx->ctx);
-    sts = ENT_Init(name, workPath, logLevel, mode);
-    iENT_RuntimeSetActiveCtx(prevCtx);
-
-    if(sts != ENT_SYS_NORMAL)
-    {
-        free(runtimeCtx);
-        return sts;
-    }
-
-    *runtime = (ENT_RUNTIME)runtimeCtx;
-    return ENT_SYS_NORMAL;
+    return ENT_Init((ENT_HANDLE*)runtime, name, workPath, logLevel, mode);
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :ENT_Close
  *
- * DESCRIPTION :   
- *                 
- *                  
+ * DESCRIPTION :
+ *
+ *
  *
  * COMPLETION
  * STATUS      :  0
- *                Success; Service has completed successfully.           
+ *                Success; Service has completed successfully.
  *
- *                            
+ *
  *
  *-----------------------------------------------------------------------------
  */
-ENT_PUBLIC MSG_ID_T  ENT_Close()
+ENT_PUBLIC MSG_ID_T  ENT_Close(ENT_HANDLE* handle)
 {
-    return iENT_CTXClose(iENT_RuntimeActiveCtx());
+    return iENT_HandleClose(handle);
 }
 
 ENT_PUBLIC MSG_ID_T ENT_RuntimeClose(ENT_RUNTIME runtime)
 {
-    ENT_RUNTIME_CTX_T* runtimeCtx = (ENT_RUNTIME_CTX_T*)runtime;
-    ENT_CTX* prevCtx = NULL;
-    MSG_ID_T sts = ENT_SYS_NORMAL;
+    ENT_HANDLE handle = (ENT_HANDLE)runtime;
 
-    if(runtimeCtx == NULL)
-    {
-        return ENT_INIT_INVALID_ARGUMENT;
-    }
-
-    prevCtx = iENT_RuntimeSetActiveCtx(&runtimeCtx->ctx);
-    sts = ENT_Close();
-    iENT_RuntimeSetActiveCtx(prevCtx);
-
-    free(runtimeCtx);
-    return sts;
+    return ENT_Close(&handle);
 }
 
-ENT_PUBLIC MSG_ID_T  ENT_SetRtAttributes(int rtCpu,
+ENT_PUBLIC MSG_ID_T  ENT_SetRtAttributes(ENT_HANDLE handle,
+                                         int rtCpu,
                                          ENT_RT_POLICY_E rtPolicy,
                                          int rtPriority)
 {
-    ENT_CTX* ctx = iENT_RuntimeActiveCtx();
-
-    if(!ctx->isInit)
-    {
-        return ENT_RT_NOT_INITIALIZED;
-    }
-
-    if(!ctx->rtRequested)
-    {
-        IENT_LOG_WARN("rt attributes requested while mode is normal\n");
-        return ENT_RT_NOTRT;
-    }
-
-    return iENT_CTXApplyRtAttributes(ctx,rtCpu,rtPolicy,rtPriority);
+    return iENT_HandleSetRtAttributes(handle, rtCpu, rtPolicy, rtPriority);
 }
 
 ENT_PUBLIC MSG_ID_T ENT_RuntimeSetRtAttributes(ENT_RUNTIME runtime,
@@ -674,72 +708,46 @@ ENT_PUBLIC MSG_ID_T ENT_RuntimeSetRtAttributes(ENT_RUNTIME runtime,
                                                ENT_RT_POLICY_E rtPolicy,
                                                int rtPriority)
 {
-    ENT_RUNTIME_CTX_T* runtimeCtx = (ENT_RUNTIME_CTX_T*)runtime;
-    ENT_CTX* prevCtx = NULL;
-    MSG_ID_T sts = ENT_SYS_NORMAL;
-
-    if(runtimeCtx == NULL)
-    {
-        return ENT_RT_NOT_INITIALIZED;
-    }
-
-    prevCtx = iENT_RuntimeSetActiveCtx(&runtimeCtx->ctx);
-    sts = ENT_SetRtAttributes(rtCpu, rtPolicy, rtPriority);
-    iENT_RuntimeSetActiveCtx(prevCtx);
-
-    return sts;
+    return ENT_SetRtAttributes((ENT_HANDLE)runtime, rtCpu, rtPolicy, rtPriority);
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :ENT_Run
  *
- * DESCRIPTION :   
- *                 
- *                  
+ * DESCRIPTION :
+ *
+ *
  *
  * COMPLETION
  * STATUS      :  0
- *                Success; Service has completed successfully.           
+ *                Success; Service has completed successfully.
  *
- *                            
+ *
  *
  *-----------------------------------------------------------------------------
  */
-ENT_PUBLIC MSG_ID_T  ENT_Run()
+ENT_PUBLIC MSG_ID_T  ENT_Run(ENT_HANDLE handle)
 {
-    return iENT_CTXRun(iENT_RuntimeActiveCtx());
+    return iENT_HandleRun(handle);
 }
 
 ENT_PUBLIC MSG_ID_T ENT_RuntimeRun(ENT_RUNTIME runtime)
 {
-    ENT_RUNTIME_CTX_T* runtimeCtx = (ENT_RUNTIME_CTX_T*)runtime;
-    ENT_CTX* prevCtx = NULL;
-    MSG_ID_T sts = ENT_SYS_NORMAL;
-
-    if(runtimeCtx == NULL)
-    {
-        return ENT_SYS_RUN_UNINITIALIZED;
-    }
-
-    prevCtx = iENT_RuntimeSetActiveCtx(&runtimeCtx->ctx);
-    sts = ENT_Run();
-    iENT_RuntimeSetActiveCtx(prevCtx);
-
-    return sts;
+    return ENT_Run((ENT_HANDLE)runtime);
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :ENT_Helpers
  *
- * DESCRIPTION :   
- *                 
- *                  
+ * DESCRIPTION :
+ *
+ *
  *
  * COMPLETION
  * STATUS      :  0
- *                Success; Service has completed successfully.           
+ *                Success; Service has completed successfully.
  *
- *                            
+ *
  *
  *-----------------------------------------------------------------------------
  */

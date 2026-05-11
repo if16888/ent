@@ -1,12 +1,12 @@
 /*-----------------------------------------------------------------------------
  *   Copyright 2019 Fei Li
- * 
+ *
  *   Licensed under the Apache License, Version 2.0 (the "License");
  *   you may not use this file except in compliance with the License.
  *   You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  *   Unless required by applicable law or agreed to in writing, software
  *   distributed under the License is distributed on an "AS IS" BASIS,
  *   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -38,7 +38,7 @@ DWORD WINAPI thread_func(void* data)
         UTL_Sleep(3000);
         ENT_LOG_WARN("[%s]->[%d]\n",cfg,i);
     }
-    
+
     return 0;
 }
 #else
@@ -103,7 +103,7 @@ void thread_example()
     sts = ENT_ThreadInit(&thHandle);
     if(sts<0)
     {
-        ENT_LOG_FATAL("ENT_ThreadInit failed,sts [%d]\n",sts);    
+        ENT_LOG_FATAL("ENT_ThreadInit failed,sts [%d]\n",sts);
     }
     sts = ENT_ThreadCreate(NULL,thHandle,thread_func,(void*)"no tid");
     if(sts<0)
@@ -163,7 +163,7 @@ static UTL_TPOOL    tpHandle;
 MSG_ID_T tpool_example_start()
 {
     MSG_ID_T     sts = 0;
-    
+
     sts = UTL_TPoolInit(&tpHandle,8);
     if(sts < 0)
     {
@@ -179,8 +179,8 @@ MSG_ID_T tpool_example_start()
         *tmp = 0xff;
         datas[i] = i+1;
         UTL_TPoolAddTask(tpHandle,tp_task,tp_task_end,&datas[i],tmp);
-    } 
-    return 0;   
+    }
+    return 0;
 }
 
 MSG_ID_T tpool_example_stop()
@@ -230,21 +230,22 @@ int main(int argc,char* argv[])
 #endif
 {
     MSG_ID_T  sts=0;
-    
-    sts = ENT_Init("example",".",LOG_LEV_DEBUG_E,ENT_MODE_NORMAL_E);
+    ENT_HANDLE handle = NULL;
+
+    sts = ENT_Init(&handle, "example", ".", LOG_LEV_DEBUG_E, ENT_MODE_NORMAL_E);
     if(sts < 0)
     {
         ENT_LOG_FATAL("ENT_Init failed sts [%d]\n",sts);
         return -1;
     }
-    
+
     sts = example_run();
     if(sts < 0)
     {
         ENT_LOG_WARN("example_run sts [%d]\n",sts);
     }
 
-    sts = ENT_Close();
+    sts = ENT_Close(&handle);
     if(sts < 0)
     {
         ENT_LOG_WARN("ENT_Close sts [%d]\n",sts);
