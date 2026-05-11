@@ -4,7 +4,14 @@
   "description": "ent C library",
   "dependencies": [
     "sqlite3",
-    "libmariadb",
-    "libpq"
-  ]
+    "libmariadb"
+  ],
+  "features": {
+    "pgsql": {
+      "description": "Enable PostgreSQL client dependency for builds that turn on ENT_ENABLE_PGSQL.",
+      "dependencies": [
+        "libpq"
+      ]
+    }
+  }
 }
