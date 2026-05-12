@@ -29,6 +29,8 @@ typedef struct ENT_CTX
     bool           isInit;
     bool           rtRequested;
     bool           rtEnabled;
+    bool           running;
+    bool           stopRequested;
     char*          entName;
     char*          workPath;
     char*          logName;
@@ -45,10 +47,13 @@ typedef struct ENT_CTX
 
 typedef struct ENT_HANDLE_TAG
 {
+    unsigned int   magic;
     ENT_CTX ctx;
 } ENT_HANDLE_CTX_T;
 
 extern ENT_CTX gEntCtx;
+
+#define ENT_HANDLE_MAGIC 0x454E5448u
 
 ENT_CTX* iENT_RuntimeActiveCtx(void);
 

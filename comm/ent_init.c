@@ -102,6 +102,7 @@ static MSG_ID_T iENT_CTXInit(ENT_CTX* ctx,
                              const char* workPath,
                              ENT_LOG_LEV_E logLevel,
                              ENT_MODE_E mode);
+static MSG_ID_T iENT_CTXStop(ENT_CTX* ctx);
 static MSG_ID_T iENT_CTXClose(ENT_CTX* ctx);
 static MSG_ID_T iENT_CTXRun(ENT_CTX* ctx);
 
@@ -120,7 +121,10 @@ static MSG_ID_T iENT_HandleInit(ENT_HANDLE* handle,
         return ENT_INIT_INVALID_ARGUMENT;
     }
 
-    *handle = NULL;
+    if(*handle != NULL)
+    {
+        return ENT_SYS_ALREADY_INITIALIZED;
+    }
 
     handleCtx = (ENT_HANDLE_CTX_T*)calloc(1, sizeof(*handleCtx));
     if(handleCtx == NULL)
@@ -128,11 +132,14 @@ static MSG_ID_T iENT_HandleInit(ENT_HANDLE* handle,
         return ENT_INIT_LOGPATH_ALLOCFAIL;
     }
 
+    handleCtx->magic = ENT_HANDLE_MAGIC;
+
     prevCtx = iENT_RuntimeSetActiveCtx(&handleCtx->ctx);
     sts = iENT_CTXInit(&handleCtx->ctx, name, workPath, logLevel, mode);
     iENT_RuntimeSetActiveCtx(prevCtx);
     if(sts != ENT_SYS_NORMAL)
     {
+        handleCtx->magic = 0u;
         free(handleCtx);
         return sts;
     }
@@ -153,7 +160,7 @@ static MSG_ID_T iENT_HandleClose(ENT_HANDLE* handle)
     }
 
     handleCtx = (ENT_HANDLE_CTX_T*)(*handle);
-    if(handleCtx == NULL || !handleCtx->ctx.isInit)
+    if(handleCtx == NULL || handleCtx->magic != ENT_HANDLE_MAGIC || !handleCtx->ctx.isInit)
     {
         return ENT_SYS_CLOSE_UNINITIALIZED;
     }
@@ -161,6 +168,7 @@ static MSG_ID_T iENT_HandleClose(ENT_HANDLE* handle)
     prevCtx = iENT_RuntimeSetActiveCtx(&handleCtx->ctx);
     sts = iENT_CTXClose(&handleCtx->ctx);
     iENT_RuntimeSetActiveCtx(prevCtx);
+    handleCtx->magic = 0u;
     free(handleCtx);
     *handle = NULL;
     return sts;
@@ -172,9 +180,14 @@ static MSG_ID_T iENT_HandleRun(ENT_HANDLE handle)
     ENT_CTX* prevCtx = NULL;
     MSG_ID_T sts = ENT_SYS_NORMAL;
 
-    if(handleCtx == NULL || !handleCtx->ctx.isInit)
+    if(handleCtx == NULL || handleCtx->magic != ENT_HANDLE_MAGIC || !handleCtx->ctx.isInit)
     {
         return ENT_SYS_RUN_UNINITIALIZED;
+    }
+
+    if(handleCtx->ctx.stopRequested)
+    {
+        return ENT_SYS_STOPPED;
     }
 
     prevCtx = iENT_RuntimeSetActiveCtx(&handleCtx->ctx);
@@ -192,9 +205,14 @@ static MSG_ID_T iENT_HandleSetRtAttributes(ENT_HANDLE handle,
     ENT_CTX* prevCtx = NULL;
     MSG_ID_T sts = ENT_SYS_NORMAL;
 
-    if(handleCtx == NULL || !handleCtx->ctx.isInit)
+    if(handleCtx == NULL || handleCtx->magic != ENT_HANDLE_MAGIC || !handleCtx->ctx.isInit)
     {
         return ENT_RT_NOT_INITIALIZED;
+    }
+
+    if(handleCtx->ctx.stopRequested)
+    {
+        return ENT_SYS_STOPPED;
     }
 
     if(handleCtx->ctx.rtRequested == false)
@@ -204,6 +222,33 @@ static MSG_ID_T iENT_HandleSetRtAttributes(ENT_HANDLE handle,
 
     prevCtx = iENT_RuntimeSetActiveCtx(&handleCtx->ctx);
     sts = iENT_CTXApplyRtAttributes(&handleCtx->ctx, rtCpu, rtPolicy, rtPriority);
+    iENT_RuntimeSetActiveCtx(prevCtx);
+    return sts;
+}
+
+static MSG_ID_T iENT_HandleStop(ENT_HANDLE handle)
+{
+    ENT_HANDLE_CTX_T* handleCtx = (ENT_HANDLE_CTX_T*)handle;
+    ENT_CTX* prevCtx = NULL;
+    MSG_ID_T sts = ENT_SYS_INVALID_ARGUMENT;
+
+    if(handleCtx == NULL)
+    {
+        return ENT_SYS_INVALID_ARGUMENT;
+    }
+
+    if(handleCtx->magic != ENT_HANDLE_MAGIC || !handleCtx->ctx.isInit)
+    {
+        return ENT_SYS_STOPPED;
+    }
+
+    if(handleCtx->ctx.stopRequested)
+    {
+        return ENT_SYS_STOPPED;
+    }
+
+    prevCtx = iENT_RuntimeSetActiveCtx(&handleCtx->ctx);
+    sts = iENT_CTXStop(&handleCtx->ctx);
     iENT_RuntimeSetActiveCtx(prevCtx);
     return sts;
 }
@@ -252,6 +297,8 @@ static inline void iENT_CTXResetRuntime(ENT_CTX* ctx)
 
     ctx->rtRequested = false;
     ctx->rtEnabled = false;
+    ctx->running = false;
+    ctx->stopRequested = false;
     ctx->rtCpu = -1;
     ctx->rtPolicy = ENT_RT_POLICY_OTHER_E;
     ctx->rtPriority = 0;
@@ -333,6 +380,35 @@ static inline void iENT_CTXSetRtRequestedState(ENT_CTX* ctx,
     ctx->rtPolicy = ENT_RT_POLICY_OTHER_E;
     ctx->rtPriority = 0;
     ctx->rtLastError = 0;
+}
+
+static MSG_ID_T iENT_CTXStop(ENT_CTX* ctx)
+{
+    MSG_ID_T sts = ENT_SYS_NORMAL;
+
+    if(ctx == NULL)
+    {
+        return ENT_SYS_INVALID_ARGUMENT;
+    }
+
+    if(!ctx->isInit)
+    {
+        return ENT_SYS_STOPPED;
+    }
+
+    UTL_LockEnter(ctx->entLock);
+    if(!ctx->stopRequested)
+    {
+        ctx->stopRequested = true;
+        sts = ENT_SYS_NORMAL;
+    }
+    else
+    {
+        sts = ENT_SYS_STOPPED;
+    }
+    UTL_CVWakeAll(ctx->entCV);
+    UTL_LockLeave(ctx->entLock);
+    return sts;
 }
 
 static MSG_ID_T iENT_CTXApplyRtMode(ENT_CTX* ctx,
@@ -577,6 +653,8 @@ static MSG_ID_T iENT_CTXInit(ENT_CTX* ctx,
     }
 
     iENT_CTXApplyRtMode(ctx,mode);
+    ctx->running = false;
+    ctx->stopRequested = false;
     ctx->isInit = true;
 
     return ENT_SYS_NORMAL;
@@ -584,6 +662,8 @@ static MSG_ID_T iENT_CTXInit(ENT_CTX* ctx,
 
 static MSG_ID_T iENT_CTXClose(ENT_CTX* ctx)
 {
+    MSG_ID_T sts = ENT_SYS_NORMAL;
+
     if(ctx == NULL)
     {
         return ENT_SYS_CLOSE_UNINITIALIZED;
@@ -593,6 +673,19 @@ static MSG_ID_T iENT_CTXClose(ENT_CTX* ctx)
     {
         return ENT_SYS_CLOSE_UNINITIALIZED;
     }
+
+    sts = iENT_CTXStop(ctx);
+    if(sts < 0 && sts != ENT_SYS_STOPPED)
+    {
+        return sts;
+    }
+
+    UTL_LockEnter(ctx->entLock);
+    while(ctx->running)
+    {
+        UTL_CVWait(ctx->entCV,ctx->entLock,0,RW_WRITE_E);
+    }
+    UTL_LockLeave(ctx->entLock);
 
 #ifndef WIN32
     if(ctx->rtEnabled)
@@ -619,19 +712,43 @@ static MSG_ID_T iENT_CTXClose(ENT_CTX* ctx)
 
 static MSG_ID_T iENT_CTXRun(ENT_CTX* ctx)
 {
+    MSG_ID_T waitSts = ENT_SYS_NORMAL;
+
     if(ctx == NULL || !ctx->isInit)
     {
         return ENT_SYS_RUN_UNINITIALIZED;
     }
 
-    while(1)
+    UTL_LockEnter(ctx->entLock);
+    if(ctx->stopRequested)
     {
-        UTL_LockEnter(ctx->entLock);
-        UTL_CVWait(ctx->entCV,ctx->entLock,0,RW_WRITE_E);
         UTL_LockLeave(ctx->entLock);
-        break;
+        return ENT_SYS_STOPPED;
     }
-    return ENT_SYS_NORMAL;
+
+    if(ctx->running)
+    {
+        UTL_LockLeave(ctx->entLock);
+        return ENT_SYS_ALREADY_INITIALIZED;
+    }
+
+    ctx->running = true;
+    while(!ctx->stopRequested)
+    {
+        waitSts = UTL_CVWait(ctx->entCV,ctx->entLock,0,RW_WRITE_E);
+        if(waitSts < 0)
+        {
+            ctx->running = false;
+            UTL_CVWakeAll(ctx->entCV);
+            UTL_LockLeave(ctx->entLock);
+            return waitSts;
+        }
+    }
+
+    ctx->running = false;
+    UTL_CVWakeAll(ctx->entCV);
+    UTL_LockLeave(ctx->entLock);
+    return ENT_SYS_STOPPED;
 }
 
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
@@ -685,6 +802,11 @@ ENT_PUBLIC MSG_ID_T  ENT_SetRtAttributes(ENT_HANDLE handle,
                                          int rtPriority)
 {
     return iENT_HandleSetRtAttributes(handle, rtCpu, rtPolicy, rtPriority);
+}
+
+ENT_PUBLIC MSG_ID_T  ENT_Stop(ENT_HANDLE handle)
+{
+    return iENT_HandleStop(handle);
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *

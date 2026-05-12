@@ -23,6 +23,54 @@ int main(void)
         return EXIT_FAILURE;
     }
 
+    if(expect_true(ENT_SYS_INVALID_ARGUMENT < 0,
+                   "ENT_SYS_INVALID_ARGUMENT should be negative") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
+    if(expect_true(ENT_MsgIsError(ENT_SYS_INVALID_ARGUMENT) == true,
+                   "ENT_SYS_INVALID_ARGUMENT should be an error code") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
+    if(expect_true(strcmp(ENT_MsgSubmoduleName(ENT_SYS_INVALID_ARGUMENT), "SYS") == 0,
+                   "ENT_SYS_INVALID_ARGUMENT submodule name lookup mismatch") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
+    if(expect_true(strcmp(ENT_MsgText(ENT_SYS_INVALID_ARGUMENT), "invalid common argument") == 0,
+                   "ENT_SYS_INVALID_ARGUMENT message text lookup mismatch") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
+    if(expect_true(ENT_SYS_STOPPED < 0,
+                   "ENT_SYS_STOPPED should be negative") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
+    if(expect_true(ENT_MsgIsError(ENT_SYS_STOPPED) == true,
+                   "ENT_SYS_STOPPED should be an error code") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
+    if(expect_true(strcmp(ENT_MsgSubmoduleName(ENT_SYS_STOPPED), "SYS") == 0,
+                   "ENT_SYS_STOPPED submodule name lookup mismatch") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
+    if(expect_true(strcmp(ENT_MsgText(ENT_SYS_STOPPED), "ent stopped") == 0,
+                   "ENT_SYS_STOPPED message text lookup mismatch") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
     if(expect_true(ENT_INIT_INVALID_ARGUMENT < 0,
                    "ENT_INIT_INVALID_ARGUMENT should be negative") != 0)
     {

@@ -273,6 +273,9 @@ int main(void)
     ENT_Run(handleA);
     ENT_Run(handleB);
 
+    ENT_Stop(handleB);
+    ENT_Stop(handleA);
+
     ENT_Close(&handleB);
     ENT_Close(&handleA);
     return 0;
@@ -312,6 +315,7 @@ int main(void)
 - 共享基础设施不会因为某一个实例失败或关闭被误杀
 - 不要把同一个 `ENT_HANDLE` 句柄重复 close
 - 如果需要并发运行多个实例，建议在各自线程中调度 `ENT_Run()`
+- 如果需要让 `ENT_Run()` 提前退出，先调用 `ENT_Stop()`，再调用 `ENT_Close()`
 
 当前仓库测试已覆盖：
 
