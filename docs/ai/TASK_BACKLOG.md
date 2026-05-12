@@ -1,55 +1,81 @@
 # AI Task Backlog
 
-本文档是 ent 后续 AI coding agent 任务的第一版 backlog。所有任务执行前必须先生成任务卡，必要时先做 impact-scan。
+本文档是 ent 后续 AI coding agent 任务的第一版 backlog。任何任务执行前都必须先生成任务卡；高风险模块先做 impact-scan。
 
-## P0
+## 已完成 / 已关闭
 
 ### ENT-001：ent_log 返回码统一到 ent.msg
 
-- 目标：扫描并规划 `ent_log` 返回码从裸数字或私有错误码迁移到 `msg/ent.msg` 的影响面。
-- 非目标：第一阶段不直接修改 log 业务代码，不调整 API 签名，不改 CI。
-- 风险：R3，涉及返回语义、调用方兼容性、测试断言和消息码生成链路。
-- 推荐授权等级：L1 impact-scan，后续实现再进入 L2。
-- 预期验证命令：`git diff --check`、`rg "return -|return 0|return 1|ENT_LOG|ENT_SYS" comm inc test msg`、后续实现阶段运行 `ctest --test-dir build --output-on-failure`。
+- 状态：已完成（PR #9）
+- 说明：`ent_log` 成功返回路径已统一到 `ENT_SYS_NORMAL`，并完成对应 impact-scan、实现、验证和合并。
 
 ### ENT-002：test_ent_log 增加 flush/close 边界测试
 
-- 目标：补齐 log flush / close 的重复调用、closing 状态、失败路径和资源释放测试。
-- 非目标：不重构 log 实现，不改变 public API，不统一返回码。
-- 风险：R2，可能暴露现有生命周期 bug。
+- 状态：已完成（PR #10）
+- 说明：`test_ent_log` 已补齐 flush / close / ctx / interval=0 边界测试。
+
+### ENT-009：重审 ENT_Init / ENT_RuntimeInit 多实例收口边界
+
+- 状态：已完成（impact-scan）
+- 说明：已完成只读扫描，为后续 handle-based 收口提供了影响面与风险边界。
+
+### ENT-010：收口 ENT_Init 为多实例入口并压缩函数长度
+
+- 状态：已完成（PR #19）
+- 说明：已删除对外 `ENT_Runtime*` public API，`ENT_Init` / `ENT_Close` / `ENT_Run` / `ENT_SetRtAttributes` 成为 handle-based 对外入口。
+
+### ENT-011：清理旧 Runtime API 并同步文档与测试
+
+- 状态：已完成（PR #19）
+- 说明：README、example、test/downstream_consumer 与 public header 已同步到 handle-based API。
+
+## 进行中
+
+### ENT-012：ENT_HANDLE Init / Run / Stop / Close 闭环
+
+- 状态：进行中（PR #20）
+- 目标：让 `ENT_HANDLE` 的 `Init / Run / Stop / Close` 形成完整生命周期闭环，避免重复初始化，支持 stop 唤醒和 close 收口。
+- 非目标：不改 DB、timer、SHM、socket 主逻辑，不恢复 `ENT_Runtime*`，不做旧 API 兼容。
+- 风险：R3，涉及 public API、状态机、资源释放和并发关闭。
 - 推荐授权等级：L2。
-- 预期验证命令：`git diff --check`、`cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`、`cmake --build build -j4`、`ctest --test-dir build --output-on-failure`。
+- 预期验证命令：
+  - `git diff --check`
+  - `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`
+  - `cmake --build build -j4`
+  - `ctest --test-dir build --output-on-failure -R "test_ent_init|test_ent_msg|test_ent_log|test_ent_log_flush_deadline|test_ent_db|test_security|test_utl_thread|test_utl_tpool_integration|test_utl_timer|test_ent_shm"`
 
-### ENT-003：ent_shm API skeleton
+## P0
 
-- 目标：新增 `ent_shm` public API skeleton、最小实现和编译接入，为后续共享内存能力建立边界。
-- 非目标：不实现完整跨进程一致性、不做性能 benchmark、不提供复杂持久化语义。
-- 风险：R3，涉及 public header、ABI、Windows / Linux mmap 差异和资源生命周期。
-- 推荐授权等级：L1 impact-scan 后 L2 实现。
-- 预期验证命令：`git diff --check`、`cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`、`cmake --build build -j4`、`ctest --test-dir build --output-on-failure`。
+### ENT-003：ent_shm 生命周期边界硬化
+
+- 目标：梳理并补强 `ent_shm` 的 open / flush / close 生命周期边界、重复 close、失败路径和跨平台差异说明。
+- 非目标：不重做 API 体系，不新增消息码，不重构 mmap / file-mapping 主逻辑。
+- 风险：R3，涉及 public API、资源释放、Windows / Linux 差异。
+- 推荐授权等级：L1 impact-scan 后 L2。
+- 预期验证命令：`git diff --check`、`ctest --test-dir build --output-on-failure -R "test_ent_shm"`。
 
 ### ENT-004：Windows CI 增加 test_ent_log 文件路径验证
 
 - 目标：让 Windows CI 覆盖 `test_ent_log` 对文件路径、目录创建、路径分隔符的关键行为。
-- 非目标：不重写 CI 矩阵，不调整第三方依赖策略，不改变 log API。
+- 非目标：不重构 CI 矩阵，不调整第三方依赖策略，不改 log API。
 - 风险：R3，涉及 CI workflow、Windows shell、路径语义和 artifact。
 - 推荐授权等级：L1 impact-scan 后 L2 / L3。
 - 预期验证命令：`git diff --check`、本地 Windows `ctest --test-dir build -C Release --output-on-failure`、GitHub Actions Windows job。
 
-### ENT-005：扫描裸 return -1/0/1 与私有错误码
+### ENT-005：清点 public API 与内部 helper 的裸数字返回
 
-- 目标：只读扫描库内裸数字返回和私有错误码，分类为 OK、invalid、busy、fatal、nonfatal 等候选语义。
-- 非目标：不直接替换代码，不新增消息码，不调整测试。
-- 风险：R2，扫描结果会影响后续返回语义治理。
+- 目标：只读扫描库内裸数字返回和私有错误码，区分 public API、内部 helper、test/perf stub 三类返回语义，并标出真正需要收口的 public contract 缺口。
+- 非目标：不直接替换代码，不新增消息码，不调整测试，不把测试桩或 perf harness 的哨兵返回当成产品缺陷。
+- 风险：R2，扫描结果会影响后续返回语义治理，但主要是分类与收口优先级问题。
 - 推荐授权等级：L1。
 - 预期验证命令：`rg "return\\s+[-]?[0-9]+\\s*;" comm inc test`、`rg "ENT_.*_(FAILED|BAD|IN_USE|NON_FATAL|NORMAL)" comm inc test msg`。
 
 ## P1
 
-### ENT-101：runtime 多实例测试补齐
+### ENT-101：ENT_HANDLE 多实例并发/隔离边界测试补齐
 
-- 目标：补齐 runtime 多实例初始化失败、局部关闭、状态隔离和清理顺序测试。
-- 非目标：不重构 runtime 架构，不改变 `ENT_RUNTIME` public API。
+- 目标：补齐 `ENT_HANDLE` 多实例并发运行、交错 stop / close、初始化失败、局部关闭、状态隔离和清理顺序测试。
+- 非目标：不重构 handle 架构，不恢复 `ENT_Runtime*` public API。
 - 风险：R3，涉及全局状态、生命周期和下游行为。
 - 推荐授权等级：L1 impact-scan 后 L2。
 - 预期验证命令：`git diff --check`、`cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`、`cmake --build build -j4`、`ctest --test-dir build --output-on-failure`。
@@ -65,40 +91,40 @@
 ### ENT-103：thread/tpool/timer 返回语义 review
 
 - 目标：review thread / tpool / timer 的返回码、失败路径和生命周期语义，输出问题清单。
-- 非目标：不直接修改实现，不扩大到 runtime / db / log。
+- 非目标：不直接修改实现，不扩展到 runtime / db / log。
 - 风险：R2，可能发现跨模块返回语义不一致。
 - 推荐授权等级：L1。
 - 预期验证命令：`rg "return\\s+[-]?[0-9]+\\s*;" comm inc test`、`rg "UTL_|ENT_THRD|ENT_TPL|ENT_TMR" comm inc test msg`。
 
-### ENT-104：README 增加 API 返回语义速查表
+### ENT-104：README 增加 handle-based API 返回语义速查表
 
-- 目标：在 README 或 docs 中整理 public API 返回语义速查表。
-- 非目标：不改变代码、不新增消息码、不修改测试。
-- 风险：R1，文档可能暴露现有不一致。
+- 目标：在 README 中整理 handle-based public API 返回语义速查表。
+- 非目标：不改代码、不新增消息码、不调整测试。
+- 风险：R1，文档可能和实现不同步。
 - 推荐授权等级：L2。
-- 预期验证命令：`git diff --check`、文档链接检查、人工 review。
+- 预期验证命令：`git diff --check`、文档链路 review。
 
 ### ENT-105：CI artifact 上传失败日志
 
-- 目标：让 CI 在失败时上传关键构建和测试日志，方便 triage。
-- 非目标：不改构建逻辑，不改变测试断言。
+- 目标：让 CI 在失败时上传关键构建和测试日志，便于 triage。
+- 非目标：不改构建逻辑，不改变失败判定。
 - 风险：R3，涉及 workflow 和 artifact 权限。
 - 推荐授权等级：L1 impact-scan 后 L2 / L3。
-- 预期验证命令：`git diff --check`、GitHub Actions dry review、实际失败 job artifact 验证。
+- 预期验证命令：`git diff --check`、GitHub Actions dry review、失败 job artifact 验证。
 
 ## P2
 
-### ENT-201：docs/architecture/runtime.md
+### ENT-201：docs/architecture/handle-lifecycle.md
 
-- 目标：补充 runtime 架构文档，说明单实例与多实例边界、资源归属和关闭顺序。
-- 非目标：不改代码，不调整测试。
+- 目标：补齐 handle 生命周期架构文档，说明 `ENT_HANDLE` 的 Init / Run / Stop / Close 边界、资源归属和关闭顺序。
+- 非目标：不改代码，不调整测试，不恢复 `ENT_Runtime*` 文档。
 - 风险：R1。
 - 推荐授权等级：L2。
 - 预期验证命令：`git diff --check`、人工 review。
 
 ### ENT-202：docs/architecture/log-lifecycle.md
 
-- 目标：补充 log 生命周期文档，说明 service-level 和 handle-level close / flush 语义。
+- 目标：补齐 log 生命周期文档，说明 service-level 和 handle-level close / flush 语义，以及当前 handle-based API 的收口边界。
 - 非目标：不统一返回码，不修改 log 实现。
 - 风险：R1。
 - 推荐授权等级：L2。

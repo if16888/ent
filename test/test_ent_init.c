@@ -23,6 +23,8 @@ static int s_block_wait_mode = 0;
 static UTL_CV s_block_wait_cv = NULL;
 static volatile int s_block_wait_entered = 0;
 static volatile int s_block_wait_released = 0;
+static volatile int s_close_thread_started = 0;
+static volatile int s_close_wait_entered = 0;
 static int s_log_init_calls = 0;
 static int s_log_close_handle_calls = 0;
 static int s_log_close_calls = 0;
@@ -93,6 +95,8 @@ static void reset_wait_capture(void)
     s_block_wait_cv = NULL;
     s_block_wait_entered = 0;
     s_block_wait_released = 0;
+    s_close_thread_started = 0;
+    s_close_wait_entered = 0;
 }
 
 static void enable_auto_stop_after_wait(void)
@@ -124,6 +128,22 @@ static void iENT_TestSleepMs(unsigned int ms)
 static void wait_until_blocking_wait_entered(void)
 {
     while(!s_block_wait_entered)
+    {
+        iENT_TestSleepMs(1);
+    }
+}
+
+static void wait_until_close_thread_started(void)
+{
+    while(!s_close_thread_started)
+    {
+        iENT_TestSleepMs(1);
+    }
+}
+
+static void wait_until_close_wait_entered(void)
+{
+    while(!s_close_wait_entered)
     {
         iENT_TestSleepMs(1);
     }
@@ -205,6 +225,18 @@ typedef struct TEST_RUN_THREAD_CTX
     MSG_ID_T   ret;
 } TEST_RUN_THREAD_CTX;
 
+typedef struct TEST_CLOSE_THREAD_CTX
+{
+    ENT_HANDLE* handle;
+    MSG_ID_T    ret;
+} TEST_CLOSE_THREAD_CTX;
+
+#ifdef WIN32
+static DWORD WINAPI close_thread_proc(void* arg);
+#else
+static void* close_thread_proc(void* arg);
+#endif
+
 #ifdef WIN32
 typedef HANDLE TEST_THREAD;
 static DWORD WINAPI run_stop_thread_proc(void* arg)
@@ -227,6 +259,27 @@ static void* run_stop_thread_proc(void* arg)
 #endif
 }
 
+#ifdef WIN32
+static DWORD WINAPI close_thread_proc(void* arg)
+#else
+static void* close_thread_proc(void* arg)
+#endif
+{
+    TEST_CLOSE_THREAD_CTX* ctx = (TEST_CLOSE_THREAD_CTX*)arg;
+
+    s_close_thread_started = 1;
+    if(ctx != NULL)
+    {
+        ctx->ret = ENT_Close(ctx->handle);
+    }
+
+#ifdef WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
 static int start_test_thread(TEST_THREAD* th, TEST_RUN_THREAD_CTX* ctx)
 {
 #ifdef WIN32
@@ -239,6 +292,21 @@ static int start_test_thread(TEST_THREAD* th, TEST_RUN_THREAD_CTX* ctx)
     return (*th != NULL) ? 0 : -1;
 #else
     return pthread_create(th, NULL, run_stop_thread_proc, ctx);
+#endif
+}
+
+static int start_close_test_thread(TEST_THREAD* th, TEST_CLOSE_THREAD_CTX* ctx)
+{
+#ifdef WIN32
+    if(th == NULL)
+    {
+        return -1;
+    }
+
+    *th = CreateThread(NULL, 0, close_thread_proc, ctx, 0, NULL);
+    return (*th != NULL) ? 0 : -1;
+#else
+    return pthread_create(th, NULL, close_thread_proc, ctx);
 #endif
 }
 
@@ -488,7 +556,13 @@ MSG_ID_T UTL_CVWait(UTL_CV cv, UTL_LOCK lock, int ms, UTL_LOCK_RW_TYPE_T rwType)
     s_wait_calls++;
     if(s_block_wait_mode && cv == s_block_wait_cv)
     {
+        ENT_CTX* ctx = iENT_RuntimeActiveCtx();
+
         s_block_wait_entered = 1;
+        if(ctx != NULL && ctx->handleState == ENT_HANDLE_STATE_CLOSING_E)
+        {
+            s_close_wait_entered = 1;
+        }
         while(!s_block_wait_released)
         {
             iENT_TestSleepMs(1);
@@ -582,8 +656,8 @@ static int test_ent_run_waits_on_cv_with_lock(void)
         return 1;
     }
 
-    if(expect_true(threadCtx.ret == ENT_SYS_STOPPED,
-                   "ENT_Run should return STOPPED after ENT_Stop wakes it") != 0)
+    if(expect_true(threadCtx.ret == ENT_SYS_NORMAL,
+                   "ENT_Run should return NORMAL after ENT_Stop wakes it") != 0)
     {
         free(handle);
         return 1;
@@ -652,6 +726,166 @@ static int test_ent_stop_validates_states(void)
     }
 
     return 0;
+}
+
+static int test_ent_stop_rejects_stale_handle(void)
+{
+    ENT_HANDLE handle = NULL;
+    ENT_HANDLE staleHandle = NULL;
+
+    reset_wait_capture();
+    reset_close_counters();
+    reset_log_failures();
+
+    if(expect_true(ENT_Init(&handle, "demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
+                   "ENT_Init should succeed before testing stale ENT_Stop") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(handle != NULL, "ENT_Init should return a live handle before stale ENT_Stop") != 0)
+    {
+        close_handle_if_needed(&handle);
+        return 1;
+    }
+
+    staleHandle = handle;
+    if(expect_true(ENT_Close(&handle) == ENT_SYS_NORMAL && handle == NULL,
+                   "ENT_Close should clear the live handle before stale ENT_Stop checks") != 0)
+    {
+        return 1;
+    }
+
+    return expect_true(ENT_Stop(staleHandle) == ENT_SYS_BAD_HANDLE,
+                       "ENT_Stop should reject a stale handle");
+}
+
+static int test_ent_run_rejects_stale_handle(void)
+{
+    ENT_HANDLE handle = NULL;
+    ENT_HANDLE staleHandle = NULL;
+
+    reset_wait_capture();
+    reset_close_counters();
+    reset_log_failures();
+
+    if(expect_true(ENT_Init(&handle, "demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
+                   "ENT_Init should succeed before testing stale ENT_Run") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(handle != NULL, "ENT_Init should return a live handle before stale ENT_Run") != 0)
+    {
+        close_handle_if_needed(&handle);
+        return 1;
+    }
+
+    staleHandle = handle;
+    if(expect_true(ENT_Close(&handle) == ENT_SYS_NORMAL && handle == NULL,
+                   "ENT_Close should clear the live handle before stale ENT_Run checks") != 0)
+    {
+        return 1;
+    }
+
+    return expect_true(ENT_Run(staleHandle) == ENT_SYS_BAD_HANDLE,
+                       "ENT_Run should reject a stale handle");
+}
+
+static int test_ent_close_rejects_stale_handle(void)
+{
+    ENT_HANDLE handle = NULL;
+    ENT_HANDLE staleHandle = NULL;
+
+    reset_wait_capture();
+    reset_close_counters();
+    reset_log_failures();
+
+    if(expect_true(ENT_Init(&handle, "demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
+                   "ENT_Init should succeed before testing stale ENT_Close") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(handle != NULL, "ENT_Init should return a live handle before stale ENT_Close") != 0)
+    {
+        close_handle_if_needed(&handle);
+        return 1;
+    }
+
+    staleHandle = handle;
+    if(expect_true(ENT_Close(&handle) == ENT_SYS_NORMAL && handle == NULL,
+                   "ENT_Close should clear the live handle before stale ENT_Close checks") != 0)
+    {
+        return 1;
+    }
+
+    return expect_true(ENT_Close(&staleHandle) == ENT_SYS_BAD_HANDLE,
+                       "ENT_Close should reject a stale handle pointer");
+}
+
+static int test_ent_run_returns_stopped_when_stop_requested_before_entry(void)
+{
+    ENT_HANDLE handle = NULL;
+
+    reset_wait_capture();
+    reset_close_counters();
+    reset_log_failures();
+
+    if(expect_true(ENT_Init(&handle, "demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
+                   "ENT_Init should succeed before testing pre-stopped ENT_Run") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(ENT_Stop(handle) == ENT_SYS_NORMAL,
+                   "ENT_Stop should succeed before checking the pre-stopped run path") != 0)
+    {
+        close_handle_if_needed(&handle);
+        return 1;
+    }
+
+    if(expect_true(ENT_Run(handle) == ENT_SYS_STOPPED,
+                   "ENT_Run should report STOPPED when stop was already requested") != 0)
+    {
+        close_handle_if_needed(&handle);
+        return 1;
+    }
+
+    return expect_true(ENT_Close(&handle) == ENT_SYS_NORMAL && handle == NULL,
+                       "ENT_Close should still succeed after a pre-stopped ENT_Run");
+}
+
+static int test_ent_set_rt_attributes_rejects_stale_handle(void)
+{
+    ENT_HANDLE handle = NULL;
+    ENT_HANDLE staleHandle = NULL;
+
+    reset_wait_capture();
+    reset_close_counters();
+    reset_log_failures();
+
+    if(expect_true(ENT_Init(&handle, "demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
+                   "ENT_Init should succeed before testing stale ENT_SetRtAttributes") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(handle != NULL, "ENT_Init should return a live handle before stale ENT_SetRtAttributes") != 0)
+    {
+        close_handle_if_needed(&handle);
+        return 1;
+    }
+
+    staleHandle = handle;
+    if(expect_true(ENT_Close(&handle) == ENT_SYS_NORMAL && handle == NULL,
+                   "ENT_Close should clear the live handle before stale ENT_SetRtAttributes checks") != 0)
+    {
+        return 1;
+    }
+
+    return expect_true(ENT_SetRtAttributes(staleHandle, -1, ENT_RT_POLICY_OTHER_E, 0) == ENT_SYS_BAD_HANDLE,
+                       "ENT_SetRtAttributes should reject a stale handle");
 }
 
 static int test_ent_run_rejects_closed_handle(void)
@@ -731,8 +965,8 @@ static int test_ent_close_stops_running_handle(void)
         return 1;
     }
 
-    if(expect_true(threadCtx.ret == ENT_SYS_STOPPED,
-                   "ENT_Run should return STOPPED after ENT_Close stops it") != 0)
+    if(expect_true(threadCtx.ret == ENT_SYS_NORMAL,
+                   "ENT_Run should return NORMAL after ENT_Close stops it") != 0)
     {
         return 1;
     }
@@ -743,6 +977,100 @@ static int test_ent_close_stops_running_handle(void)
     }
 
     return 0;
+}
+
+static int test_ent_close_waits_for_running_worker_before_free(void)
+{
+    TEST_THREAD runTh;
+    TEST_THREAD closeTh;
+    TEST_RUN_THREAD_CTX runCtx;
+    TEST_CLOSE_THREAD_CTX closeCtx;
+    ENT_HANDLE handle = (ENT_HANDLE)calloc(1, sizeof(*handle));
+    ENT_HANDLE rawHandle = handle;
+    int failed = 0;
+
+    if(handle == NULL)
+    {
+        return 1;
+    }
+
+    handle->magic = ENT_HANDLE_MAGIC;
+    handle->ctx.isInit = true;
+    handle->ctx.entCV = (UTL_CV)0x3344;
+    handle->ctx.entLock = (UTL_LOCK)0x7788;
+    handle->ctx.running = false;
+    handle->ctx.stopRequested = false;
+    handle->ctx.handleState = ENT_HANDLE_STATE_ACTIVE_E;
+    handle->ctx.activeCalls = 0u;
+    reset_wait_capture();
+    enable_blocking_wait(handle->ctx.entCV);
+
+    runCtx.handle = handle;
+    runCtx.ret = ENT_SYS_INVALID_ARGUMENT;
+    closeCtx.handle = &handle;
+    closeCtx.ret = ENT_SYS_INVALID_ARGUMENT;
+
+    if(expect_true(start_test_thread(&runTh, &runCtx) == 0,
+                   "thread start should start the ENT_Run worker for close-wait testing") != 0)
+    {
+        free(rawHandle);
+        return 1;
+    }
+
+    wait_until_blocking_wait_entered();
+
+    if(expect_true(start_close_test_thread(&closeTh, &closeCtx) == 0,
+                   "thread start should start the ENT_Close worker") != 0)
+    {
+        release_blocking_wait();
+        join_test_thread(runTh);
+        free(rawHandle);
+        return 1;
+    }
+
+    wait_until_close_thread_started();
+    wait_until_close_wait_entered();
+
+    if(expect_true(ENT_Run(handle) != ENT_SYS_NORMAL,
+                   "ENT_Run should not succeed while close is in progress") != 0)
+    {
+        failed = 1;
+    }
+
+    release_blocking_wait();
+
+    if(expect_true(join_test_thread(runTh) == 0,
+                   "thread join should wait for the ENT_Run worker to exit after close wait") != 0)
+    {
+        failed = 1;
+    }
+
+    if(expect_true(join_test_thread(closeTh) == 0,
+                   "thread join should wait for the ENT_Close worker to exit") != 0)
+    {
+        failed = 1;
+    }
+
+    if(expect_true(runCtx.ret == ENT_SYS_NORMAL,
+                   "ENT_Run should return NORMAL after ENT_Close stops it") != 0)
+    {
+        failed = 1;
+    }
+
+    if(expect_true(closeCtx.ret == ENT_SYS_NORMAL,
+                   "ENT_Close should return NORMAL after waiting for the running worker") != 0)
+    {
+        failed = 1;
+    }
+
+    if(expect_true(handle == NULL,
+                   "ENT_Close should clear the handle after waiting for the running worker") != 0)
+    {
+        failed = 1;
+    }
+
+    free(rawHandle);
+    return failed;
 }
 
 static int test_ent_close_clears_handle_instances(void)
@@ -1313,8 +1641,8 @@ static int test_handle_instances_can_run_and_close_independently(void)
     }
 
     enable_auto_stop_after_wait();
-    if(expect_true(ENT_Run(handleA) == ENT_SYS_STOPPED,
-                   "ENT_Run should stop for handle A after one wait") != 0)
+    if(expect_true(ENT_Run(handleA) == ENT_SYS_NORMAL,
+                   "ENT_Run should return NORMAL for handle A after one wait and stop wake-up") != 0)
     {
         failed = 1;
         goto CLEANUP;
@@ -1330,8 +1658,8 @@ static int test_handle_instances_can_run_and_close_independently(void)
     }
 
     enable_auto_stop_after_wait();
-    if(expect_true(ENT_Run(handleB) == ENT_SYS_STOPPED,
-                   "ENT_Run should stop for handle B after one wait") != 0)
+    if(expect_true(ENT_Run(handleB) == ENT_SYS_NORMAL,
+                   "ENT_Run should return NORMAL for handle B after one wait and stop wake-up") != 0)
     {
         failed = 1;
         goto CLEANUP;
@@ -1475,8 +1803,8 @@ static int test_handle_second_instance_lock_init_failure_keeps_first_alive(void)
 
     reset_wait_capture();
     enable_auto_stop_after_wait();
-    if(expect_true(ENT_Run(handleA) == ENT_SYS_STOPPED,
-                   "Handle A should stop cleanly after handle B lock-init failure") != 0)
+    if(expect_true(ENT_Run(handleA) == ENT_SYS_NORMAL,
+                   "Handle A should return NORMAL after handle B lock-init failure stop wake-up") != 0)
     {
         failed = 1;
         goto CLEANUP;
@@ -1582,8 +1910,8 @@ static int test_handle_second_instance_log_option_failure_keeps_first_alive(void
 
     reset_wait_capture();
     enable_auto_stop_after_wait();
-    if(expect_true(ENT_Run(handleA) == ENT_SYS_STOPPED,
-                   "Handle A should stop cleanly after handle B log-option failure") != 0)
+    if(expect_true(ENT_Run(handleA) == ENT_SYS_NORMAL,
+                   "Handle A should return NORMAL after handle B log-option failure stop wake-up") != 0)
     {
         failed = 1;
         goto CLEANUP;
@@ -1642,6 +1970,12 @@ int main(void)
     failures += test_ent_set_rt_attributes_rejects_uninitialized_context();
     failures += test_ent_set_rt_attributes_allows_noop_after_init();
     failures += test_ent_set_rt_attributes_rejects_normal_mode();
+    failures += test_ent_stop_rejects_stale_handle();
+    failures += test_ent_run_rejects_stale_handle();
+    failures += test_ent_close_rejects_stale_handle();
+    failures += test_ent_run_returns_stopped_when_stop_requested_before_entry();
+    failures += test_ent_set_rt_attributes_rejects_stale_handle();
+    failures += test_ent_close_waits_for_running_worker_before_free();
     failures += test_handle_instance_uses_isolated_context();
     failures += test_handle_instances_can_run_and_close_independently();
     failures += test_handle_second_instance_lock_init_failure_keeps_first_alive();

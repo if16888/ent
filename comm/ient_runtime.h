@@ -24,6 +24,13 @@
 #include "ent_log.h"
 #include "ent_utility.h"
 
+typedef enum
+{
+    ENT_HANDLE_STATE_ACTIVE_E = 0,
+    ENT_HANDLE_STATE_CLOSING_E,
+    ENT_HANDLE_STATE_CLOSED_E
+} ENT_HANDLE_STATE_E;
+
 typedef struct ENT_CTX
 {
     bool           isInit;
@@ -31,6 +38,8 @@ typedef struct ENT_CTX
     bool           rtEnabled;
     bool           running;
     bool           stopRequested;
+    ENT_HANDLE_STATE_E handleState;
+    unsigned int   activeCalls;
     char*          entName;
     char*          workPath;
     char*          logName;

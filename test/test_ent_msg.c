@@ -47,6 +47,36 @@ int main(void)
         return EXIT_FAILURE;
     }
 
+    if(expect_true(ENT_SYS_BAD_HANDLE < 0,
+                   "ENT_SYS_BAD_HANDLE should be negative") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
+    if(expect_true(ENT_MsgIsError(ENT_SYS_BAD_HANDLE) == true,
+                   "ENT_SYS_BAD_HANDLE should be an error code") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
+    if(expect_true(ENT_MsgGetSubmodule(ENT_SYS_BAD_HANDLE) == 0u,
+                   "ENT_SYS_BAD_HANDLE submodule id decode mismatch") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
+    if(expect_true(strcmp(ENT_MsgSubmoduleName(ENT_SYS_BAD_HANDLE), "SYS") == 0,
+                   "ENT_SYS_BAD_HANDLE submodule name lookup mismatch") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
+    if(expect_true(strcmp(ENT_MsgText(ENT_SYS_BAD_HANDLE), "invalid ent handle") == 0,
+                   "ENT_SYS_BAD_HANDLE message text lookup mismatch") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
     if(expect_true(ENT_SYS_STOPPED < 0,
                    "ENT_SYS_STOPPED should be negative") != 0)
     {

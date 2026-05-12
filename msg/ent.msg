@@ -38,6 +38,7 @@ ALREADY_INITIALIZED ok  1  ent already initialized
 CLOSE_UNINITIALIZED err 1  ent not initialized for close
 RUN_UNINITIALIZED   err 2  ent not initialized for run
 INVALID_ARGUMENT    err 3  invalid common argument
+BAD_HANDLE          err 6  invalid ent handle
 STOPPED             err 4  ent stopped
 INVALID_MSGCODE     err 5  invalid message code parts: module[%u] submodule[%u] inner[%u]
 
