@@ -72,10 +72,10 @@
 
 ## P1
 
-### ENT-101：runtime 多实例测试补齐
+### ENT-101：ENT_HANDLE 多实例测试补齐
 
-- 目标：补齐 runtime 多实例初始化失败、局部关闭、状态隔离和清理顺序测试。
-- 非目标：不重构 runtime 架构，不改变 `ENT_Runtime*` public API。
+- 目标：补齐 `ENT_HANDLE` 多实例初始化失败、局部关闭、状态隔离和清理顺序测试。
+- 非目标：不重构 handle 架构，不恢复 `ENT_Runtime*` public API。
 - 风险：R3，涉及全局状态、生命周期和下游行为。
 - 推荐授权等级：L1 impact-scan 后 L2。
 - 预期验证命令：`git diff --check`、`cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`、`cmake --build build -j4`、`ctest --test-dir build --output-on-failure`。
@@ -96,9 +96,9 @@
 - 推荐授权等级：L1。
 - 预期验证命令：`rg "return\\s+[-]?[0-9]+\\s*;" comm inc test`、`rg "UTL_|ENT_THRD|ENT_TPL|ENT_TMR" comm inc test msg`。
 
-### ENT-104：README 增加 API 返回语义速查表
+### ENT-104：README 增加 handle-based API 返回语义速查表
 
-- 目标：在 README 中整理 public API 返回语义速查表。
+- 目标：在 README 中整理 handle-based public API 返回语义速查表。
 - 非目标：不改代码、不新增消息码、不调整测试。
 - 风险：R1，文档可能和实现不同步。
 - 推荐授权等级：L2。
@@ -114,17 +114,17 @@
 
 ## P2
 
-### ENT-201：docs/architecture/runtime.md
+### ENT-201：docs/architecture/handle-lifecycle.md
 
-- 目标：补齐 runtime 架构文档，说明单实例与多实例边界、资源归属和关闭顺序。
-- 非目标：不改代码，不调整测试。
+- 目标：补齐 handle 生命周期架构文档，说明 `ENT_HANDLE` 的 Init / Run / Stop / Close 边界、资源归属和关闭顺序。
+- 非目标：不改代码，不调整测试，不恢复 `ENT_Runtime*` 文档。
 - 风险：R1。
 - 推荐授权等级：L2。
 - 预期验证命令：`git diff --check`、人工 review。
 
 ### ENT-202：docs/architecture/log-lifecycle.md
 
-- 目标：补齐 log 生命周期文档，说明 service-level 和 handle-level close / flush 语义。
+- 目标：补齐 log 生命周期文档，说明 service-level 和 handle-level close / flush 语义，以及当前 handle-based API 的收口边界。
 - 非目标：不统一返回码，不修改 log 实现。
 - 风险：R1。
 - 推荐授权等级：L2。
