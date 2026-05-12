@@ -39,7 +39,6 @@ typedef enum
 } ENT_RT_POLICY_E;
 
 typedef struct ENT_HANDLE_TAG* ENT_HANDLE;
-typedef ENT_HANDLE ENT_RUNTIME;
 
 ENT_PUBLIC MSG_ID_T  ENT_Init(ENT_HANDLE* handle,
                               const char* name,
@@ -55,21 +54,6 @@ ENT_PUBLIC MSG_ID_T  ENT_SetRtAttributes(ENT_HANDLE handle,
                                          int rtPriority);
 
 ENT_PUBLIC MSG_ID_T  ENT_Run(ENT_HANDLE handle);
-
-ENT_PUBLIC MSG_ID_T  ENT_RuntimeInit(ENT_RUNTIME* runtime,
-                                     const char* name,
-                                     const char* workPath,
-                                     ENT_LOG_LEV_E logLevel,
-                                     ENT_MODE_E mode);
-
-ENT_PUBLIC MSG_ID_T  ENT_RuntimeClose(ENT_RUNTIME runtime);
-
-ENT_PUBLIC MSG_ID_T  ENT_RuntimeSetRtAttributes(ENT_RUNTIME runtime,
-                                                int rtCpu,
-                                                ENT_RT_POLICY_E rtPolicy,
-                                                int rtPriority);
-
-ENT_PUBLIC MSG_ID_T  ENT_RuntimeRun(ENT_RUNTIME runtime);
 
 ENT_PUBLIC MSG_ID_T  ENT_Helpers();
 

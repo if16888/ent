@@ -2,7 +2,7 @@
 
 `ent` 是一个跨平台 C 组件库，当前主要提供以下能力：
 
-- 运行时初始化与多实例 runtime 管理
+- handle-based 初始化与多实例管理
 - 日志系统
 - 线程 / 锁 / 条件变量 / 线程池 / 定时器 / socket 等基础设施
 - 数据库访问封装（SQLite / MySQL / PostgreSQL，按构建配置启用）
@@ -232,9 +232,9 @@ Release workflow 现在会按平台 / 架构打包两类文件：
 
 ---
 
-## 9. 多实例 runtime 使用示例
+## 9. 多实例 handle 使用示例
 
-`ent` 现在支持通过 `ENT_RUNTIME` 句柄管理多个隔离的 runtime 实例。典型流程如下：
+`ent` 现在通过 `ENT_HANDLE` 句柄管理多个隔离实例。典型流程如下：
 
 ```c
 #include "ent_init.h"
@@ -243,97 +243,53 @@ Release workflow 现在会按平台 / 架构打包两类文件：
 
 int main(void)
 {
-    ENT_RUNTIME runtimeA = NULL;
-    ENT_RUNTIME runtimeB = NULL;
-    MSG_ID_T sts = 0;
+    ENT_HANDLE handleA = NULL;
+    ENT_HANDLE handleB = NULL;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
 
-    sts = ENT_RuntimeInit(&runtimeA, "node_a", "./work_a", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E);
+    sts = ENT_Init(&handleA, "node_a", "./work_a", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E);
     if(sts != ENT_SYS_NORMAL)
     {
         return 1;
     }
 
-    sts = ENT_RuntimeInit(&runtimeB, "node_b", "./work_b", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E);
+    sts = ENT_Init(&handleB, "node_b", "./work_b", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E);
     if(sts != ENT_SYS_NORMAL)
     {
-        ENT_RuntimeClose(runtimeA);
+        ENT_Close(&handleA);
         return 1;
     }
 
-    /* 可选：对单个 runtime 设置 RT 属性 */
-    sts = ENT_RuntimeSetRtAttributes(runtimeA, -1, ENT_RT_POLICY_OTHER_E, 0);
+    /* 可选：对单个 handle 设置 RT 属性 */
+    sts = ENT_SetRtAttributes(handleA, -1, ENT_RT_POLICY_OTHER_E, 0);
     if(sts != ENT_SYS_NORMAL && sts != ENT_RT_NOTRT)
     {
-        ENT_RuntimeClose(runtimeB);
-        ENT_RuntimeClose(runtimeA);
+        ENT_Close(&handleB);
+        ENT_Close(&handleA);
         return 1;
     }
 
     /* 实际项目中通常在各自线程中运行 */
-    ENT_RuntimeRun(runtimeA);
-    ENT_RuntimeRun(runtimeB);
+    ENT_Run(handleA);
+    ENT_Run(handleB);
 
-    ENT_RuntimeClose(runtimeB);
-    ENT_RuntimeClose(runtimeA);
+    ENT_Close(&handleB);
+    ENT_Close(&handleA);
     return 0;
 }
 ```
 
-### 9.1 `ENT_RUNTIME` 的作用
+### 9.1 `ENT_HANDLE` 的作用
 
-`ENT_RUNTIME` 的核心作用是：
+`ENT_HANDLE` 是对外统一的实例句柄。它的作用是：
 
-**把原来全局唯一的运行时上下文，变成“每个实例各自一份上下文”的显式句柄。**
+- 让每个实例持有独立的上下文
+- 保持初始化、运行、关闭语义一致
+- 避免一个实例的关闭直接覆盖另一个实例的状态
 
-也就是说：
+### 9.2 什么时候应该用 `ENT_HANDLE`
 
-- `ENT_Init / ENT_Run / ENT_Close` 更偏向**单实例 / 全局实例**模式
-- `ENT_RuntimeInit / ENT_RuntimeRun / ENT_RuntimeClose` 则是**多实例 / 显式实例句柄**模式
-
-可以把它理解成下面这个差异：
-
-```text
-单实例模式
------------
-process
-  └── gEntCtx
-       ├── entName
-       ├── workPath
-       ├── logPath
-       ├── entLock
-       ├── entCV
-       └── init / rt state
-
-多实例模式
------------
-process
-  ├── runtimeA -> ENT_CTX_A
-  │      ├── entName = node_a
-  │      ├── workPath = ./work_a
-  │      ├── logPath
-  │      ├── entLock
-  │      ├── entCV
-  │      └── init / rt state
-  │
-  └── runtimeB -> ENT_CTX_B
-         ├── entName = node_b
-         ├── workPath = ./work_b
-         ├── logPath
-         ├── entLock
-         ├── entCV
-         └── init / rt state
-```
-
-这意味着在同一个进程里，你可以：
-
-- 同时持有多个 runtime
-- 给每个 runtime 不同的 `name / workPath / logPath`
-- 分别初始化、运行、关闭它们
-- 避免一个实例的失败或关闭直接覆盖另一个实例的上下文
-
-### 9.2 什么时候应该用 `ENT_RUNTIME`
-
-更适合用多实例接口的场景包括：
+更适合用 handle 接口的场景包括：
 
 - 一个进程里同时管理多个逻辑节点 / 站点 / 对象
 - 把 `ent` 当作 SDK 嵌入到更大的宿主程序中
@@ -341,38 +297,27 @@ process
 
 ### 9.3 它的边界
 
-`ENT_RUNTIME` 隔离的是**实例状态**，不是把库里所有东西都做成完全物理隔离。
-
+`ENT_HANDLE` 隔离的是**实例状态**，不是把库里所有东西都做成完全物理隔离。
 当前实现更准确的理解是：
 
-- `ENT_RUNTIME` 负责隔离每个实例自己的 `ENT_CTX`
+- `ENT_HANDLE` 负责隔离每个实例自己的 `ENT_CTX`
 - 某些基础设施仍然可能由库内部统一管理，例如部分日志服务或公共子系统
 
 因此，多实例设计既要保证：
 
-- A、B 两个 runtime 的上下文互不覆盖
+- A、B 两个 handle 的上下文互不覆盖
 
 也要保证：
 
-- 共享基础设施不会因为某一个实例失败或关闭被误关
-
-这也是为什么仓库里现在专门补了多实例失败路径和关闭顺序测试。
-
-建议遵循这几个原则：
-
-- 每个 `ENT_RUNTIME` 对应独立的 `name/workPath`
-- 失败路径下，只关闭已经成功初始化的实例
-- 不要把同一个 `ENT_RUNTIME` 句柄重复 close
-- 如果需要并发运行多个实例，建议在各自线程中调度 `ENT_RuntimeRun()`
+- 共享基础设施不会因为某一个实例失败或关闭被误杀
+- 不要把同一个 `ENT_HANDLE` 句柄重复 close
+- 如果需要并发运行多个实例，建议在各自线程中调度 `ENT_Run()`
 
 当前仓库测试已覆盖：
 
 - 多实例独立初始化
-- 一个实例关闭后另一个仍可继续运行
+- 一个实例关闭后另一个实例仍可继续运行
 - 第二个实例初始化失败不会破坏第一个实例
-
----
-
 ## 10. 当前测试覆盖概览
 
 已接入 `ctest` 的测试目标包括：
@@ -412,7 +357,7 @@ process
 - SQLite / MySQL / PostgreSQL 都是**按构建结果启用**，不是运行时热插拔。
 - PostgreSQL 现在有显式顶层开关 `ENT_ENABLE_PGSQL`。
 - Windows CI 当前默认关闭 PostgreSQL 探测：
-  - `WINDOWS_DISABLE_PGSQL=ON`
+  - Windows CI also requires SQLite / MySQL / PostgreSQL to be available.
 - 静态库 `ent_s` 已显式传播系统库和数据库库依赖，便于下游静态链接。
 
 ### 11.1 DB 并发与生命周期语义

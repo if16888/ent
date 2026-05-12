@@ -658,15 +658,6 @@ ENT_PUBLIC MSG_ID_T  ENT_Init(ENT_HANDLE* handle,
 {
     return iENT_HandleInit(handle, name, workPath, logLevel, mode);
 }
-
-ENT_PUBLIC MSG_ID_T ENT_RuntimeInit(ENT_RUNTIME* runtime,
-                                    const char* name,
-                                    const char* workPath,
-                                    ENT_LOG_LEV_E logLevel,
-                                    ENT_MODE_E mode)
-{
-    return ENT_Init((ENT_HANDLE*)runtime, name, workPath, logLevel, mode);
-}
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :ENT_Close
@@ -688,27 +679,12 @@ ENT_PUBLIC MSG_ID_T  ENT_Close(ENT_HANDLE* handle)
     return iENT_HandleClose(handle);
 }
 
-ENT_PUBLIC MSG_ID_T ENT_RuntimeClose(ENT_RUNTIME runtime)
-{
-    ENT_HANDLE handle = (ENT_HANDLE)runtime;
-
-    return ENT_Close(&handle);
-}
-
 ENT_PUBLIC MSG_ID_T  ENT_SetRtAttributes(ENT_HANDLE handle,
                                          int rtCpu,
                                          ENT_RT_POLICY_E rtPolicy,
                                          int rtPriority)
 {
     return iENT_HandleSetRtAttributes(handle, rtCpu, rtPolicy, rtPriority);
-}
-
-ENT_PUBLIC MSG_ID_T ENT_RuntimeSetRtAttributes(ENT_RUNTIME runtime,
-                                               int rtCpu,
-                                               ENT_RT_POLICY_E rtPolicy,
-                                               int rtPriority)
-{
-    return ENT_SetRtAttributes((ENT_HANDLE)runtime, rtCpu, rtPolicy, rtPriority);
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
@@ -729,11 +705,6 @@ ENT_PUBLIC MSG_ID_T ENT_RuntimeSetRtAttributes(ENT_RUNTIME runtime,
 ENT_PUBLIC MSG_ID_T  ENT_Run(ENT_HANDLE handle)
 {
     return iENT_HandleRun(handle);
-}
-
-ENT_PUBLIC MSG_ID_T ENT_RuntimeRun(ENT_RUNTIME runtime)
-{
-    return ENT_Run((ENT_HANDLE)runtime);
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
