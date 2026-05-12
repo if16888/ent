@@ -1,7 +1,10 @@
 /tmp/
 /build/
+/build*/
+/build-*/
 /build-install*/
 /build-ci*/
+/vcpkg*/
 .local-install/
 .vscode/
 
