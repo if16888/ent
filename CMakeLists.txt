@@ -61,6 +61,10 @@ get_property(ENT_ENABLE_MYSQL CACHE ENT_ENABLE_MYSQL PROPERTY VALUE)
 get_property(ENT_ENABLE_PGSQL CACHE ENT_ENABLE_PGSQL PROPERTY VALUE)
 get_property(ENT_ENABLE_LUA CACHE ENT_ENABLE_LUA PROPERTY VALUE)
 
+if(NOT ENT_ENABLE_SQLITE OR NOT ENT_ENABLE_MYSQL OR NOT ENT_ENABLE_PGSQL)
+    message(FATAL_ERROR "All database backends must stay enabled; missing DB dependency or explicit OFF is not allowed.")
+endif()
+
 if(ENT_BUILD_EXAMPLES)
     add_subdirectory(example)
 endif()

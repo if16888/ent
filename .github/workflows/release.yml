@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libsqlite3-dev default-libmysqlclient-dev
+          sudo apt-get install -y ninja-build libsqlite3-dev default-libmysqlclient-dev libpq-dev
 
       - name: Configure
         run: ./scripts/run-ci-linux.sh configure
@@ -76,7 +76,6 @@ jobs:
       BUILD_DIR: build-${{ matrix.arch }}
       WINDOWS_CMAKE_PLATFORM: ${{ matrix.platform }}
       VCPKG_TARGET_TRIPLET: ${{ matrix.triplet }}
-      WINDOWS_DISABLE_PGSQL: ON
 
     steps:
       - name: Checkout

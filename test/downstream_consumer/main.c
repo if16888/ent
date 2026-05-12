@@ -2,6 +2,7 @@
 
 #include "ent_init.h"
 #include "ent_msg.h"
+#include "ent_log.h"
 
 static int print_backend_matrix(void)
 {
@@ -14,9 +15,24 @@ static int print_backend_matrix(void)
 int main(void)
 {
     MSG_ID_T sts = ENT_Helpers();
+    ENT_HANDLE handle = NULL;
     if(sts != ENT_SYS_NORMAL)
     {
         fprintf(stderr, "ENT_Helpers failed: %d\n", (int)sts);
+        return 1;
+    }
+
+    sts = ENT_Init(&handle, "downstream_consumer", ".", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E);
+    if(sts != ENT_SYS_NORMAL)
+    {
+        fprintf(stderr, "ENT_Init failed: %d\n", (int)sts);
+        return 1;
+    }
+
+    sts = ENT_Close(&handle);
+    if(sts != ENT_SYS_NORMAL || handle != NULL)
+    {
+        fprintf(stderr, "ENT_Close failed: %d\n", (int)sts);
         return 1;
     }
 

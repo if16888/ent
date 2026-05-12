@@ -1,12 +1,12 @@
 /*-----------------------------------------------------------------------------
  *   Copyright 2019 Fei Li
- * 
+ *
  *   Licensed under the Apache License, Version 2.0 (the "License");
  *   you may not use this file except in compliance with the License.
  *   You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  *   Unless required by applicable law or agreed to in writing, software
  *   distributed under the License is distributed on an "AS IS" BASIS,
  *   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -38,35 +38,22 @@ typedef enum
     ENT_RT_POLICY_RR_E
 } ENT_RT_POLICY_E;
 
-typedef struct ENT_RUNTIME_CTX_TAG* ENT_RUNTIME;
+typedef struct ENT_HANDLE_TAG* ENT_HANDLE;
 
-ENT_PUBLIC MSG_ID_T  ENT_Init(const char* name,
+ENT_PUBLIC MSG_ID_T  ENT_Init(ENT_HANDLE* handle,
+                              const char* name,
                               const char* workPath,
                               ENT_LOG_LEV_E logLevel,
                               ENT_MODE_E mode);
 
-ENT_PUBLIC MSG_ID_T  ENT_RuntimeInit(ENT_RUNTIME* runtime,
-                                     const char* name,
-                                     const char* workPath,
-                                     ENT_LOG_LEV_E logLevel,
-                                     ENT_MODE_E mode);
+ENT_PUBLIC MSG_ID_T  ENT_Close(ENT_HANDLE* handle);
 
-ENT_PUBLIC MSG_ID_T  ENT_RuntimeClose(ENT_RUNTIME runtime);
-
-ENT_PUBLIC MSG_ID_T  ENT_RuntimeSetRtAttributes(ENT_RUNTIME runtime,
-                                                int rtCpu,
-                                                ENT_RT_POLICY_E rtPolicy,
-                                                int rtPriority);
-
-ENT_PUBLIC MSG_ID_T  ENT_RuntimeRun(ENT_RUNTIME runtime);
-
-ENT_PUBLIC MSG_ID_T  ENT_SetRtAttributes(int rtCpu,
+ENT_PUBLIC MSG_ID_T  ENT_SetRtAttributes(ENT_HANDLE handle,
+                                         int rtCpu,
                                          ENT_RT_POLICY_E rtPolicy,
                                          int rtPriority);
 
-ENT_PUBLIC MSG_ID_T  ENT_Close();
-
-ENT_PUBLIC MSG_ID_T  ENT_Run();
+ENT_PUBLIC MSG_ID_T  ENT_Run(ENT_HANDLE handle);
 
 ENT_PUBLIC MSG_ID_T  ENT_Helpers();
 

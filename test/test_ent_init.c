@@ -136,6 +136,14 @@ static int expect_true(int condition, const char* message)
     return 0;
 }
 
+static void close_handle_if_needed(ENT_HANDLE* handle)
+{
+    if(handle != NULL && *handle != NULL)
+    {
+        ENT_Close(handle);
+    }
+}
+
 #ifndef WIN32
 int mlockall(int flags)
 {
@@ -383,10 +391,9 @@ MSG_ID_T UTL_CVWakeAll(UTL_CV cv)
 
 static int test_ent_run_rejects_uninitialized_context(void)
 {
-    memset(&gEntCtx, 0, sizeof(gEntCtx));
     reset_wait_capture();
 
-    if(expect_true(ENT_Run() == ENT_SYS_RUN_UNINITIALIZED, "ENT_Run should reject an uninitialized context") != 0)
+    if(expect_true(ENT_Run(NULL) == ENT_SYS_RUN_UNINITIALIZED, "ENT_Run should reject an uninitialized context") != 0)
     {
         return 1;
     }
@@ -396,13 +403,19 @@ static int test_ent_run_rejects_uninitialized_context(void)
 
 static int test_ent_run_waits_on_cv_with_lock(void)
 {
-    memset(&gEntCtx, 0, sizeof(gEntCtx));
-    gEntCtx.isInit = true;
-    gEntCtx.entCV = (UTL_CV)0x1234;
-    gEntCtx.entLock = (UTL_LOCK)0x5678;
+    ENT_HANDLE handle = (ENT_HANDLE)calloc(1, sizeof(*handle));
+
+    if(handle == NULL)
+    {
+        return 1;
+    }
+
+    handle->ctx.isInit = true;
+    handle->ctx.entCV = (UTL_CV)0x1234;
+    handle->ctx.entLock = (UTL_LOCK)0x5678;
     reset_wait_capture();
 
-    if(expect_true(ENT_Run() == ENT_SYS_NORMAL, "ENT_Run should succeed after initialization") != 0)
+    if(expect_true(ENT_Run(handle) == ENT_SYS_NORMAL, "ENT_Run should succeed after initialization") != 0)
     {
         return 1;
     }
@@ -412,44 +425,41 @@ static int test_ent_run_waits_on_cv_with_lock(void)
         return 1;
     }
 
-    if(expect_true(s_last_cv == gEntCtx.entCV, "ENT_Run should pass entCV as the first UTL_CVWait argument") != 0)
+    if(expect_true(s_last_cv == handle->ctx.entCV, "ENT_Run should pass entCV as the first UTL_CVWait argument") != 0)
     {
         return 1;
     }
 
-    return expect_true(s_last_lock == gEntCtx.entLock, "ENT_Run should pass entLock as the second UTL_CVWait argument");
+    if(expect_true(s_last_lock == handle->ctx.entLock, "ENT_Run should pass entLock as the second UTL_CVWait argument") != 0)
+    {
+        return 1;
+    }
+
+    free(handle);
+    return 0;
 }
 
-static int test_ent_close_clears_runtime_handles(void)
+static int test_ent_close_clears_handle_instances(void)
 {
-    memset(&gEntCtx, 0, sizeof(gEntCtx));
-    gEntCtx.isInit = true;
-    gEntCtx.entLog = (ENT_LOG)0x11;
-    gEntCtx.entLock = (UTL_LOCK)0x22;
-    gEntCtx.entCV = (UTL_CV)0x33;
+    ENT_HANDLE handle = (ENT_HANDLE)calloc(1, sizeof(*handle));
+
+    if(handle == NULL)
+    {
+        return 1;
+    }
+
+    handle->ctx.isInit = true;
+    handle->ctx.entLog = (ENT_LOG)0x11;
+    handle->ctx.entLock = (UTL_LOCK)0x22;
+    handle->ctx.entCV = (UTL_CV)0x33;
     reset_close_counters();
 
-    if(expect_true(ENT_Close() == ENT_SYS_NORMAL, "ENT_Close should succeed for an initialized context") != 0)
+    if(expect_true(ENT_Close(&handle) == ENT_SYS_NORMAL, "ENT_Close should succeed for an initialized context") != 0)
     {
         return 1;
     }
 
-    if(expect_true(gEntCtx.isInit == false, "ENT_Close should mark the context as uninitialized") != 0)
-    {
-        return 1;
-    }
-
-    if(expect_true(iENT_LogDefaultHandle() == NULL, "ENT_Close should clear entLog after closing it") != 0)
-    {
-        return 1;
-    }
-
-    if(expect_true(gEntCtx.entLock == NULL, "ENT_Close should clear entLock after closing it") != 0)
-    {
-        return 1;
-    }
-
-    if(expect_true(gEntCtx.entCV == NULL, "ENT_Close should clear entCV after closing it") != 0)
+    if(expect_true(handle == NULL, "ENT_Close should clear the handle") != 0)
     {
         return 1;
     }
@@ -464,7 +474,7 @@ static int test_ent_close_clears_runtime_handles(void)
         return 1;
     }
 
-    if(expect_true(s_log_close_handle_calls == 2, "ENT_Close should close both log handles") != 0)
+    if(expect_true(s_log_close_handle_calls == 1, "ENT_Close should close the entity log handle exactly once") != 0)
     {
         return 1;
     }
@@ -475,52 +485,57 @@ static int test_ent_close_clears_runtime_handles(void)
     }
 
     if(expect_true(s_first_closed_log_handle == (ENT_LOG)0x11 && s_second_closed_log_handle == NULL,
-                   "ENT_Close should close entity handle first, then default handle") != 0)
+                   "ENT_Close should close the entity handle exactly once") != 0)
     {
         return 1;
     }
 
-    return expect_true(s_last_closed_log_handle == NULL,
-                       "ENT_Close should close default log handle at service level (NULL handle)");
+    return expect_true(s_last_closed_log_handle == (ENT_LOG)0x11,
+                       "ENT_Close should close the entity log handle that was attached to the context");
 }
 
-static int test_ent_init_closes_logging_when_default_log_level_setup_fails(void)
+static int test_ent_init_closes_logging_when_entity_log_level_setup_fails(void)
 {
-    memset(&gEntCtx, 0, sizeof(gEntCtx));
+    ENT_HANDLE handle = NULL;
     reset_close_counters();
     reset_log_failures();
     s_fail_log_set_option_call = 1;
 
-    if(expect_true(ENT_Init("demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_INIT_DEFAULT_LEVELFAIL,
-                   "ENT_Init should report default log level setup failure") != 0)
+    if(expect_true(ENT_Init(&handle, "demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_INIT_ENTITY_LEVELFAIL,
+                   "ENT_Init should report entity log level setup failure") != 0)
     {
         return 1;
     }
 
-    if(expect_true(gEntCtx.isInit == false, "ENT_Init should leave the context uninitialized on failure") != 0)
+    if(expect_true(handle == NULL, "ENT_Init should leave the handle NULL on failure") != 0)
     {
         return 1;
     }
 
     if(expect_true(s_log_close_handle_calls == 1,
-                   "ENT_Init should close the default log handle when default log setup fails") != 0)
+                   "ENT_Init should close the entity log handle when entity log setup fails") != 0)
     {
         return 1;
     }
 
     return expect_true(s_log_close_calls == 1,
-                       "ENT_Init should close logging when default log setup fails");
+                       "ENT_Init should close logging when entity log setup fails");
 }
 
 static int test_ent_init_logs_before_tearing_down_logging_when_lock_init_fails(void)
 {
-    memset(&gEntCtx, 0, sizeof(gEntCtx));
+    ENT_HANDLE handle = NULL;
     reset_close_counters();
     reset_log_failures();
     s_fail_lock_init = -1;
 
-    if(expect_true(ENT_Init("demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_INIT_LOCK_INITFAIL,
+    if(expect_true(ENT_Init(&handle, "demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_INIT_LOCK_INITFAIL,
                    "ENT_Init should report lock initialization failure") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(handle == NULL, "ENT_Init should clear the handle on lock init failure") != 0)
     {
         return 1;
     }
@@ -531,7 +546,7 @@ static int test_ent_init_logs_before_tearing_down_logging_when_lock_init_fails(v
         return 1;
     }
 
-    if(expect_true(s_last_log_error_handle != NULL,
+    if(expect_true(s_last_log_error_handle == s_ent_log_at_lock_init,
                    "ENT_Init should log with the entity handle while it is still valid") != 0)
     {
         return 1;
@@ -549,7 +564,8 @@ static int test_ent_init_logs_before_tearing_down_logging_when_lock_init_fails(v
         return 1;
     }
 
-    if(expect_true(gEntCtx.isInit == false, "ENT_Init should leave the context uninitialized after lock failure") != 0)
+    if(expect_true(s_log_close_handle_calls == 1,
+                   "ENT_Init should close the entity log handle after lock failure") != 0)
     {
         return 1;
     }
@@ -561,162 +577,183 @@ static int test_ent_init_logs_before_tearing_down_logging_when_lock_init_fails(v
 static int test_ent_init_builds_paths_without_trailing_separator(void)
 {
     const char* expected_log_path = expected_log_path_for("/tmp/demo");
+    ENT_HANDLE handle = NULL;
 
-    memset(&gEntCtx, 0, sizeof(gEntCtx));
     reset_close_counters();
     reset_log_failures();
 
-    if(expect_true(ENT_Init("demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
+    if(expect_true(ENT_Init(&handle, "demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
                    "ENT_Init should succeed for a normal work path") != 0)
     {
         return 1;
     }
 
-    if(expect_true(strcmp(gEntCtx.workPath, "/tmp/demo") == 0,
+    if(expect_true(handle != NULL, "ENT_Init should return a handle") != 0)
+    {
+        close_handle_if_needed(&handle);
+        return 1;
+    }
+
+    if(expect_true(strcmp(handle->ctx.workPath, "/tmp/demo") == 0,
                    "ENT_Init should retain the original workPath") != 0)
     {
+        close_handle_if_needed(&handle);
         return 1;
     }
 
-    if(expect_true(strcmp(gEntCtx.entName, "demo") == 0,
+    if(expect_true(strcmp(handle->ctx.entName, "demo") == 0,
                    "ENT_Init should retain the original entName") != 0)
     {
+        close_handle_if_needed(&handle);
         return 1;
     }
 
-    if(expect_true(strcmp(gEntCtx.logPath, expected_log_path) == 0,
+    if(expect_true(strcmp(handle->ctx.logPath, expected_log_path) == 0,
                    "ENT_Init should append /log when workPath has no trailing separator") != 0)
     {
+        close_handle_if_needed(&handle);
         return 1;
     }
 
-    if(expect_true(strcmp(gEntCtx.logName, "ent_demo") == 0,
+    if(expect_true(strcmp(handle->ctx.logName, "ent_demo") == 0,
                    "ENT_Init should prefix the log name with ent_") != 0)
     {
+        close_handle_if_needed(&handle);
         return 1;
     }
 
-    if(expect_true(s_log_init_handle_calls == 2,
-                   "ENT_Init should initialize the default and entity log handles") != 0)
+    if(expect_true(s_log_init_handle_calls == 1,
+                   "ENT_Init should initialize the entity log handle") != 0)
     {
+        close_handle_if_needed(&handle);
         return 1;
     }
 
-    if(expect_true(strcmp(s_first_log_init_handle_module, "demo") == 0,
-                   "ENT_Init should initialize the default logger with the entity name") != 0)
+    if(expect_true(strcmp(s_first_log_init_handle_module, "ent_demo") == 0,
+                   "ENT_Init should initialize the entity logger with the prefixed log name") != 0)
     {
+        close_handle_if_needed(&handle);
         return 1;
     }
 
     if(expect_true(strcmp(s_first_log_init_handle_path, expected_log_path) == 0,
-                   "ENT_Init should initialize the default logger with the computed log path") != 0)
-    {
-        return 1;
-    }
-
-    if(expect_true(strcmp(s_second_log_init_handle_module, "ent_demo") == 0,
-                   "ENT_Init should initialize the entity logger with the prefixed log name") != 0)
-    {
-        return 1;
-    }
-
-    if(expect_true(strcmp(s_second_log_init_handle_path, expected_log_path) == 0,
                    "ENT_Init should initialize the entity logger with the computed log path") != 0)
     {
+        close_handle_if_needed(&handle);
         return 1;
     }
 
-    if(expect_true(s_log_set_option_calls == 2,
-                   "ENT_Init should set log level for the default and entity loggers") != 0)
+    if(expect_true(s_log_set_option_calls == 1,
+                   "ENT_Init should set log level for the entity logger") != 0)
     {
+        close_handle_if_needed(&handle);
         return 1;
     }
 
-    if(expect_true(s_last_log_set_option_handle == iENT_LogDefaultHandle(),
-                   "ENT_Init should set log option on the entity handle as the second call") != 0)
+    if(expect_true(s_last_log_set_option_handle == handle->ctx.entLog,
+                   "ENT_Init should set log option on the entity handle") != 0)
     {
+        close_handle_if_needed(&handle);
         return 1;
     }
 
     if(expect_true(s_last_log_set_option == ENT_LOG_LEVEL_E && s_last_log_set_level == LOG_LEV_WARN_E,
                    "ENT_Init should set ENT_LOG_LEVEL_E to requested log level") != 0)
     {
+        close_handle_if_needed(&handle);
         return 1;
     }
 
-    if(expect_true(iENT_LogDefaultHandle() == s_ent_log_at_lock_init,
-                   "ENT_Init should expose the entity log through the default-handle accessor") != 0)
+    if(expect_true(handle->ctx.entLog == s_ent_log_at_lock_init,
+                   "ENT_Init should retain the entity log handle inside the returned context") != 0)
+    {
+        close_handle_if_needed(&handle);
+        return 1;
+    }
+
+    if(expect_true(ENT_Close(&handle) == ENT_SYS_NORMAL && handle == NULL,
+                   "ENT_Close should succeed after a successful ENT_Init") != 0)
     {
         return 1;
     }
 
-    if(expect_true(ENT_Close() == ENT_SYS_NORMAL, "ENT_Close should succeed after a successful ENT_Init") != 0)
-    {
-        return 1;
-    }
-
-    return expect_true(s_log_close_handle_calls == 2,
-                       "ENT_Close should close both log handles after a successful ENT_Init");
+    return expect_true(handle == NULL && s_log_close_handle_calls == 1,
+                       "ENT_Close should close the entity log handle after a successful ENT_Init");
 }
 
 static int test_ent_init_builds_paths_with_trailing_separator(void)
 {
     const char* expected_log_path = expected_log_path_for("/tmp/demo/");
+    ENT_HANDLE handle = NULL;
 
-    memset(&gEntCtx, 0, sizeof(gEntCtx));
     reset_close_counters();
     reset_log_failures();
 
-    if(expect_true(ENT_Init("demo", "/tmp/demo/", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
+    if(expect_true(ENT_Init(&handle, "demo", "/tmp/demo/", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
                    "ENT_Init should succeed for a work path that already ends with a separator") != 0)
     {
         return 1;
     }
 
-    if(expect_true(strcmp(gEntCtx.logPath, expected_log_path) == 0,
+    if(expect_true(handle != NULL, "ENT_Init should return a handle") != 0)
+    {
+        close_handle_if_needed(&handle);
+        return 1;
+    }
+
+    if(expect_true(strcmp(handle->ctx.logPath, expected_log_path) == 0,
                    "ENT_Init should not duplicate the separator before log") != 0)
     {
+        close_handle_if_needed(&handle);
         return 1;
     }
 
     if(expect_true(strcmp(s_first_log_init_handle_path, expected_log_path) == 0,
-                   "The default logger should receive the normalized log path") != 0)
-    {
-        return 1;
-    }
-
-    if(expect_true(strcmp(s_second_log_init_handle_path, expected_log_path) == 0,
                    "The entity logger should receive the normalized log path") != 0)
     {
+        close_handle_if_needed(&handle);
         return 1;
     }
 
-    return expect_true(ENT_Close() == ENT_SYS_NORMAL, "ENT_Close should succeed after trailing-separator initialization");
+    if(expect_true(s_log_init_handle_calls == 1,
+                   "ENT_Init should initialize the entity logger once") != 0)
+    {
+        close_handle_if_needed(&handle);
+        return 1;
+    }
+
+    return expect_true(ENT_Close(&handle) == ENT_SYS_NORMAL && handle == NULL,
+                       "ENT_Close should succeed after trailing-separator initialization");
 }
 
 static int test_ent_init_rejects_empty_name_or_work_path(void)
 {
     MSG_ID_T sts = 0;
+    ENT_HANDLE handle = NULL;
 
-    memset(&gEntCtx, 0, sizeof(gEntCtx));
     reset_close_counters();
     reset_log_failures();
 
-    sts = ENT_Init("", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E);
+    sts = ENT_Init(&handle, "", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E);
     if(expect_true(sts == ENT_INIT_INVALID_ARGUMENT,
                    "ENT_Init should reject an empty entity name") != 0)
     {
         return 1;
     }
 
-    sts = ENT_Init("demo", "", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E);
+    if(expect_true(handle == NULL, "ENT_Init should keep the handle NULL after rejecting an empty entity name") != 0)
+    {
+        return 1;
+    }
+
+    sts = ENT_Init(&handle, "demo", "", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E);
     if(expect_true(sts == ENT_INIT_INVALID_ARGUMENT,
                    "ENT_Init should reject an empty workPath") != 0)
     {
         return 1;
     }
 
-    if(expect_true(gEntCtx.isInit == false, "ENT_Init should remain uninitialized after rejecting empty input") != 0)
+    if(expect_true(handle == NULL, "ENT_Init should keep the handle NULL after rejecting an empty workPath") != 0)
     {
         return 1;
     }
@@ -727,7 +764,7 @@ static int test_ent_init_rejects_empty_name_or_work_path(void)
 
 static int test_ent_init_realtime_mode_can_degrade_to_normal(void)
 {
-    memset(&gEntCtx, 0, sizeof(gEntCtx));
+    ENT_HANDLE handle = NULL;
     reset_close_counters();
     reset_log_failures();
 
@@ -736,153 +773,157 @@ static int test_ent_init_realtime_mode_can_degrade_to_normal(void)
     s_mlockall_errno = EPERM;
 #endif
 
-    if(expect_true(ENT_Init("demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_REALTIME_E) == ENT_SYS_NORMAL,
+    if(expect_true(ENT_Init(&handle, "demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_REALTIME_E) == ENT_SYS_NORMAL,
                    "ENT_Init should still succeed when realtime mode degrades to normal mode") != 0)
     {
         return 1;
     }
 
-    if(expect_true(gEntCtx.rtRequested == true, "ENT_Init should persist that realtime mode was requested") != 0)
+    if(expect_true(handle != NULL && handle->ctx.rtRequested == true,
+                   "ENT_Init should persist that realtime mode was requested") != 0)
     {
-        ENT_Close();
+        close_handle_if_needed(&handle);
         return 1;
     }
 
-    if(expect_true(gEntCtx.rtEnabled == false, "ENT_Init should report degraded normal mode when realtime is not applied") != 0)
+    if(expect_true(handle->ctx.rtEnabled == false,
+                   "ENT_Init should report degraded normal mode when realtime is not applied") != 0)
     {
-        ENT_Close();
+        close_handle_if_needed(&handle);
         return 1;
     }
 
 #ifndef WIN32
-    if(expect_true(gEntCtx.rtLastError == EPERM, "ENT_Init should preserve the mlockall errno when realtime degrades") != 0)
+    if(expect_true(handle->ctx.rtLastError == EPERM, "ENT_Init should preserve the mlockall errno when realtime degrades") != 0)
     {
-        ENT_Close();
+        close_handle_if_needed(&handle);
         return 1;
     }
 
     if(expect_true(s_mlockall_calls == 1, "ENT_Init should attempt mlockall once for realtime mode") != 0)
     {
-        ENT_Close();
+        close_handle_if_needed(&handle);
         return 1;
     }
 #endif
 
-    return expect_true(ENT_Close() == ENT_SYS_NORMAL, "ENT_Close should succeed after realtime degrade initialization");
+    return expect_true(ENT_Close(&handle) == ENT_SYS_NORMAL && handle == NULL,
+                       "ENT_Close should succeed after realtime degrade initialization");
 }
 
 static int test_ent_set_rt_attributes_rejects_uninitialized_context(void)
 {
-    memset(&gEntCtx, 0, sizeof(gEntCtx));
-    return expect_true(ENT_SetRtAttributes(-1, ENT_RT_POLICY_OTHER_E, 0) == ENT_RT_NOT_INITIALIZED,
+    return expect_true(ENT_SetRtAttributes(NULL, -1, ENT_RT_POLICY_OTHER_E, 0) == ENT_RT_NOT_INITIALIZED,
                        "ENT_SetRtAttributes should reject an uninitialized context");
 }
 
 static int test_ent_set_rt_attributes_allows_noop_after_init(void)
 {
-    memset(&gEntCtx, 0, sizeof(gEntCtx));
+    ENT_HANDLE handle = NULL;
     reset_close_counters();
     reset_log_failures();
 
-    if(expect_true(ENT_Init("demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_REALTIME_E) == ENT_SYS_NORMAL,
+    if(expect_true(ENT_Init(&handle, "demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_REALTIME_E) == ENT_SYS_NORMAL,
                    "ENT_Init should succeed before applying RT attributes") != 0)
     {
         return 1;
     }
 
-    if(expect_true(ENT_SetRtAttributes(-1, ENT_RT_POLICY_OTHER_E, 0) == ENT_SYS_NORMAL,
+    if(expect_true(ENT_SetRtAttributes(handle, -1, ENT_RT_POLICY_OTHER_E, 0) == ENT_SYS_NORMAL,
                    "ENT_SetRtAttributes should allow noop configuration after init") != 0)
     {
-        ENT_Close();
+        close_handle_if_needed(&handle);
         return 1;
     }
 
-    return expect_true(ENT_Close() == ENT_SYS_NORMAL, "ENT_Close should succeed after ENT_SetRtAttributes noop");
+    return expect_true(ENT_Close(&handle) == ENT_SYS_NORMAL && handle == NULL,
+                       "ENT_Close should succeed after ENT_SetRtAttributes noop");
 }
 
 static int test_ent_set_rt_attributes_rejects_normal_mode(void)
 {
-    memset(&gEntCtx, 0, sizeof(gEntCtx));
+    ENT_HANDLE handle = NULL;
     reset_close_counters();
     reset_log_failures();
 
-    if(expect_true(ENT_Init("demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
+    if(expect_true(ENT_Init(&handle, "demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
                    "ENT_Init should succeed in normal mode before checking rt attribute rejection") != 0)
     {
         return 1;
     }
 
-    if(expect_true(ENT_SetRtAttributes(0, ENT_RT_POLICY_FIFO_E, 1) == ENT_RT_NOTRT,
+    if(expect_true(ENT_SetRtAttributes(handle, 0, ENT_RT_POLICY_FIFO_E, 1) == ENT_RT_NOTRT,
                    "ENT_SetRtAttributes should reject realtime attributes when init mode is normal") != 0)
     {
-        ENT_Close();
+        close_handle_if_needed(&handle);
         return 1;
     }
 
-    if(expect_true(gEntCtx.rtCpu == -1 && gEntCtx.rtPolicy == ENT_RT_POLICY_OTHER_E && gEntCtx.rtPriority == 0,
+    if(expect_true(handle->ctx.rtCpu == -1 && handle->ctx.rtPolicy == ENT_RT_POLICY_OTHER_E && handle->ctx.rtPriority == 0,
                    "ENT_SetRtAttributes should leave rt settings unchanged when mode is normal") != 0)
     {
-        ENT_Close();
+        close_handle_if_needed(&handle);
         return 1;
     }
 
-    return expect_true(ENT_Close() == ENT_SYS_NORMAL, "ENT_Close should succeed after normal-mode rt rejection");
+    return expect_true(ENT_Close(&handle) == ENT_SYS_NORMAL && handle == NULL,
+                       "ENT_Close should succeed after normal-mode rt rejection");
 }
 
-static int test_runtime_instance_uses_isolated_context(void)
+static int test_handle_instance_uses_isolated_context(void)
 {
-    ENT_RUNTIME runtime = NULL;
+    ENT_HANDLE handle = NULL;
     MSG_ID_T sts = ENT_SYS_NORMAL;
 
     memset(&gEntCtx, 0, sizeof(gEntCtx));
     reset_close_counters();
     reset_log_failures();
 
-    sts = ENT_RuntimeInit(&runtime, "demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E);
+    sts = ENT_Init(&handle, "demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E);
     if(expect_true(sts == ENT_SYS_NORMAL,
-                   "ENT_RuntimeInit should initialize an isolated runtime context") != 0)
+                   "ENT_Init should initialize an isolated handle context") != 0)
     {
         return 1;
     }
 
-    if(expect_true(runtime != NULL, "ENT_RuntimeInit should return a runtime handle") != 0)
+    if(expect_true(handle != NULL, "ENT_Init should return a handle") != 0)
     {
-        ENT_RuntimeClose(runtime);
+        ENT_Close(&handle);
         return 1;
     }
 
     if(expect_true(gEntCtx.isInit == false,
-                   "ENT_RuntimeInit should not initialize the global runtime context") != 0)
+                   "ENT_Init should not initialize the global context") != 0)
     {
-        ENT_RuntimeClose(runtime);
+        ENT_Close(&handle);
         return 1;
     }
 
-    if(expect_true(ENT_RuntimeSetRtAttributes(runtime, 0, ENT_RT_POLICY_FIFO_E, 1) == ENT_RT_NOTRT,
-                   "ENT_RuntimeSetRtAttributes should reuse runtime-specific initialization state") != 0)
+    if(expect_true(ENT_SetRtAttributes(handle, 0, ENT_RT_POLICY_FIFO_E, 1) == ENT_RT_NOTRT,
+                   "ENT_SetRtAttributes should reuse handle-specific initialization state") != 0)
     {
-        ENT_RuntimeClose(runtime);
+        ENT_Close(&handle);
         return 1;
     }
 
-    if(expect_true(ENT_RuntimeClose(runtime) == ENT_SYS_NORMAL,
-                   "ENT_RuntimeClose should clean up an isolated runtime context") != 0)
+    if(expect_true(ENT_Close(&handle) == ENT_SYS_NORMAL,
+                   "ENT_Close should clean up an isolated handle context") != 0)
     {
         return 1;
     }
 
     return expect_true(gEntCtx.isInit == false,
-                       "ENT_RuntimeClose should leave the global runtime context untouched");
+                       "ENT_Close should leave the global context untouched");
 }
 
-static int test_runtime_instances_can_run_and_close_independently(void)
+static int test_handle_instances_can_run_and_close_independently(void)
 {
-    ENT_RUNTIME runtimeA = NULL;
-    ENT_RUNTIME runtimeB = NULL;
-    UTL_CV runtimeACv = NULL;
-    UTL_CV runtimeBCv = NULL;
-    UTL_LOCK runtimeALock = NULL;
-    UTL_LOCK runtimeBLock = NULL;
+    ENT_HANDLE handleA = NULL;
+    ENT_HANDLE handleB = NULL;
+    UTL_CV handleACv = NULL;
+    UTL_CV handleBCv = NULL;
+    UTL_LOCK handleALock = NULL;
+    UTL_LOCK handleBLock = NULL;
     int failed = 0;
 
     memset(&gEntCtx, 0, sizeof(gEntCtx));
@@ -890,157 +931,157 @@ static int test_runtime_instances_can_run_and_close_independently(void)
     reset_log_failures();
     reset_wait_capture();
 
-    if(expect_true(ENT_RuntimeInit(&runtimeA, "demo_a", "/tmp/demo_a", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
-                   "ENT_RuntimeInit should initialize runtime A") != 0)
+    if(expect_true(ENT_Init(&handleA, "demo_a", "/tmp/demo_a", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
+                   "ENT_Init should initialize handle A") != 0)
     {
         return 1;
     }
 
-    if(expect_true(ENT_RuntimeInit(&runtimeB, "demo_b", "/tmp/demo_b", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
-                   "ENT_RuntimeInit should initialize runtime B") != 0)
+    if(expect_true(ENT_Init(&handleB, "demo_b", "/tmp/demo_b", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
+                   "ENT_Init should initialize handle B") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
     if(expect_true(s_log_init_calls == 1,
-                   "Multiple runtime instances should share one logging service initialization") != 0)
+                   "Multiple handle instances should share one logging service initialization") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
     if(expect_true(gEntCtx.isInit == false,
-                   "Initializing isolated runtimes should not initialize the global runtime context") != 0)
+                   "Initializing isolated handles should not initialize the global context") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
-    if(expect_true(ENT_RuntimeRun(runtimeA) == ENT_SYS_NORMAL,
-                   "ENT_RuntimeRun should succeed for runtime A") != 0)
+    if(expect_true(ENT_Run(handleA) == ENT_SYS_NORMAL,
+                   "ENT_Run should succeed for handle A") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
-    runtimeACv = s_last_cv;
-    runtimeALock = s_last_lock;
+    handleACv = s_last_cv;
+    handleALock = s_last_lock;
 
-    if(expect_true(runtimeACv != NULL && runtimeALock != NULL,
-                   "Runtime A should use non-null lock/CV handles") != 0)
-    {
-        failed = 1;
-        goto CLEANUP;
-    }
-
-    if(expect_true(ENT_RuntimeRun(runtimeB) == ENT_SYS_NORMAL,
-                   "ENT_RuntimeRun should succeed for runtime B") != 0)
-    {
-        failed = 1;
-        goto CLEANUP;
-    }
-    runtimeBCv = s_last_cv;
-    runtimeBLock = s_last_lock;
-
-    if(expect_true(runtimeBCv != NULL && runtimeBLock != NULL,
-                   "Runtime B should use non-null lock/CV handles") != 0)
+    if(expect_true(handleACv != NULL && handleALock != NULL,
+                   "Handle A should use non-null lock/CV handles") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
-    if(expect_true(runtimeACv != runtimeBCv && runtimeALock != runtimeBLock,
-                   "Distinct runtime instances should use distinct lock/CV handles") != 0)
+    if(expect_true(ENT_Run(handleB) == ENT_SYS_NORMAL,
+                   "ENT_Run should succeed for handle B") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+    handleBCv = s_last_cv;
+    handleBLock = s_last_lock;
+
+    if(expect_true(handleBCv != NULL && handleBLock != NULL,
+                   "Handle B should use non-null lock/CV handles") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
-    if(expect_true(ENT_RuntimeClose(runtimeA) == ENT_SYS_NORMAL,
-                   "Closing runtime A should succeed while runtime B remains active") != 0)
+    if(expect_true(handleACv != handleBCv && handleALock != handleBLock,
+                   "Distinct handle instances should use distinct lock/CV handles") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
-    runtimeA = NULL;
+
+    if(expect_true(ENT_Close(&handleA) == ENT_SYS_NORMAL,
+                   "Closing handle A should succeed while handle B remains active") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+    handleA = NULL;
 
     if(expect_true(s_log_close_calls == 0,
-                   "Closing one runtime instance should not close the shared logging service") != 0)
+                   "Closing one handle instance should not close the shared logging service") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
     if(expect_true(s_log_close_handle_calls == 1,
-                   "Closing one runtime instance should close only its own entity log handle") != 0)
+                   "Closing one handle instance should close only its own entity log handle") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
     reset_wait_capture();
-    if(expect_true(ENT_RuntimeRun(runtimeB) == ENT_SYS_NORMAL,
-                   "Runtime B should remain runnable after runtime A is closed") != 0)
+    if(expect_true(ENT_Run(handleB) == ENT_SYS_NORMAL,
+                   "Handle B should remain runnable after handle A is closed") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
-    if(expect_true(s_last_cv == runtimeBCv && s_last_lock == runtimeBLock,
-                   "Runtime B should preserve its own lock/CV handles after runtime A is closed") != 0)
+    if(expect_true(s_last_cv == handleBCv && s_last_lock == handleBLock,
+                   "Handle B should preserve its own lock/CV handles after handle A is closed") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
-    if(expect_true(ENT_RuntimeClose(runtimeB) == ENT_SYS_NORMAL,
-                   "Closing runtime B should succeed") != 0)
+    if(expect_true(ENT_Close(&handleB) == ENT_SYS_NORMAL,
+                   "Closing handle B should succeed") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
-    runtimeB = NULL;
+    handleB = NULL;
 
     if(expect_true(s_log_close_calls == 1,
-                   "Closing the final runtime instance should close the shared logging service exactly once") != 0)
+                   "Closing the final handle instance should close the shared logging service exactly once") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
     if(expect_true(s_log_close_handle_calls == 2,
-                   "Each runtime instance should close exactly one entity log handle") != 0)
+                   "Each handle instance should close exactly one entity log handle") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
     if(expect_true(gEntCtx.isInit == false,
-                   "Closing isolated runtimes should leave the global runtime context untouched") != 0)
+                   "Closing isolated handles should leave the global context untouched") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
 CLEANUP:
-    if(runtimeA != NULL)
+    if(handleA != NULL)
     {
-        ENT_RuntimeClose(runtimeA);
+        ENT_Close(&handleA);
     }
-    if(runtimeB != NULL)
+    if(handleB != NULL)
     {
-        ENT_RuntimeClose(runtimeB);
+        ENT_Close(&handleB);
     }
 
     return failed;
 }
 
-static int test_runtime_second_instance_lock_init_failure_keeps_first_alive(void)
+static int test_handle_second_instance_lock_init_failure_keeps_first_alive(void)
 {
-    ENT_RUNTIME runtimeA = NULL;
-    ENT_RUNTIME runtimeB = NULL;
-    UTL_CV runtimeACv = NULL;
-    UTL_LOCK runtimeALock = NULL;
+    ENT_HANDLE handleA = NULL;
+    ENT_HANDLE handleB = NULL;
+    UTL_CV handleACv = NULL;
+    UTL_LOCK handleALock = NULL;
     int failed = 0;
 
     memset(&gEntCtx, 0, sizeof(gEntCtx));
@@ -1048,105 +1089,105 @@ static int test_runtime_second_instance_lock_init_failure_keeps_first_alive(void
     reset_log_failures();
     reset_wait_capture();
 
-    if(expect_true(ENT_RuntimeInit(&runtimeA, "demo_a", "/tmp/demo_a", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
-                   "Runtime A should initialize before testing runtime B lock failure") != 0)
+    if(expect_true(ENT_Init(&handleA, "demo_a", "/tmp/demo_a", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
+                   "Handle A should initialize before testing handle B lock failure") != 0)
     {
         return 1;
     }
 
     s_fail_lock_init = -1;
-    if(expect_true(ENT_RuntimeInit(&runtimeB, "demo_b", "/tmp/demo_b", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_INIT_LOCK_INITFAIL,
-                   "Runtime B should report lock initialization failure") != 0)
+    if(expect_true(ENT_Init(&handleB, "demo_b", "/tmp/demo_b", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_INIT_LOCK_INITFAIL,
+                   "Handle B should report lock initialization failure") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
     s_fail_lock_init = 0;
 
-    if(expect_true(runtimeB == NULL,
-                   "Runtime B handle should remain NULL when initialization fails") != 0)
+    if(expect_true(handleB == NULL,
+                   "Handle B should remain NULL when initialization fails") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
     if(expect_true(s_log_init_calls == 1,
-                   "Second runtime failure should not reinitialize the shared logging service") != 0)
+                   "Second handle failure should not reinitialize the shared logging service") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
     if(expect_true(s_log_close_calls == 0,
-                   "Second runtime failure should not close the shared logging service while runtime A is alive") != 0)
+                   "Second handle failure should not close the shared logging service while handle A is alive") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
     if(expect_true(s_log_close_handle_calls == 1,
-                   "Failed runtime B init should close only its own entity log handle") != 0)
+                   "Failed handle B init should close only its own entity log handle") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
     reset_wait_capture();
-    if(expect_true(ENT_RuntimeRun(runtimeA) == ENT_SYS_NORMAL,
-                   "Runtime A should remain runnable after runtime B lock-init failure") != 0)
+    if(expect_true(ENT_Run(handleA) == ENT_SYS_NORMAL,
+                   "Handle A should remain runnable after handle B lock-init failure") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
-    runtimeACv = s_last_cv;
-    runtimeALock = s_last_lock;
+    handleACv = s_last_cv;
+    handleALock = s_last_lock;
 
-    if(expect_true(runtimeACv != NULL && runtimeALock != NULL,
-                   "Runtime A should still provide valid lock/CV handles after runtime B failure") != 0)
+    if(expect_true(handleACv != NULL && handleALock != NULL,
+                   "Handle A should still provide valid lock/CV handles after handle B failure") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
-    if(expect_true(ENT_RuntimeClose(runtimeA) == ENT_SYS_NORMAL,
-                   "Runtime A should still close cleanly after runtime B lock-init failure") != 0)
+    if(expect_true(ENT_Close(&handleA) == ENT_SYS_NORMAL,
+                   "Handle A should still close cleanly after handle B lock-init failure") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
-    runtimeA = NULL;
+    handleA = NULL;
 
     if(expect_true(s_log_close_calls == 1,
-                   "Closing runtime A after runtime B failure should close shared logging exactly once") != 0)
+                   "Closing handle A after handle B failure should close shared logging exactly once") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
     if(expect_true(s_log_close_handle_calls == 2,
-                   "Runtime B failure plus runtime A close should close two entity log handles total") != 0)
+                   "Handle B failure plus handle A close should close two entity log handles total") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
 CLEANUP:
-    if(runtimeA != NULL)
+    if(handleA != NULL)
     {
-        ENT_RuntimeClose(runtimeA);
+        ENT_Close(&handleA);
     }
-    if(runtimeB != NULL)
+    if(handleB != NULL)
     {
-        ENT_RuntimeClose(runtimeB);
+        ENT_Close(&handleB);
     }
 
     return failed;
 }
 
-static int test_runtime_second_instance_log_option_failure_keeps_first_alive(void)
+static int test_handle_second_instance_log_option_failure_keeps_first_alive(void)
 {
-    ENT_RUNTIME runtimeA = NULL;
-    ENT_RUNTIME runtimeB = NULL;
+    ENT_HANDLE handleA = NULL;
+    ENT_HANDLE handleB = NULL;
     int failed = 0;
 
     memset(&gEntCtx, 0, sizeof(gEntCtx));
@@ -1154,87 +1195,87 @@ static int test_runtime_second_instance_log_option_failure_keeps_first_alive(voi
     reset_log_failures();
     reset_wait_capture();
 
-    if(expect_true(ENT_RuntimeInit(&runtimeA, "demo_a", "/tmp/demo_a", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
-                   "Runtime A should initialize before testing runtime B log-option failure") != 0)
+    if(expect_true(ENT_Init(&handleA, "demo_a", "/tmp/demo_a", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
+                   "Handle A should initialize before testing handle B log-option failure") != 0)
     {
         return 1;
     }
 
     s_fail_log_set_option_call = 2;
-    if(expect_true(ENT_RuntimeInit(&runtimeB, "demo_b", "/tmp/demo_b", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_INIT_ENTITY_LEVELFAIL,
-                   "Runtime B should report entity log level setup failure") != 0)
+    if(expect_true(ENT_Init(&handleB, "demo_b", "/tmp/demo_b", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_INIT_ENTITY_LEVELFAIL,
+                   "Handle B should report entity log level setup failure") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
     s_fail_log_set_option_call = 0;
 
-    if(expect_true(runtimeB == NULL,
-                   "Runtime B handle should remain NULL when log option setup fails") != 0)
+    if(expect_true(handleB == NULL,
+                   "Handle B should remain NULL when log option setup fails") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
     if(expect_true(s_log_init_calls == 1,
-                   "Second runtime log-option failure should not reinitialize shared logging") != 0)
+                   "Second handle log-option failure should not reinitialize shared logging") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
     if(expect_true(s_log_close_calls == 0,
-                   "Second runtime log-option failure should not close shared logging while runtime A is alive") != 0)
+                   "Second handle log-option failure should not close shared logging while handle A is alive") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
     if(expect_true(s_log_close_handle_calls == 1,
-                   "Failed runtime B log setup should close only its own entity log handle") != 0)
+                   "Failed handle B log setup should close only its own entity log handle") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
     reset_wait_capture();
-    if(expect_true(ENT_RuntimeRun(runtimeA) == ENT_SYS_NORMAL,
-                   "Runtime A should remain runnable after runtime B log-option failure") != 0)
+    if(expect_true(ENT_Run(handleA) == ENT_SYS_NORMAL,
+                   "Handle A should remain runnable after handle B log-option failure") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
-    if(expect_true(ENT_RuntimeClose(runtimeA) == ENT_SYS_NORMAL,
-                   "Runtime A should still close cleanly after runtime B log-option failure") != 0)
+    if(expect_true(ENT_Close(&handleA) == ENT_SYS_NORMAL,
+                   "Handle A should still close cleanly after handle B log-option failure") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
-    runtimeA = NULL;
+    handleA = NULL;
 
     if(expect_true(s_log_close_calls == 1,
-                   "Closing runtime A after runtime B log-option failure should close shared logging exactly once") != 0)
+                   "Closing handle A after handle B log-option failure should close shared logging exactly once") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
     if(expect_true(s_log_close_handle_calls == 2,
-                   "Runtime B log-option failure plus runtime A close should close two entity log handles total") != 0)
+                   "Handle B log-option failure plus handle A close should close two entity log handles total") != 0)
     {
         failed = 1;
         goto CLEANUP;
     }
 
 CLEANUP:
-    if(runtimeA != NULL)
+    if(handleA != NULL)
     {
-        ENT_RuntimeClose(runtimeA);
+        ENT_Close(&handleA);
     }
-    if(runtimeB != NULL)
+    if(handleB != NULL)
     {
-        ENT_RuntimeClose(runtimeB);
+        ENT_Close(&handleB);
     }
 
     return failed;
@@ -1246,8 +1287,8 @@ int main(void)
 
     failures += test_ent_run_rejects_uninitialized_context();
     failures += test_ent_run_waits_on_cv_with_lock();
-    failures += test_ent_close_clears_runtime_handles();
-    failures += test_ent_init_closes_logging_when_default_log_level_setup_fails();
+    failures += test_ent_close_clears_handle_instances();
+    failures += test_ent_init_closes_logging_when_entity_log_level_setup_fails();
     failures += test_ent_init_logs_before_tearing_down_logging_when_lock_init_fails();
     failures += test_ent_init_builds_paths_without_trailing_separator();
     failures += test_ent_init_builds_paths_with_trailing_separator();
@@ -1256,10 +1297,10 @@ int main(void)
     failures += test_ent_set_rt_attributes_rejects_uninitialized_context();
     failures += test_ent_set_rt_attributes_allows_noop_after_init();
     failures += test_ent_set_rt_attributes_rejects_normal_mode();
-    failures += test_runtime_instance_uses_isolated_context();
-    failures += test_runtime_instances_can_run_and_close_independently();
-    failures += test_runtime_second_instance_lock_init_failure_keeps_first_alive();
-    failures += test_runtime_second_instance_log_option_failure_keeps_first_alive();
+    failures += test_handle_instance_uses_isolated_context();
+    failures += test_handle_instances_can_run_and_close_independently();
+    failures += test_handle_second_instance_lock_init_failure_keeps_first_alive();
+    failures += test_handle_second_instance_log_option_failure_keeps_first_alive();
 
     if(failures != 0)
     {

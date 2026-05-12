@@ -107,7 +107,6 @@ static void inject_capture_cb(char** fields, char** rowRes,
 /* ── 辅助：安全清理 ENT_Init 遗留状态 ──────────────────── */
 static void safe_reset_ent(void)
 {
-    ENT_Close();
     memset(&gEntCtx, 0, sizeof(gEntCtx));
 }
 
@@ -337,18 +336,19 @@ static void test_init_long_name_no_overflow(void)
      * 表示拒绝过长输入。当前代码没有这个检查，所以如果它返回 0
      * 说明风险确实存在，需要记录为 FINDING。
      */
-    MSG_ID_T ret = ENT_Init(long_name, work_path, LOG_LEV_WARN_E, ENT_MODE_NORMAL_E);
+    ENT_HANDLE handle = NULL;
+    MSG_ID_T ret = ENT_Init(&handle, long_name, work_path, LOG_LEV_WARN_E, ENT_MODE_NORMAL_E);
 
     /* 无论成功失败，能走到这里就说明没崩溃 */
     fprintf(stdout, "    → ENT_Init(long_name) returned %d (no crash)\n", ret);
 
-    if (ret == 0) {
+    if (ret == ENT_SYS_NORMAL) {
         RECORD_FINDING(_test_name, "ENT_Init accepted an overlong module name");
     }
 
     /* 清理 */
-    if (ret == 0) {
-        ENT_Close();
+    if (ret == ENT_SYS_NORMAL) {
+        ENT_Close(&handle);
     }
     safe_reset_ent();
 
@@ -377,16 +377,17 @@ static void test_init_long_workpath_no_overflow(void)
 #endif
     long_path[4096] = '\0';
 
-    MSG_ID_T ret = ENT_Init("sectest", long_path, LOG_LEV_WARN_E, ENT_MODE_NORMAL_E);
+    ENT_HANDLE handle = NULL;
+    MSG_ID_T ret = ENT_Init(&handle, "sectest", long_path, LOG_LEV_WARN_E, ENT_MODE_NORMAL_E);
 
     fprintf(stdout, "    → ENT_Init(long_path) returned %d (no crash)\n", ret);
 
-    if (ret == 0) {
+    if (ret == ENT_SYS_NORMAL) {
         RECORD_FINDING(_test_name, "ENT_Init accepted an overlong workPath");
     }
 
-    if (ret == 0) {
-        ENT_Close();
+    if (ret == ENT_SYS_NORMAL) {
+        ENT_Close(&handle);
     }
     safe_reset_ent();
 

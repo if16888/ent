@@ -5,7 +5,6 @@ $Platform = if ($env:WINDOWS_CMAKE_PLATFORM) { $env:WINDOWS_CMAKE_PLATFORM } els
 $DefaultTriplet = if ($Platform -eq "x64") { "x64-windows" } else { "x86-windows" }
 $Triplet = if ($env:VCPKG_TARGET_TRIPLET) { $env:VCPKG_TARGET_TRIPLET } else { $DefaultTriplet }
 $BuildDir = if ($env:BUILD_DIR) { $env:BUILD_DIR } else { "build-ci-$Triplet" }
-$DisablePostgreSQL = if ($env:WINDOWS_DISABLE_PGSQL) { $env:WINDOWS_DISABLE_PGSQL } else { "" }
 $InstallDir = if ($env:INSTALL_DIR) { $env:INSTALL_DIR } else { Join-Path $BuildDir "install" }
 $DownstreamBuildDir = if ($env:DOWNSTREAM_BUILD_DIR) { $env:DOWNSTREAM_BUILD_DIR } else { Join-Path $BuildDir "downstream-consumer" }
 $DownstreamSourceDir = if ($env:DOWNSTREAM_SOURCE_DIR) { $env:DOWNSTREAM_SOURCE_DIR } else { "test/downstream_consumer" }
@@ -27,13 +26,11 @@ function Run-Configure {
         "-DCMAKE_BUILD_TYPE=Release",
         "-DVCPKG_TARGET_TRIPLET=$Triplet",
         "-DENT_ENABLE_SQLITE=ON",
-        "-DENT_ENABLE_MYSQL=ON"
+        "-DENT_ENABLE_MYSQL=ON",
+        "-DENT_ENABLE_PGSQL=ON"
     )
     if ($ToolchainFile) {
         $CmakeArgs += "-DCMAKE_TOOLCHAIN_FILE=$ToolchainFile"
-    }
-    if ($DisablePostgreSQL -and $DisablePostgreSQL.ToLower() -notin @("0", "off", "false")) {
-        $CmakeArgs += "-DENT_ENABLE_PGSQL=OFF"
     }
     cmake @CmakeArgs
 }
