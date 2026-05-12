@@ -29,6 +29,14 @@ int main(void)
         return 1;
     }
 
+    sts = ENT_Stop(handle);
+    if(sts != ENT_SYS_NORMAL)
+    {
+        fprintf(stderr, "ENT_Stop failed: %d\n", (int)sts);
+        ENT_Close(&handle);
+        return 1;
+    }
+
     sts = ENT_Close(&handle);
     if(sts != ENT_SYS_NORMAL || handle != NULL)
     {

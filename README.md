@@ -269,9 +269,10 @@ int main(void)
         return 1;
     }
 
-    /* 实际项目中通常在各自线程中运行 */
-    ENT_Run(handleA);
-    ENT_Run(handleB);
+    /* 实际项目中通常把 ENT_Run() 放到各自 worker thread 里：
+       workerA: ENT_Run(handleA);
+       workerB: ENT_Run(handleB);
+       main thread 负责 Stop / Close 收口。 */
 
     ENT_Stop(handleB);
     ENT_Stop(handleA);
@@ -314,7 +315,8 @@ int main(void)
 
 - 共享基础设施不会因为某一个实例失败或关闭被误杀
 - 不要把同一个 `ENT_HANDLE` 句柄重复 close
-- 如果需要并发运行多个实例，建议在各自线程中调度 `ENT_Run()`
+- 如果需要并发运行多个实例，建议把 `ENT_Run()` 放到各自 worker thread 中调度
+- `ENT_Run()` 被 `ENT_Stop()` 正常唤醒后返回 `ENT_SYS_NORMAL`
 - 如果需要让 `ENT_Run()` 提前退出，先调用 `ENT_Stop()`，再调用 `ENT_Close()`
 
 当前仓库测试已覆盖：
