@@ -46,13 +46,13 @@
 
 ## P0
 
-### ENT-003：ent_shm API skeleton
+### ENT-003：ent_shm 生命周期边界硬化
 
-- 目标：新增 `ent_shm` public API skeleton、最小实现和编译接入，为后续共享内存能力建立边界。
-- 非目标：不实现完整跨进程一致性、不做性能 benchmark、不提供复杂持久化语义。
-- 风险：R3，涉及 public header、ABI、Windows / Linux mmap 差异和资源生命周期。
-- 推荐授权等级：L1 impact-scan 后 L2 实现。
-- 预期验证命令：`git diff --check`、`cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`、`cmake --build build -j4`、`ctest --test-dir build --output-on-failure`。
+- 目标：梳理并补强 `ent_shm` 的 open / flush / close 生命周期边界、重复 close、失败路径和跨平台差异说明。
+- 非目标：不重做 API 体系，不新增消息码，不重构 mmap / file-mapping 主逻辑。
+- 风险：R3，涉及 public API、资源释放、Windows / Linux 差异。
+- 推荐授权等级：L1 impact-scan 后 L2。
+- 预期验证命令：`git diff --check`、`ctest --test-dir build --output-on-failure -R "test_ent_shm"`。
 
 ### ENT-004：Windows CI 增加 test_ent_log 文件路径验证
 
@@ -62,11 +62,11 @@
 - 推荐授权等级：L1 impact-scan 后 L2 / L3。
 - 预期验证命令：`git diff --check`、本地 Windows `ctest --test-dir build -C Release --output-on-failure`、GitHub Actions Windows job。
 
-### ENT-005：扫描裸 return -1/0/1 与私有错误码
+### ENT-005：清点 public API 与内部 helper 的裸数字返回
 
-- 目标：只读扫描库内裸数字返回和私有错误码，分类为 OK、invalid、busy、fatal、nonfatal 等候选语义。
-- 非目标：不直接替换代码，不新增消息码，不调整测试。
-- 风险：R2，扫描结果会影响后续返回语义治理。
+- 目标：只读扫描库内裸数字返回和私有错误码，区分 public API、内部 helper、test/perf stub 三类返回语义，并标出真正需要收口的 public contract 缺口。
+- 非目标：不直接替换代码，不新增消息码，不调整测试，不把测试桩或 perf harness 的哨兵返回当成产品缺陷。
+- 风险：R2，扫描结果会影响后续返回语义治理，但主要是分类与收口优先级问题。
 - 推荐授权等级：L1。
 - 预期验证命令：`rg "return\\s+[-]?[0-9]+\\s*;" comm inc test`、`rg "ENT_.*_(FAILED|BAD|IN_USE|NON_FATAL|NORMAL)" comm inc test msg`。
 
