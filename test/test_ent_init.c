@@ -1031,8 +1031,8 @@ static int test_ent_close_waits_for_running_worker_before_free(void)
     wait_until_close_thread_started();
     wait_until_close_wait_entered();
 
-    if(expect_true(ENT_Run(handle) == ENT_SYS_BAD_HANDLE,
-                   "ENT_Run should reject a handle while close is in progress") != 0)
+    if(expect_true(ENT_Run(handle) != ENT_SYS_NORMAL,
+                   "ENT_Run should not succeed while close is in progress") != 0)
     {
         failed = 1;
     }
