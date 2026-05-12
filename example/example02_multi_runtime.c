@@ -48,6 +48,8 @@ int main(void)
      * This sample intentionally avoids calling ENT_Run() directly,
      * because the default run loop blocks waiting on its condition
      * variable and would turn the sample into a hanging demo.
+     * If you do start the workers, pair ENT_Run() with ENT_Stop()
+     * before ENT_Close().
      */
 
     sts = ENT_SetRtAttributes(handle_a, -1, ENT_RT_POLICY_OTHER_E, 0);

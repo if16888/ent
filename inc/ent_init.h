@@ -49,9 +49,11 @@ ENT_PUBLIC MSG_ID_T  ENT_Init(ENT_HANDLE* handle,
 ENT_PUBLIC MSG_ID_T  ENT_Close(ENT_HANDLE* handle);
 
 ENT_PUBLIC MSG_ID_T  ENT_SetRtAttributes(ENT_HANDLE handle,
-                                         int rtCpu,
-                                         ENT_RT_POLICY_E rtPolicy,
-                                         int rtPriority);
+                                          int rtCpu,
+                                          ENT_RT_POLICY_E rtPolicy,
+                                          int rtPriority);
+
+ENT_PUBLIC MSG_ID_T  ENT_Stop(ENT_HANDLE handle);
 
 ENT_PUBLIC MSG_ID_T  ENT_Run(ENT_HANDLE handle);
 
