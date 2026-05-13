@@ -98,9 +98,9 @@
 - 推荐授权等级：L2。
 - 预期验证命令：`git diff --check`、文档链路 review。
 
-### ENT-105：CI failure log artifact 可见性
+### ENT-105：CI failure log artifact 收集与可见性
 
-- 目标：让 CI 在失败时上传关键构建、测试和安装日志，便于快速 triage。
+- 目标：让 CI 在失败时收集并上传关键构建、测试和安装日志，便于快速 triage。
 - 非目标：不改构建逻辑，不改变失败判定。
 - 风险：R3，涉及 workflow 和 artifact 权限。
 - 推荐授权等级：L1 impact-scan 后 L2 / L3。
