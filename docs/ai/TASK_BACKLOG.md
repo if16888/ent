@@ -34,25 +34,17 @@
 - 状态：已完成（PR #19）
 - 说明：README、example、test/downstream_consumer 与 public header 已同步到 handle-based API。
 
+### ENT-012：ENT_HANDLE Init / Run / Stop / Close 闭环
+
+- 状态：已完成（PR #20, PR #21）
+- 说明：`ENT_HANDLE` 的 `Init / Run / Stop / Close` 生命周期闭环已完成并合并，包含重复初始化拒绝、stop 唤醒、close 收口和并发边界修复。
+
 ### ENT-201：docs/architecture/handle-lifecycle.md
 
 - 状态：已完成（已落地）
 - 说明：已补齐 `ENT_HANDLE` 生命周期架构文档，并与 README 的 handle-based 入口互相链接。
 
 ## 进行中
-
-### ENT-012：ENT_HANDLE Init / Run / Stop / Close 闭环
-
-- 状态：进行中（PR #20）
-- 目标：让 `ENT_HANDLE` 的 `Init / Run / Stop / Close` 形成完整生命周期闭环，避免重复初始化，支持 stop 唤醒和 close 收口。
-- 非目标：不改 DB、timer、SHM、socket 主逻辑，不恢复 `ENT_Runtime*`，不做旧 API 兼容。
-- 风险：R3，涉及 public API、状态机、资源释放和并发关闭。
-- 推荐授权等级：L2。
-- 预期验证命令：
-  - `git diff --check`
-  - `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`
-  - `cmake --build build -j4`
-  - `ctest --test-dir build --output-on-failure -R "test_ent_init|test_ent_msg|test_ent_log|test_ent_log_flush_deadline|test_ent_db|test_security|test_utl_thread|test_utl_tpool_integration|test_utl_timer|test_ent_shm"`
 
 ## P0
 
