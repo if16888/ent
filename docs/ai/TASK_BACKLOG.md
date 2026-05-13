@@ -59,6 +59,11 @@
 - 状态：已完成（已落地）
 - 说明：README 已补齐 handle-based public API 的返回语义速查表，并与 `docs/log-return-codes.md` 互相引用。
 
+### ENT-101：ENT_HANDLE 多实例并发/隔离边界强化
+
+- 状态：已完成（基础覆盖已存在，暂无立即实现缺口）
+- 说明：`ENT_HANDLE` 的多实例初始化、独立运行、独立关闭、失败隔离、stop / close 闭环和 stale handle 拒绝已在代码、测试和 README 中收口；当前剩余更偏向更细并发边界强化，不再作为阻塞性待办。
+
 ## 进行中
 
 ## P0
@@ -80,23 +85,6 @@
 - 预期验证命令：`rg "return\\s+[-]?[0-9]+\\s*;" comm inc test`、`rg "ENT_.*_(FAILED|BAD|IN_USE|NON_FATAL|NORMAL)" comm inc test msg`。
 
 ## P1
-
-### ENT-101：ENT_HANDLE 多实例并发/隔离边界强化
-
-- 目标：在现有 `ENT_HANDLE` 多实例基础覆盖之上，继续强化并发运行、交错 stop / close、初始化失败、局部关闭、状态隔离和清理顺序边界。
-- 非目标：不重构 handle 架构，不恢复 `ENT_Runtime*` public API。
-- 风险：R3，涉及全局状态、生命周期和下游行为。
-- 推荐授权等级：L1 impact-scan 后 L2。
-- 预期验证命令：`git diff --check`、`cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`、`cmake --build build -j4`、`ctest --test-dir build --output-on-failure`。
-
-### ENT-105：CI failure log artifact 收集与可见性
-
-- 状态：已完成（已合并到 `master`，见 PR #22 / PR #23）。
-- 目标：让 CI 在失败时收集并上传关键构建、测试和安装日志，便于快速 triage。
-- 非目标：不改构建逻辑，不改变失败判定。
-- 风险：R3，涉及 workflow 和 artifact 权限。
-- 推荐授权等级：L1 impact-scan 后 L2 / L3。
-- 预期验证命令：`git diff --check`、GitHub Actions dry review、失败 job artifact 验证。
 
 ## P2
 
