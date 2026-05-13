@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       BUILD_DIR: build
-      CI_LOG_DIR: ${{ runner.temp }}/ci-logs/linux
+      CI_LOG_DIR: ${{ github.workspace }}/ci-logs/linux
 
     steps:
       - name: Checkout
@@ -61,7 +61,7 @@ jobs:
       BUILD_DIR: build-${{ matrix.arch }}
       WINDOWS_CMAKE_PLATFORM: ${{ matrix.platform }}
       VCPKG_TARGET_TRIPLET: ${{ matrix.triplet }}
-      CI_LOG_DIR: ${{ runner.temp }}/ci-logs/${{ matrix.arch }}
+      CI_LOG_DIR: ${{ github.workspace }}/ci-logs/${{ matrix.arch }}
 
     steps:
       - name: Checkout
