@@ -51,13 +51,13 @@
 
 ## P0
 
-### ENT-004：Windows CI 增加 test_ent_log 文件路径验证
+### ENT-004：Windows CI 路径回归可见性
 
-- 目标：让 Windows CI 覆盖 `test_ent_log` 对文件路径、目录创建、路径分隔符的关键行为。
-- 非目标：不重构 CI 矩阵，不调整第三方依赖策略，不改 log API。
-- 风险：R3，涉及 CI workflow、Windows shell、路径语义和 artifact。
+- 目标：让 Windows CI 在 `test_ent_log` 路径相关失败时更容易定位问题，而不是新增重复的路径测试。
+- 非目标：不重构 CI 矩阵，不改 log API，不重复拆分已有 `test_ent_log` 路径覆盖。
+- 风险：R3，涉及 CI workflow、Windows shell、路径语义和失败诊断。
 - 推荐授权等级：L1 impact-scan 后 L2 / L3。
-- 预期验证命令：`git diff --check`、本地 Windows `ctest --test-dir build -C Release --output-on-failure`、GitHub Actions Windows job。
+- 预期验证命令：`git diff --check`、Windows `ctest --test-dir build -C Release --output-on-failure -R "test_ent_log|test_ent_log_flush_deadline"`、GitHub Actions Windows job。
 
 ### ENT-005：清点 public API 与内部 helper 的裸数字返回
 
