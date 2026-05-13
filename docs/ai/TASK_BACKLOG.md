@@ -66,9 +66,9 @@
 
 ## P1
 
-### ENT-101：ENT_HANDLE 多实例并发/隔离边界测试补齐
+### ENT-101：ENT_HANDLE 多实例并发/隔离边界强化
 
-- 目标：补齐 `ENT_HANDLE` 多实例并发运行、交错 stop / close、初始化失败、局部关闭、状态隔离和清理顺序测试。
+- 目标：在现有 `ENT_HANDLE` 多实例基础覆盖之上，继续强化并发运行、交错 stop / close、初始化失败、局部关闭、状态隔离和清理顺序边界。
 - 非目标：不重构 handle 架构，不恢复 `ENT_Runtime*` public API。
 - 风险：R3，涉及全局状态、生命周期和下游行为。
 - 推荐授权等级：L1 impact-scan 后 L2。
