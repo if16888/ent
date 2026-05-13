@@ -44,6 +44,11 @@
 - 状态：已完成（已落地）
 - 说明：`test_ent_db` 已补齐 close 进行中对 active operation、reinit、重复 close、service close 的并发边界测试。
 
+### ENT-103：thread/tpool/timer 返回语义 review
+
+- 状态：已完成（review 完成，无立即实现缺口）
+- 说明：已完成对 thread / tpool / timer public wrapper 返回码、失败路径和生命周期语义的只读 review，当前未发现必须立即修改实现的 public contract 缺口。
+
 ### ENT-201：docs/architecture/handle-lifecycle.md
 
 - 状态：已完成（已落地）
@@ -83,14 +88,6 @@
 - 风险：R3，涉及全局状态、生命周期和下游行为。
 - 推荐授权等级：L1 impact-scan 后 L2。
 - 预期验证命令：`git diff --check`、`cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`、`cmake --build build -j4`、`ctest --test-dir build --output-on-failure`。
-
-### ENT-103：thread/tpool/timer 返回语义 review
-
-- 目标：review thread / tpool / timer 的 public wrapper 返回码、失败路径和生命周期语义，区分 public contract 与内部 helper sentinel，输出问题清单。
-- 非目标：不直接修改实现，不扩展到 runtime / db / log。
-- 风险：R2，可能发现跨模块返回语义不一致。
-- 推荐授权等级：L1。
-- 预期验证命令：`rg "return\\s+[-]?[0-9]+\\s*;" comm inc test`、`rg "UTL_|ENT_THRD|ENT_TPL|ENT_TMR" comm inc test msg`。
 
 ### ENT-105：CI failure log artifact 收集与可见性
 
