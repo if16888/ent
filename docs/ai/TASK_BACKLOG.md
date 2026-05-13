@@ -84,7 +84,7 @@
 
 ### ENT-103：thread/tpool/timer 返回语义 review
 
-- 目标：review thread / tpool / timer 的返回码、失败路径和生命周期语义，输出问题清单。
+- 目标：review thread / tpool / timer 的 public wrapper 返回码、失败路径和生命周期语义，区分 public contract 与内部 helper sentinel，输出问题清单。
 - 非目标：不直接修改实现，不扩展到 runtime / db / log。
 - 风险：R2，可能发现跨模块返回语义不一致。
 - 推荐授权等级：L1。
