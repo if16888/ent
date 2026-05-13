@@ -94,6 +94,7 @@
 
 ### ENT-105：CI failure log artifact 收集与可见性
 
+- 状态：已完成（已合并到 `master`，见 PR #22 / PR #23）。
 - 目标：让 CI 在失败时收集并上传关键构建、测试和安装日志，便于快速 triage。
 - 非目标：不改构建逻辑，不改变失败判定。
 - 风险：R3，涉及 workflow 和 artifact 权限。
