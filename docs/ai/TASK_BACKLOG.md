@@ -39,6 +39,11 @@
 - 状态：已完成（PR #20, PR #21）
 - 说明：`ENT_HANDLE` 的 `Init / Run / Stop / Close` 生命周期闭环已完成并合并，包含重复初始化拒绝、stop 唤醒、close 收口和并发边界修复。
 
+### ENT-102：db handle close / reinit 并发边界测试补齐
+
+- 状态：已完成（已落地）
+- 说明：`test_ent_db` 已补齐 close 进行中对 active operation、reinit、重复 close、service close 的并发边界测试。
+
 ### ENT-201：docs/architecture/handle-lifecycle.md
 
 - 状态：已完成（已落地）
@@ -76,14 +81,6 @@
 - 目标：在现有 `ENT_HANDLE` 多实例基础覆盖之上，继续强化并发运行、交错 stop / close、初始化失败、局部关闭、状态隔离和清理顺序边界。
 - 非目标：不重构 handle 架构，不恢复 `ENT_Runtime*` public API。
 - 风险：R3，涉及全局状态、生命周期和下游行为。
-- 推荐授权等级：L1 impact-scan 后 L2。
-- 预期验证命令：`git diff --check`、`cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`、`cmake --build build -j4`、`ctest --test-dir build --output-on-failure`。
-
-### ENT-102：db handle close / reinit 并发边界测试补齐
-
-- 目标：补齐 DB handle active operation 与 close 竞争、reinit 竞争、重复 close、service close 时 live handle 的并发测试。
-- 非目标：不改 DB backend 连接策略，不引入新数据库依赖。
-- 风险：R3，涉及并发、条件变量、数据库 backend 和资源释放。
 - 推荐授权等级：L1 impact-scan 后 L2。
 - 预期验证命令：`git diff --check`、`cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`、`cmake --build build -j4`、`ctest --test-dir build --output-on-failure`。
 
