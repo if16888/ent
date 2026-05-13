@@ -69,17 +69,14 @@
 - 状态：已完成（已合并到 `master`，见 PR #22 / PR #23）
 - 说明：Windows CI 已补齐 `test_ent_log` 路径相关失败的日志收集与 artifact 上传，路径回归的可见性和定位能力已收口。
 
+### ENT-005：清点 public API 与内部 helper 的裸数字返回
+
+- 状态：已完成（review 完成，无立即实现缺口）
+- 说明：已完成对库内裸数字返回和私有错误码的只读扫描，当前未发现必须立即修改实现的 public contract 缺口。
+
 ## 进行中
 
 ## P0
-
-### ENT-005：清点 public API 与内部 helper 的裸数字返回
-
-- 目标：只读扫描库内裸数字返回和私有错误码，区分 public API、内部 helper、test/perf stub 三类返回语义，并标出真正需要收口的 public contract 缺口。
-- 非目标：不直接替换代码，不新增消息码，不调整测试，不把测试桩或 perf harness 的哨兵返回当成产品缺陷。
-- 风险：R2，扫描结果会影响后续返回语义治理，但主要是分类与收口优先级问题。
-- 推荐授权等级：L1。
-- 预期验证命令：`rg "return\\s+[-]?[0-9]+\\s*;" comm inc test`、`rg "ENT_.*_(FAILED|BAD|IN_USE|NON_FATAL|NORMAL)" comm inc test msg`。
 
 ## P1
 
