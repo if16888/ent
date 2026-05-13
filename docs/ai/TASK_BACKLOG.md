@@ -64,17 +64,14 @@
 - 状态：已完成（基础覆盖已存在，暂无立即实现缺口）
 - 说明：`ENT_HANDLE` 的多实例初始化、独立运行、独立关闭、失败隔离、stop / close 闭环和 stale handle 拒绝已在代码、测试和 README 中收口；当前剩余更偏向更细并发边界强化，不再作为阻塞性待办。
 
+### ENT-004：Windows CI 路径回归可见性
+
+- 状态：已完成（已合并到 `master`，见 PR #22 / PR #23）
+- 说明：Windows CI 已补齐 `test_ent_log` 路径相关失败的日志收集与 artifact 上传，路径回归的可见性和定位能力已收口。
+
 ## 进行中
 
 ## P0
-
-### ENT-004：Windows CI 路径回归可见性
-
-- 目标：让 Windows CI 在 `test_ent_log` 路径相关失败时更容易定位问题，而不是新增重复的路径测试。
-- 非目标：不重构 CI 矩阵，不改 log API，不重复拆分已有 `test_ent_log` 路径覆盖。
-- 风险：R3，涉及 CI workflow、Windows shell、路径语义和失败诊断。
-- 推荐授权等级：L1 impact-scan 后 L2 / L3。
-- 预期验证命令：`git diff --check`、Windows `ctest --test-dir build -C Release --output-on-failure -R "test_ent_log|test_ent_log_flush_deadline"`、GitHub Actions Windows job。
 
 ### ENT-005：清点 public API 与内部 helper 的裸数字返回
 
