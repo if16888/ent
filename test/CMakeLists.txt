@@ -60,6 +60,8 @@ add_executable(
   ../comm/ent_init.c
 )
 
+target_compile_definitions(test_ent_init PRIVATE ENT_INIT_TEST_HOOKS=1)
+
 target_include_directories(
   test_ent_init
   PRIVATE

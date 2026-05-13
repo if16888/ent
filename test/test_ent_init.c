@@ -49,6 +49,9 @@ static int s_munlockall_calls = 0;
 static uintptr_t s_next_log_handle = 0x1000;
 static uintptr_t s_next_lock_handle = 0x2000;
 static uintptr_t s_next_cv_handle = 0x3000;
+#ifdef ENT_INIT_TEST_HOOKS
+static int s_handle_ctx_free_calls = 0;
+#endif
 static ENT_LOG s_ent_log_at_lock_init = NULL;
 static const char* s_last_log_init_handle_module = NULL;
 static const char* s_last_log_init_handle_path = NULL;
@@ -160,6 +163,9 @@ static void reset_close_counters(void)
     s_log_close_calls = 0;
     s_lock_close_calls = 0;
     s_cv_close_calls = 0;
+#ifdef ENT_INIT_TEST_HOOKS
+    s_handle_ctx_free_calls = 0;
+#endif
 }
 
 static void reset_log_failures(void)
@@ -217,6 +223,28 @@ static void close_handle_if_needed(ENT_HANDLE* handle)
     {
         ENT_Close(handle);
     }
+}
+
+#ifdef ENT_INIT_TEST_HOOKS
+void ENT_InitTestHandleCtxFreed(void)
+{
+    s_handle_ctx_free_calls += 1;
+}
+#endif
+
+static ENT_HANDLE make_bad_magic_handle(void)
+{
+    ENT_HANDLE handle = (ENT_HANDLE)calloc(1, sizeof(*handle));
+
+    if(handle == NULL)
+    {
+        return NULL;
+    }
+
+    handle->magic = 0u;
+    handle->ctx.isInit = true;
+    handle->ctx.handleState = ENT_HANDLE_STATE_ACTIVE_E;
+    return handle;
 }
 
 typedef struct TEST_RUN_THREAD_CTX
@@ -728,100 +756,118 @@ static int test_ent_stop_validates_states(void)
     return 0;
 }
 
-static int test_ent_stop_rejects_stale_handle(void)
+static int test_ent_stop_rejects_bad_magic_handle(void)
 {
-    ENT_HANDLE handle = NULL;
-    ENT_HANDLE staleHandle = NULL;
+    ENT_HANDLE handle = make_bad_magic_handle();
 
     reset_wait_capture();
     reset_close_counters();
     reset_log_failures();
 
-    if(expect_true(ENT_Init(&handle, "demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
-                   "ENT_Init should succeed before testing stale ENT_Stop") != 0)
+    if(expect_true(handle != NULL, "test should allocate a bad-magic handle for ENT_Stop checks") != 0)
     {
         return 1;
     }
 
-    if(expect_true(handle != NULL, "ENT_Init should return a live handle before stale ENT_Stop") != 0)
+    if(expect_true(ENT_Stop(handle) == ENT_SYS_BAD_HANDLE,
+                   "ENT_Stop should reject a bad-magic handle object") != 0)
     {
-        close_handle_if_needed(&handle);
+        free(handle);
         return 1;
     }
 
-    staleHandle = handle;
-    if(expect_true(ENT_Close(&handle) == ENT_SYS_NORMAL && handle == NULL,
-                   "ENT_Close should clear the live handle before stale ENT_Stop checks") != 0)
+    if(expect_true(ENT_Close(&handle) == ENT_SYS_BAD_HANDLE,
+                   "ENT_Close should reject a bad-magic handle object") != 0)
     {
+        free(handle);
         return 1;
     }
 
-    return expect_true(ENT_Stop(staleHandle) == ENT_SYS_BAD_HANDLE,
-                       "ENT_Stop should reject a stale handle");
+    if(expect_true(handle != NULL,
+                   "ENT_Close should not clear a bad-magic handle object") != 0)
+    {
+        free(handle);
+        return 1;
+    }
+
+    free(handle);
+    return 0;
 }
 
-static int test_ent_run_rejects_stale_handle(void)
+static int test_ent_run_rejects_bad_magic_handle(void)
 {
-    ENT_HANDLE handle = NULL;
-    ENT_HANDLE staleHandle = NULL;
+    ENT_HANDLE handle = make_bad_magic_handle();
 
     reset_wait_capture();
     reset_close_counters();
     reset_log_failures();
 
-    if(expect_true(ENT_Init(&handle, "demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
-                   "ENT_Init should succeed before testing stale ENT_Run") != 0)
+    if(expect_true(handle != NULL, "test should allocate a bad-magic handle for ENT_Run checks") != 0)
     {
         return 1;
     }
 
-    if(expect_true(handle != NULL, "ENT_Init should return a live handle before stale ENT_Run") != 0)
+    if(expect_true(ENT_Run(handle) == ENT_SYS_BAD_HANDLE,
+                   "ENT_Run should reject a bad-magic handle object") != 0)
     {
-        close_handle_if_needed(&handle);
+        free(handle);
         return 1;
     }
 
-    staleHandle = handle;
-    if(expect_true(ENT_Close(&handle) == ENT_SYS_NORMAL && handle == NULL,
-                   "ENT_Close should clear the live handle before stale ENT_Run checks") != 0)
+    if(expect_true(ENT_Close(&handle) == ENT_SYS_BAD_HANDLE,
+                   "ENT_Close should reject a bad-magic handle object") != 0)
     {
+        free(handle);
         return 1;
     }
 
-    return expect_true(ENT_Run(staleHandle) == ENT_SYS_BAD_HANDLE,
-                       "ENT_Run should reject a stale handle");
+    if(expect_true(handle != NULL,
+                   "ENT_Close should not clear a bad-magic handle object") != 0)
+    {
+        free(handle);
+        return 1;
+    }
+
+    free(handle);
+    return 0;
 }
 
-static int test_ent_close_rejects_stale_handle(void)
+static int test_ent_close_rejects_bad_magic_handle(void)
 {
-    ENT_HANDLE handle = NULL;
-    ENT_HANDLE staleHandle = NULL;
+    ENT_HANDLE handle = make_bad_magic_handle();
 
     reset_wait_capture();
     reset_close_counters();
     reset_log_failures();
 
-    if(expect_true(ENT_Init(&handle, "demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
-                   "ENT_Init should succeed before testing stale ENT_Close") != 0)
+    if(expect_true(handle != NULL, "test should allocate a bad-magic handle for ENT_Close checks") != 0)
     {
         return 1;
     }
 
-    if(expect_true(handle != NULL, "ENT_Init should return a live handle before stale ENT_Close") != 0)
+    if(expect_true(ENT_Close(&handle) == ENT_SYS_BAD_HANDLE,
+                   "ENT_Close should reject a bad-magic handle object") != 0)
     {
-        close_handle_if_needed(&handle);
+        free(handle);
         return 1;
     }
 
-    staleHandle = handle;
-    if(expect_true(ENT_Close(&handle) == ENT_SYS_NORMAL && handle == NULL,
-                   "ENT_Close should clear the live handle before stale ENT_Close checks") != 0)
+    if(expect_true(handle != NULL,
+                   "ENT_Close should not clear a bad-magic handle object") != 0)
     {
+        free(handle);
         return 1;
     }
 
-    return expect_true(ENT_Close(&staleHandle) == ENT_SYS_BAD_HANDLE,
-                       "ENT_Close should reject a stale handle pointer");
+    if(expect_true(ENT_Stop(handle) == ENT_SYS_BAD_HANDLE,
+                   "ENT_Stop should reject a bad-magic handle object even after close rejection") != 0)
+    {
+        free(handle);
+        return 1;
+    }
+
+    free(handle);
+    return 0;
 }
 
 static int test_ent_run_returns_stopped_when_stop_requested_before_entry(void)
@@ -856,36 +902,42 @@ static int test_ent_run_returns_stopped_when_stop_requested_before_entry(void)
                        "ENT_Close should still succeed after a pre-stopped ENT_Run");
 }
 
-static int test_ent_set_rt_attributes_rejects_stale_handle(void)
+static int test_ent_set_rt_attributes_rejects_bad_magic_handle(void)
 {
-    ENT_HANDLE handle = NULL;
-    ENT_HANDLE staleHandle = NULL;
+    ENT_HANDLE handle = make_bad_magic_handle();
 
     reset_wait_capture();
     reset_close_counters();
     reset_log_failures();
 
-    if(expect_true(ENT_Init(&handle, "demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
-                   "ENT_Init should succeed before testing stale ENT_SetRtAttributes") != 0)
+    if(expect_true(handle != NULL, "test should allocate a bad-magic handle for ENT_SetRtAttributes checks") != 0)
     {
         return 1;
     }
 
-    if(expect_true(handle != NULL, "ENT_Init should return a live handle before stale ENT_SetRtAttributes") != 0)
+    if(expect_true(ENT_SetRtAttributes(handle, -1, ENT_RT_POLICY_OTHER_E, 0) == ENT_SYS_BAD_HANDLE,
+                   "ENT_SetRtAttributes should reject a bad-magic handle object") != 0)
     {
-        close_handle_if_needed(&handle);
+        free(handle);
         return 1;
     }
 
-    staleHandle = handle;
-    if(expect_true(ENT_Close(&handle) == ENT_SYS_NORMAL && handle == NULL,
-                   "ENT_Close should clear the live handle before stale ENT_SetRtAttributes checks") != 0)
+    if(expect_true(ENT_Close(&handle) == ENT_SYS_BAD_HANDLE,
+                   "ENT_Close should reject a bad-magic handle object") != 0)
     {
+        free(handle);
         return 1;
     }
 
-    return expect_true(ENT_SetRtAttributes(staleHandle, -1, ENT_RT_POLICY_OTHER_E, 0) == ENT_SYS_BAD_HANDLE,
-                       "ENT_SetRtAttributes should reject a stale handle");
+    if(expect_true(handle != NULL,
+                   "ENT_Close should not clear a bad-magic handle object") != 0)
+    {
+        free(handle);
+        return 1;
+    }
+
+    free(handle);
+    return 0;
 }
 
 static int test_ent_run_rejects_closed_handle(void)
@@ -986,7 +1038,6 @@ static int test_ent_close_waits_for_running_worker_before_free(void)
     TEST_RUN_THREAD_CTX runCtx;
     TEST_CLOSE_THREAD_CTX closeCtx;
     ENT_HANDLE handle = (ENT_HANDLE)calloc(1, sizeof(*handle));
-    ENT_HANDLE rawHandle = handle;
     int failed = 0;
 
     if(handle == NULL)
@@ -1013,7 +1064,7 @@ static int test_ent_close_waits_for_running_worker_before_free(void)
     if(expect_true(start_test_thread(&runTh, &runCtx) == 0,
                    "thread start should start the ENT_Run worker for close-wait testing") != 0)
     {
-        free(rawHandle);
+        free(handle);
         return 1;
     }
 
@@ -1024,7 +1075,7 @@ static int test_ent_close_waits_for_running_worker_before_free(void)
     {
         release_blocking_wait();
         join_test_thread(runTh);
-        free(rawHandle);
+        free(handle);
         return 1;
     }
 
@@ -1069,11 +1120,18 @@ static int test_ent_close_waits_for_running_worker_before_free(void)
         failed = 1;
     }
 
-    free(rawHandle);
+#ifdef ENT_INIT_TEST_HOOKS
+    if(expect_true(s_handle_ctx_free_calls == 1,
+                   "ENT_Close should free the outer handle context exactly once after waiting for the worker") != 0)
+    {
+        failed = 1;
+    }
+#endif
+
     return failed;
 }
 
-static int test_ent_close_clears_handle_instances(void)
+static int test_ent_close_frees_handle_context(void)
 {
     ENT_HANDLE handle = (ENT_HANDLE)calloc(1, sizeof(*handle));
 
@@ -1132,6 +1190,14 @@ static int test_ent_close_clears_handle_instances(void)
     {
         return 1;
     }
+
+#ifdef ENT_INIT_TEST_HOOKS
+    if(expect_true(s_handle_ctx_free_calls == 1,
+                   "ENT_Close should free the outer handle context exactly once") != 0)
+    {
+        return 1;
+    }
+#endif
 
     return expect_true(s_last_closed_log_handle == (ENT_LOG)0x11,
                        "ENT_Close should close the entity log handle that was attached to the context");
@@ -1958,7 +2024,7 @@ int main(void)
 
     failures += test_ent_run_rejects_uninitialized_context();
     failures += test_ent_run_waits_on_cv_with_lock();
-    failures += test_ent_close_clears_handle_instances();
+    failures += test_ent_close_frees_handle_context();
     failures += test_ent_close_stops_running_handle();
     failures += test_ent_init_closes_logging_when_entity_log_level_setup_fails();
     failures += test_ent_init_logs_before_tearing_down_logging_when_lock_init_fails();
@@ -1970,11 +2036,11 @@ int main(void)
     failures += test_ent_set_rt_attributes_rejects_uninitialized_context();
     failures += test_ent_set_rt_attributes_allows_noop_after_init();
     failures += test_ent_set_rt_attributes_rejects_normal_mode();
-    failures += test_ent_stop_rejects_stale_handle();
-    failures += test_ent_run_rejects_stale_handle();
-    failures += test_ent_close_rejects_stale_handle();
+    failures += test_ent_stop_rejects_bad_magic_handle();
+    failures += test_ent_run_rejects_bad_magic_handle();
+    failures += test_ent_close_rejects_bad_magic_handle();
     failures += test_ent_run_returns_stopped_when_stop_requested_before_entry();
-    failures += test_ent_set_rt_attributes_rejects_stale_handle();
+    failures += test_ent_set_rt_attributes_rejects_bad_magic_handle();
     failures += test_ent_close_waits_for_running_worker_before_free();
     failures += test_handle_instance_uses_isolated_context();
     failures += test_handle_instances_can_run_and_close_independently();
