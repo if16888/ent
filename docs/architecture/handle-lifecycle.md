@@ -1,0 +1,88 @@
+# Handle Lifecycle Architecture
+
+`ent` 现在的对外实例模型以 `ENT_HANDLE` 为中心。它替代了早期的 `ENT_Runtime*` 公共入口，统一承载 Init / Run / Stop / Close 的生命周期闭环。
+
+这篇文档只解释 **句柄生命周期**，不重复 README 的使用示例，也不重复 `docs/log-return-codes.md` 的返回码表。
+
+## 设计目标
+
+- 对外只有一套 handle-based 生命周期入口。
+- 同一个进程里可以同时管理多个实例。
+- 每个实例都必须有清晰的初始化、运行、停止和关闭边界。
+- 关闭必须是可审计、可等待、可回收的，而不是“直接 free 掉再赌调用方没有在跑”。
+
+## 生命周期状态
+
+`ENT_HANDLE` 在实现上经历四个阶段：
+
+| 状态 | 含义 |
+| --- | --- |
+| `ACTIVE` | 句柄可正常运行、停止、设置属性和关闭。 |
+| `STOPPING` | `ENT_Stop()` 已请求停止，`ENT_Run()` 需要尽快退出。 |
+| `CLOSING` | `ENT_Close()` 已开始收口，新的运行或配置入口必须被拒绝。 |
+| `CLOSED` | 资源已经释放或标记为无效，句柄不能再复用。 |
+
+这几个状态的存在目的，不是增加复杂度，而是把“谁还在用这个句柄”说清楚。
+
+## 入口语义
+
+### `ENT_Init(ENT_HANDLE* handle, ...)`
+
+- `handle` 必须指向调用方持有的句柄变量。
+- 调用成功后，`*handle` 变成一个可用的实例句柄。
+- 同一个句柄变量如果已经非空，再次初始化必须拒绝，不允许静默覆盖。
+
+### `ENT_Run(ENT_HANDLE handle)`
+
+- `ENT_Run()` 是实例的主运行入口。
+- 它适合放在 worker thread 中执行，而不是和主线程串行阻塞调用。
+- 当 `ENT_Stop()` 已经请求停止时，`ENT_Run()` 应该尽快退出。
+- 正常被 `ENT_Stop()` 唤醒后，返回值以 `ENT_SYS_NORMAL` 作为主语义。
+
+### `ENT_Stop(ENT_HANDLE handle)`
+
+- `ENT_Stop()` 只负责发出停止请求，并唤醒可能阻塞的运行路径。
+- 它不负责释放资源。
+- 如果句柄已经无效或已经关闭，必须返回能明确表达状态的错误码，而不是把所有情况都混成一个结果。
+
+### `ENT_Close(ENT_HANDLE* handle)`
+
+- `ENT_Close()` 负责终止句柄生命周期。
+- 它必须先让实例进入收口态，再等待正在运行的路径退出，最后才释放资源。
+- 成功后，调用方持有的句柄变量必须被置为 `NULL`。
+
+### `ENT_SetRtAttributes(ENT_HANDLE handle, ...)`
+
+- `ENT_SetRtAttributes()` 只作用于有效句柄。
+- 它属于实例级配置入口，不应该绕过句柄生命周期检查。
+
+## 并发与收口原则
+
+句柄生命周期的核心原则是：
+
+1. 新的运行入口不能在关闭开始后继续进入。
+2. 关闭不能在运行路径还在使用句柄时直接释放内存。
+3. 停止只负责触发退出，不负责直接销毁。
+4. 句柄失效后，stale pointer 必须被拒绝，而不是碰运气继续跑。
+
+这也是为什么实现里要保留 magic tag、running/stopRequested 和 active call 之类的状态。
+
+## 对调用方的建议
+
+- 多实例时，不要把所有实例的 `ENT_Run()` 串成一个顺序调用链。
+- 更常见的模式是：每个实例一个 worker thread，主线程负责 `ENT_Stop()` / `ENT_Close()` 收口。
+- 不要把同一个 `ENT_HANDLE` 重复 close。
+- 不要在句柄已经停止或关闭后继续复用旧指针。
+
+## 相关文档
+
+- [README.md](../../README.md)
+- [docs/log-return-codes.md](../log-return-codes.md)
+- [docs/threading-lifecycle.md](../threading-lifecycle.md)
+
+## 相关测试
+
+- `test/test_ent_init.c`
+- `test/test_ent_msg.c`
+- `test/downstream_consumer/main.c`
+

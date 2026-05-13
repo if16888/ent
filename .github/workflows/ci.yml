@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       BUILD_DIR: build
+      CI_LOG_DIR: ${{ github.workspace }}/ci-logs/linux
 
     steps:
       - name: Checkout
@@ -36,6 +37,14 @@ jobs:
       - name: Performance Smoke
         run: ./scripts/run-ci-linux.sh perf
 
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-failure-logs-linux
+          path: ${{ runner.temp }}/ci-logs/linux
+          if-no-files-found: ignore
+
   build-windows:
     runs-on: windows-2022
     strategy:
@@ -52,6 +61,7 @@ jobs:
       BUILD_DIR: build-${{ matrix.arch }}
       WINDOWS_CMAKE_PLATFORM: ${{ matrix.platform }}
       VCPKG_TARGET_TRIPLET: ${{ matrix.triplet }}
+      CI_LOG_DIR: ${{ github.workspace }}/ci-logs/${{ matrix.arch }}
 
     steps:
       - name: Checkout
@@ -78,9 +88,14 @@ jobs:
       - name: Run log tests (Windows explicit)
         shell: pwsh
         run: |
+          $logDir = $env:CI_LOG_DIR
+          New-Item -ItemType Directory -Force -Path $logDir | Out-Null
           Push-Location $env:BUILD_DIR
           try {
-            ctest -C Release --output-on-failure -R "^(test_ent_log|test_ent_log_flush_deadline)$"
+            ctest -C Release --output-on-failure -R "^(test_ent_log|test_ent_log_flush_deadline)$" *>&1 | Tee-Object -FilePath (Join-Path $logDir "explicit-log-tests.log")
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
           }
           finally {
             Pop-Location
@@ -97,3 +112,11 @@ jobs:
       - name: Performance Smoke
         shell: pwsh
         run: .\scripts\run-ci-windows.ps1 perf
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-failure-logs-${{ matrix.arch }}
+          path: ${{ runner.temp }}/ci-logs/${{ matrix.arch }}
+          if-no-files-found: ignore

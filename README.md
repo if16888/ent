@@ -291,6 +291,8 @@ int main(void)
 - 保持初始化、运行、关闭语义一致
 - 避免一个实例的关闭直接覆盖另一个实例的状态
 
+更完整的生命周期说明见 [docs/architecture/handle-lifecycle.md](docs/architecture/handle-lifecycle.md)。
+
 ### 9.2 什么时候应该用 `ENT_HANDLE`
 
 更适合用 handle 接口的场景包括：
@@ -298,6 +300,18 @@ int main(void)
 - 一个进程里同时管理多个逻辑节点 / 站点 / 对象
 - 把 `ent` 当作 SDK 嵌入到更大的宿主程序中
 - 测试 / 仿真 / 多租户场景下，希望不同实例各自持有独立状态
+
+### 9.2.1 `ENT_HANDLE` 返回语义速查表
+
+这张表只列最常见的返回语义，完整的返回码定义请参考 [docs/log-return-codes.md](docs/log-return-codes.md)。
+
+| API | Typical success / expected return | Common reject cases |
+| --- | --- | --- |
+| `ENT_Init(&handle, ...)` | `ENT_SYS_NORMAL` | `ENT_INIT_INVALID_ARGUMENT` for NULL output pointer or invalid args; `ENT_SYS_ALREADY_INITIALIZED` when `*handle != NULL` |
+| `ENT_Close(&handle)` | `ENT_SYS_NORMAL` | `ENT_INIT_INVALID_ARGUMENT` when the handle pointer itself is NULL; `ENT_SYS_CLOSE_UNINITIALIZED` when `*handle == NULL`; `ENT_SYS_BAD_HANDLE` for stale / invalid handles |
+| `ENT_Run(handle)` | `ENT_SYS_NORMAL` when the instance is stopped normally by `ENT_Stop()` | `ENT_SYS_RUN_UNINITIALIZED` when `handle == NULL`; `ENT_SYS_BAD_HANDLE` for stale / invalid handles; `ENT_SYS_STOPPED` when stop was already requested |
+| `ENT_Stop(handle)` | `ENT_SYS_NORMAL` | `ENT_SYS_INVALID_ARGUMENT` when `handle == NULL`; `ENT_SYS_BAD_HANDLE` for stale / invalid handles; `ENT_SYS_STOPPED` when the instance is already stopped |
+| `ENT_SetRtAttributes(handle, ...)` | `ENT_SYS_NORMAL`; `ENT_RT_NOTRT` is the expected return when realtime mode is not available | `ENT_RT_NOT_INITIALIZED` when the runtime side is not initialized; `ENT_SYS_BAD_HANDLE` for stale / invalid handles |
 
 ### 9.3 它的边界
 

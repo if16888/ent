@@ -8,6 +8,7 @@ $BuildDir = if ($env:BUILD_DIR) { $env:BUILD_DIR } else { "build-ci-$Triplet" }
 $InstallDir = if ($env:INSTALL_DIR) { $env:INSTALL_DIR } else { Join-Path $BuildDir "install" }
 $DownstreamBuildDir = if ($env:DOWNSTREAM_BUILD_DIR) { $env:DOWNSTREAM_BUILD_DIR } else { Join-Path $BuildDir "downstream-consumer" }
 $DownstreamSourceDir = if ($env:DOWNSTREAM_SOURCE_DIR) { $env:DOWNSTREAM_SOURCE_DIR } else { "test/downstream_consumer" }
+$LogDir = if ($env:CI_LOG_DIR) { [System.IO.Path]::GetFullPath($env:CI_LOG_DIR) } else { "" }
 $ToolchainFile = if ($env:CMAKE_TOOLCHAIN_FILE) {
     $env:CMAKE_TOOLCHAIN_FILE
 } elseif ($env:VCPKG_ROOT) {
@@ -16,6 +17,28 @@ $ToolchainFile = if ($env:CMAKE_TOOLCHAIN_FILE) {
     "C:\vcpkg\scripts\buildsystems\vcpkg.cmake"
 } else {
     ""
+}
+
+function Invoke-Logged {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$LogName,
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Action
+    )
+
+    if ([string]::IsNullOrWhiteSpace($LogDir)) {
+        & $Action
+        return
+    }
+
+    New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+    $LogPath = Join-Path $LogDir "$LogName.log"
+    & $Action *>&1 | Tee-Object -FilePath $LogPath
+
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
 }
 
 function Run-Configure {
@@ -32,34 +55,38 @@ function Run-Configure {
     if ($ToolchainFile) {
         $CmakeArgs += "-DCMAKE_TOOLCHAIN_FILE=$ToolchainFile"
     }
-    cmake @CmakeArgs
+    Invoke-Logged "configure" { cmake @CmakeArgs }
 }
 
 function Run-Build {
-    cmake --build $BuildDir --config Release
+    Invoke-Logged "build" { cmake --build $BuildDir --config Release }
 }
 
 function Run-Test {
-    Push-Location $BuildDir
-    try {
-        ctest -C Release --output-on-failure `
-            -R "test_ent_init|test_ent_msg|test_utl_dll|test_utl_thread|test_utl_lock_cv|test_ent_thread|test_ent_thread_failures|test_utl_tpool|test_utl_tpool_lifecycle|test_utl_tpool_integration|test_utl_timer|test_utl_socket|test_ent_db|test_ent_log|test_ent_shm|test_security"
-    }
-    finally {
-        Pop-Location
+    Invoke-Logged "test" {
+        Push-Location $BuildDir
+        try {
+            ctest -C Release --output-on-failure `
+                -R "test_ent_init|test_ent_msg|test_utl_dll|test_utl_thread|test_utl_lock_cv|test_ent_thread|test_ent_thread_failures|test_utl_tpool|test_utl_tpool_lifecycle|test_utl_tpool_integration|test_utl_timer|test_utl_socket|test_ent_db|test_ent_log|test_ent_shm|test_security"
+        }
+        finally {
+            Pop-Location
+        }
     }
 }
 
 function Run-InstallConsumer {
-    cmake --install $BuildDir --config Release --prefix $InstallDir
-    $PrefixPath = [System.IO.Path]::GetFullPath($InstallDir)
-    $EntPackageDir = Join-Path $PrefixPath "CMake"
-    $DownstreamSourcePath = [System.IO.Path]::GetFullPath($DownstreamSourceDir)
-    $DownstreamBuildPath = [System.IO.Path]::GetFullPath($DownstreamBuildDir)
+    Invoke-Logged "install-consumer" {
+        cmake --install $BuildDir --config Release --prefix $InstallDir
+        $PrefixPath = [System.IO.Path]::GetFullPath($InstallDir)
+        $EntPackageDir = Join-Path $PrefixPath "CMake"
+        $DownstreamSourcePath = [System.IO.Path]::GetFullPath($DownstreamSourceDir)
+        $DownstreamBuildPath = [System.IO.Path]::GetFullPath($DownstreamBuildDir)
 
-    cmake -S $DownstreamSourcePath -B $DownstreamBuildPath -A $Platform -DCMAKE_BUILD_TYPE=Release "-Dent_DIR=$EntPackageDir"
-    cmake --build $DownstreamBuildPath --config Release
-    & "$DownstreamBuildPath\Release\ent_downstream_consumer.exe"
+        cmake -S $DownstreamSourcePath -B $DownstreamBuildPath -A $Platform -DCMAKE_BUILD_TYPE=Release "-Dent_DIR=$EntPackageDir"
+        cmake --build $DownstreamBuildPath --config Release
+        & "$DownstreamBuildPath\Release\ent_downstream_consumer.exe"
+    }
 }
 
 function Invoke-PerfBinary {
@@ -107,10 +134,12 @@ function Invoke-PerfBinary {
 }
 
 function Run-Perf {
-    Invoke-PerfBinary ".\$BuildDir\bin\Release\perf_utl_socket.exe"
-    Invoke-PerfBinary ".\$BuildDir\bin\Release\perf_utl_timer.exe"
-    Invoke-PerfBinary ".\$BuildDir\bin\Release\perf_utl_tpool.exe"
-    Invoke-PerfBinary ".\$BuildDir\bin\Release\perf_ent_log.exe"
+    Invoke-Logged "perf" {
+        Invoke-PerfBinary ".\$BuildDir\bin\Release\perf_utl_socket.exe"
+        Invoke-PerfBinary ".\$BuildDir\bin\Release\perf_utl_timer.exe"
+        Invoke-PerfBinary ".\$BuildDir\bin\Release\perf_utl_tpool.exe"
+        Invoke-PerfBinary ".\$BuildDir\bin\Release\perf_ent_log.exe"
+    }
 }
 
 switch ($Stage) {

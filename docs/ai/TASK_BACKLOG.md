@@ -14,6 +14,11 @@
 - 状态：已完成（PR #10）
 - 说明：`test_ent_log` 已补齐 flush / close / ctx / interval=0 边界测试。
 
+### ENT-003：ent_shm 生命周期边界硬化
+
+- 状态：已完成（已收口）
+- 说明：`ent_shm` 的生命周期边界测试已补齐，当前不再作为待实现任务。
+
 ### ENT-009：重审 ENT_Init / ENT_RuntimeInit 多实例收口边界
 
 - 状态：已完成（impact-scan）
@@ -29,38 +34,32 @@
 - 状态：已完成（PR #19）
 - 说明：README、example、test/downstream_consumer 与 public header 已同步到 handle-based API。
 
-## 进行中
-
 ### ENT-012：ENT_HANDLE Init / Run / Stop / Close 闭环
 
-- 状态：进行中（PR #20）
-- 目标：让 `ENT_HANDLE` 的 `Init / Run / Stop / Close` 形成完整生命周期闭环，避免重复初始化，支持 stop 唤醒和 close 收口。
-- 非目标：不改 DB、timer、SHM、socket 主逻辑，不恢复 `ENT_Runtime*`，不做旧 API 兼容。
-- 风险：R3，涉及 public API、状态机、资源释放和并发关闭。
-- 推荐授权等级：L2。
-- 预期验证命令：
-  - `git diff --check`
-  - `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`
-  - `cmake --build build -j4`
-  - `ctest --test-dir build --output-on-failure -R "test_ent_init|test_ent_msg|test_ent_log|test_ent_log_flush_deadline|test_ent_db|test_security|test_utl_thread|test_utl_tpool_integration|test_utl_timer|test_ent_shm"`
+- 状态：已完成（PR #20, PR #21）
+- 说明：`ENT_HANDLE` 的 `Init / Run / Stop / Close` 生命周期闭环已完成并合并，包含重复初始化拒绝、stop 唤醒、close 收口和并发边界修复。
+
+### ENT-201：docs/architecture/handle-lifecycle.md
+
+- 状态：已完成（已落地）
+- 说明：已补齐 `ENT_HANDLE` 生命周期架构文档，并与 README 的 handle-based 入口互相链接。
+
+### ENT-104：README 增加 handle-based API 返回语义速查表
+
+- 状态：已完成（已落地）
+- 说明：README 已补齐 handle-based public API 的返回语义速查表，并与 `docs/log-return-codes.md` 互相引用。
+
+## 进行中
 
 ## P0
 
-### ENT-003：ent_shm 生命周期边界硬化
+### ENT-004：Windows CI 路径回归可见性
 
-- 目标：梳理并补强 `ent_shm` 的 open / flush / close 生命周期边界、重复 close、失败路径和跨平台差异说明。
-- 非目标：不重做 API 体系，不新增消息码，不重构 mmap / file-mapping 主逻辑。
-- 风险：R3，涉及 public API、资源释放、Windows / Linux 差异。
-- 推荐授权等级：L1 impact-scan 后 L2。
-- 预期验证命令：`git diff --check`、`ctest --test-dir build --output-on-failure -R "test_ent_shm"`。
-
-### ENT-004：Windows CI 增加 test_ent_log 文件路径验证
-
-- 目标：让 Windows CI 覆盖 `test_ent_log` 对文件路径、目录创建、路径分隔符的关键行为。
-- 非目标：不重构 CI 矩阵，不调整第三方依赖策略，不改 log API。
-- 风险：R3，涉及 CI workflow、Windows shell、路径语义和 artifact。
+- 目标：让 Windows CI 在 `test_ent_log` 路径相关失败时更容易定位问题，而不是新增重复的路径测试。
+- 非目标：不重构 CI 矩阵，不改 log API，不重复拆分已有 `test_ent_log` 路径覆盖。
+- 风险：R3，涉及 CI workflow、Windows shell、路径语义和失败诊断。
 - 推荐授权等级：L1 impact-scan 后 L2 / L3。
-- 预期验证命令：`git diff --check`、本地 Windows `ctest --test-dir build -C Release --output-on-failure`、GitHub Actions Windows job。
+- 预期验证命令：`git diff --check`、Windows `ctest --test-dir build -C Release --output-on-failure -R "test_ent_log|test_ent_log_flush_deadline"`、GitHub Actions Windows job。
 
 ### ENT-005：清点 public API 与内部 helper 的裸数字返回
 
@@ -72,17 +71,17 @@
 
 ## P1
 
-### ENT-101：ENT_HANDLE 多实例并发/隔离边界测试补齐
+### ENT-101：ENT_HANDLE 多实例并发/隔离边界强化
 
-- 目标：补齐 `ENT_HANDLE` 多实例并发运行、交错 stop / close、初始化失败、局部关闭、状态隔离和清理顺序测试。
+- 目标：在现有 `ENT_HANDLE` 多实例基础覆盖之上，继续强化并发运行、交错 stop / close、初始化失败、局部关闭、状态隔离和清理顺序边界。
 - 非目标：不重构 handle 架构，不恢复 `ENT_Runtime*` public API。
 - 风险：R3，涉及全局状态、生命周期和下游行为。
 - 推荐授权等级：L1 impact-scan 后 L2。
 - 预期验证命令：`git diff --check`、`cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`、`cmake --build build -j4`、`ctest --test-dir build --output-on-failure`。
 
-### ENT-102：db handle close 并发测试
+### ENT-102：db handle close / reinit 并发边界测试补齐
 
-- 目标：补齐 DB handle active operation 与 close 竞争、重复 close、service close 时 live handle 的并发测试。
+- 目标：补齐 DB handle active operation 与 close 竞争、reinit 竞争、重复 close、service close 时 live handle 的并发测试。
 - 非目标：不改 DB backend 连接策略，不引入新数据库依赖。
 - 风险：R3，涉及并发、条件变量、数据库 backend 和资源释放。
 - 推荐授权等级：L1 impact-scan 后 L2。
@@ -90,37 +89,21 @@
 
 ### ENT-103：thread/tpool/timer 返回语义 review
 
-- 目标：review thread / tpool / timer 的返回码、失败路径和生命周期语义，输出问题清单。
+- 目标：review thread / tpool / timer 的 public wrapper 返回码、失败路径和生命周期语义，区分 public contract 与内部 helper sentinel，输出问题清单。
 - 非目标：不直接修改实现，不扩展到 runtime / db / log。
 - 风险：R2，可能发现跨模块返回语义不一致。
 - 推荐授权等级：L1。
 - 预期验证命令：`rg "return\\s+[-]?[0-9]+\\s*;" comm inc test`、`rg "UTL_|ENT_THRD|ENT_TPL|ENT_TMR" comm inc test msg`。
 
-### ENT-104：README 增加 handle-based API 返回语义速查表
+### ENT-105：CI failure log artifact 收集与可见性
 
-- 目标：在 README 中整理 handle-based public API 返回语义速查表。
-- 非目标：不改代码、不新增消息码、不调整测试。
-- 风险：R1，文档可能和实现不同步。
-- 推荐授权等级：L2。
-- 预期验证命令：`git diff --check`、文档链路 review。
-
-### ENT-105：CI artifact 上传失败日志
-
-- 目标：让 CI 在失败时上传关键构建和测试日志，便于 triage。
+- 目标：让 CI 在失败时收集并上传关键构建、测试和安装日志，便于快速 triage。
 - 非目标：不改构建逻辑，不改变失败判定。
 - 风险：R3，涉及 workflow 和 artifact 权限。
 - 推荐授权等级：L1 impact-scan 后 L2 / L3。
 - 预期验证命令：`git diff --check`、GitHub Actions dry review、失败 job artifact 验证。
 
 ## P2
-
-### ENT-201：docs/architecture/handle-lifecycle.md
-
-- 目标：补齐 handle 生命周期架构文档，说明 `ENT_HANDLE` 的 Init / Run / Stop / Close 边界、资源归属和关闭顺序。
-- 非目标：不改代码，不调整测试，不恢复 `ENT_Runtime*` 文档。
-- 风险：R1。
-- 推荐授权等级：L2。
-- 预期验证命令：`git diff --check`、人工 review。
 
 ### ENT-202：docs/architecture/log-lifecycle.md
 
