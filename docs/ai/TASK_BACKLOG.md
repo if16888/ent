@@ -44,6 +44,11 @@
 - 状态：已完成（已落地）
 - 说明：已补齐 `ENT_HANDLE` 生命周期架构文档，并与 README 的 handle-based 入口互相链接。
 
+### ENT-104：README 增加 handle-based API 返回语义速查表
+
+- 状态：已完成（已落地）
+- 说明：README 已补齐 handle-based public API 的返回语义速查表，并与 `docs/log-return-codes.md` 互相引用。
+
 ## 进行中
 
 ## P0
@@ -89,14 +94,6 @@
 - 风险：R2，可能发现跨模块返回语义不一致。
 - 推荐授权等级：L1。
 - 预期验证命令：`rg "return\\s+[-]?[0-9]+\\s*;" comm inc test`、`rg "UTL_|ENT_THRD|ENT_TPL|ENT_TMR" comm inc test msg`。
-
-### ENT-104：README 增加 handle-based API 返回语义速查表
-
-- 目标：在 README 中整理 handle-based public API 返回语义速查表。
-- 非目标：不改代码、不新增消息码、不调整测试。
-- 风险：R1，文档可能和实现不同步。
-- 推荐授权等级：L2。
-- 预期验证命令：`git diff --check`、文档链路 review。
 
 ### ENT-105：CI failure log artifact 收集与可见性
 
