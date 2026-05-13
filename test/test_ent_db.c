@@ -702,6 +702,28 @@ static int test_db_close_handle_waits_for_active_read(void)
             rc = 1;
             goto CLEANUP;
         }
+        if(expect_true(iENT_DbReInit(db_handle, SQLITE_TYPE, NULL, db_path, NULL, NULL, 0) == ENT_DBS_IN_USE,
+                       "iENT_DbReInit should reject a handle that is already closing") != 0)
+        {
+            test_event_signal(&probe.callback_release);
+            WaitForSingleObject(read_thread, INFINITE);
+            WaitForSingleObject(close_thread, INFINITE);
+            CloseHandle(read_thread);
+            CloseHandle(close_thread);
+            rc = 1;
+            goto CLEANUP;
+        }
+        if(expect_true(ENT_DbClose() == ENT_DBS_IN_USE,
+                       "ENT_DbClose should reject the DB service while a live handle is closing") != 0)
+        {
+            test_event_signal(&probe.callback_release);
+            WaitForSingleObject(read_thread, INFINITE);
+            WaitForSingleObject(close_thread, INFINITE);
+            CloseHandle(read_thread);
+            CloseHandle(close_thread);
+            rc = 1;
+            goto CLEANUP;
+        }
         if(expect_true(ENT_DbCloseHandle(&db_handle) == ENT_DBS_IN_USE,
                        "A second ENT_DbCloseHandle should report the handle as already closing") != 0)
         {
@@ -807,6 +829,24 @@ static int test_db_close_handle_waits_for_active_read(void)
                                          NULL,
                                          NULL) == ENT_DBS_IN_USE,
                        "ENT_DbWriteParams should reject a handle that is already closing") != 0)
+        {
+            test_event_signal(&probe.callback_release);
+            pthread_join(read_thread, NULL);
+            pthread_join(close_thread, NULL);
+            rc = 1;
+            goto CLEANUP;
+        }
+        if(expect_true(iENT_DbReInit(db_handle, SQLITE_TYPE, NULL, db_path, NULL, NULL, 0) == ENT_DBS_IN_USE,
+                       "iENT_DbReInit should reject a handle that is already closing") != 0)
+        {
+            test_event_signal(&probe.callback_release);
+            pthread_join(read_thread, NULL);
+            pthread_join(close_thread, NULL);
+            rc = 1;
+            goto CLEANUP;
+        }
+        if(expect_true(ENT_DbClose() == ENT_DBS_IN_USE,
+                       "ENT_DbClose should reject the DB service while a live handle is closing") != 0)
         {
             test_event_signal(&probe.callback_release);
             pthread_join(read_thread, NULL);
