@@ -42,7 +42,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ci-failure-logs-linux
-          path: ${{ runner.temp }}/ci-logs/linux
+          path: ${{ env.CI_LOG_DIR }}
           if-no-files-found: ignore
 
   build-windows:
@@ -118,5 +118,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ci-failure-logs-${{ matrix.arch }}
-          path: ${{ runner.temp }}/ci-logs/${{ matrix.arch }}
+          path: ${{ env.CI_LOG_DIR }}
           if-no-files-found: ignore
