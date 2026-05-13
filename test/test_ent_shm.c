@@ -415,6 +415,140 @@ static int test_open_existing_without_truncate(void)
     return 0;
 }
 
+static int test_repeated_close_is_safe(void)
+{
+    ENT_SharedMapOptions options;
+    ENT_SharedMap* map = NULL;
+    char path[512];
+
+    memset(&options, 0, sizeof(options));
+    memset(path, 0, sizeof(path));
+
+    if(prepare_temp_path(path, sizeof(path)) != 0)
+    {
+        return 1;
+    }
+
+    options.path = path;
+    options.size = TEST_SHM_SMALL_SIZE;
+    options.mode = ENT_SHM_MODE_READ_WRITE;
+    options.flags = ENT_SHM_F_CREATE_IF_MISSING | ENT_SHM_F_TRUNCATE_IF_EXISTS;
+
+    if(expect_true(ENT_SharedMapOpen(&options, &map) == ENT_SYS_NORMAL,
+                   "ENT_SharedMapOpen should create a writable mapping") != 0)
+    {
+        cleanup_temp_path(path);
+        return 1;
+    }
+
+    if(expect_true(ENT_SharedMapClose(&map) == ENT_SYS_NORMAL,
+                   "ENT_SharedMapClose should close the mapping") != 0)
+    {
+        cleanup_temp_path(path);
+        return 1;
+    }
+
+    if(expect_true(map == NULL,
+                   "ENT_SharedMapClose should NULL the closed mapping") != 0)
+    {
+        cleanup_temp_path(path);
+        return 1;
+    }
+
+    if(expect_true(ENT_SharedMapClose(&map) == ENT_SYS_NORMAL,
+                   "ENT_SharedMapClose should accept a repeated close on a NULL map handle") != 0)
+    {
+        cleanup_temp_path(path);
+        return 1;
+    }
+
+    if(expect_true(map == NULL,
+                   "ENT_SharedMapClose should keep the repeated-close handle NULL") != 0)
+    {
+        cleanup_temp_path(path);
+        return 1;
+    }
+
+    cleanup_temp_path(path);
+    return 0;
+}
+
+static int test_read_only_repeated_close_is_safe(void)
+{
+    ENT_SharedMapOptions options;
+    ENT_SharedMap* map = NULL;
+    char path[512];
+
+    memset(&options, 0, sizeof(options));
+    memset(path, 0, sizeof(path));
+
+    if(prepare_temp_path(path, sizeof(path)) != 0)
+    {
+        return 1;
+    }
+
+    options.path = path;
+    options.size = TEST_SHM_SMALL_SIZE;
+    options.mode = ENT_SHM_MODE_READ_WRITE;
+    options.flags = ENT_SHM_F_CREATE_IF_MISSING | ENT_SHM_F_TRUNCATE_IF_EXISTS;
+
+    if(expect_true(ENT_SharedMapOpen(&options, &map) == ENT_SYS_NORMAL,
+                   "ENT_SharedMapOpen should create a writable mapping") != 0)
+    {
+        cleanup_temp_path(path);
+        return 1;
+    }
+
+    if(expect_true(ENT_SharedMapClose(&map) == ENT_SYS_NORMAL,
+                   "ENT_SharedMapClose should close the writable mapping") != 0)
+    {
+        cleanup_temp_path(path);
+        return 1;
+    }
+
+    options.mode = ENT_SHM_MODE_READ_ONLY;
+    options.size = TEST_SHM_SIZE_ZERO;
+    options.flags = 0;
+
+    if(expect_true(ENT_SharedMapOpen(&options, &map) == ENT_SYS_NORMAL,
+                   "ENT_SharedMapOpen should reopen the mapping read-only") != 0)
+    {
+        cleanup_temp_path(path);
+        return 1;
+    }
+
+    if(expect_true(ENT_SharedMapClose(&map) == ENT_SYS_NORMAL,
+                   "ENT_SharedMapClose should close the read-only mapping") != 0)
+    {
+        cleanup_temp_path(path);
+        return 1;
+    }
+
+    if(expect_true(map == NULL,
+                   "ENT_SharedMapClose should NULL the closed read-only mapping") != 0)
+    {
+        cleanup_temp_path(path);
+        return 1;
+    }
+
+    if(expect_true(ENT_SharedMapClose(&map) == ENT_SYS_NORMAL,
+                   "ENT_SharedMapClose should accept a repeated close on a NULL read-only map handle") != 0)
+    {
+        cleanup_temp_path(path);
+        return 1;
+    }
+
+    if(expect_true(map == NULL,
+                   "ENT_SharedMapClose should keep the repeated-close read-only handle NULL") != 0)
+    {
+        cleanup_temp_path(path);
+        return 1;
+    }
+
+    cleanup_temp_path(path);
+    return 0;
+}
+
 static int test_multiple_map_same_file(void)
 {
     ENT_SharedMapOptions writer_options;
@@ -518,6 +652,8 @@ int main(void)
     failures += test_flush_rejects_out_of_range();
     failures += test_create_map_write_read();
     failures += test_open_existing_without_truncate();
+    failures += test_repeated_close_is_safe();
+    failures += test_read_only_repeated_close_is_safe();
     failures += test_multiple_map_same_file();
 
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
