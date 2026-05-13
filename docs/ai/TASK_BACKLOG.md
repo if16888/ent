@@ -82,9 +82,9 @@
 - 推荐授权等级：L1 impact-scan 后 L2。
 - 预期验证命令：`git diff --check`、`cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`、`cmake --build build -j4`、`ctest --test-dir build --output-on-failure`。
 
-### ENT-102：db handle close 并发测试
+### ENT-102：db handle close / reinit 并发边界测试补齐
 
-- 目标：补齐 DB handle active operation 与 close 竞争、重复 close、service close 时 live handle 的并发测试。
+- 目标：补齐 DB handle active operation 与 close 竞争、reinit 竞争、重复 close、service close 时 live handle 的并发测试。
 - 非目标：不改 DB backend 连接策略，不引入新数据库依赖。
 - 风险：R3，涉及并发、条件变量、数据库 backend 和资源释放。
 - 推荐授权等级：L1 impact-scan 后 L2。
