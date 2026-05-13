@@ -14,6 +14,11 @@
 - 状态：已完成（PR #10）
 - 说明：`test_ent_log` 已补齐 flush / close / ctx / interval=0 边界测试。
 
+### ENT-003：ent_shm 生命周期边界硬化
+
+- 状态：已完成（已收口）
+- 说明：`ent_shm` 的生命周期边界测试已补齐，当前不再作为待实现任务。
+
 ### ENT-009：重审 ENT_Init / ENT_RuntimeInit 多实例收口边界
 
 - 状态：已完成（impact-scan）
@@ -45,14 +50,6 @@
   - `ctest --test-dir build --output-on-failure -R "test_ent_init|test_ent_msg|test_ent_log|test_ent_log_flush_deadline|test_ent_db|test_security|test_utl_thread|test_utl_tpool_integration|test_utl_timer|test_ent_shm"`
 
 ## P0
-
-### ENT-003：ent_shm 生命周期边界硬化
-
-- 目标：梳理并补强 `ent_shm` 的 open / flush / close 生命周期边界、重复 close、失败路径和跨平台差异说明。
-- 非目标：不重做 API 体系，不新增消息码，不重构 mmap / file-mapping 主逻辑。
-- 风险：R3，涉及 public API、资源释放、Windows / Linux 差异。
-- 推荐授权等级：L1 impact-scan 后 L2。
-- 预期验证命令：`git diff --check`、`ctest --test-dir build --output-on-failure -R "test_ent_shm"`。
 
 ### ENT-004：Windows CI 增加 test_ent_log 文件路径验证
 
