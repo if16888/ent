@@ -291,6 +291,8 @@ int main(void)
 - 保持初始化、运行、关闭语义一致
 - 避免一个实例的关闭直接覆盖另一个实例的状态
 
+更完整的生命周期说明见 [docs/architecture/handle-lifecycle.md](docs/architecture/handle-lifecycle.md)。
+
 ### 9.2 什么时候应该用 `ENT_HANDLE`
 
 更适合用 handle 接口的场景包括：

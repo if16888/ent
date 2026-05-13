@@ -34,6 +34,11 @@
 - 状态：已完成（PR #19）
 - 说明：README、example、test/downstream_consumer 与 public header 已同步到 handle-based API。
 
+### ENT-201：docs/architecture/handle-lifecycle.md
+
+- 状态：已完成（已落地）
+- 说明：已补齐 `ENT_HANDLE` 生命周期架构文档，并与 README 的 handle-based 入口互相链接。
+
 ## 进行中
 
 ### ENT-012：ENT_HANDLE Init / Run / Stop / Close 闭环
@@ -110,14 +115,6 @@
 - 预期验证命令：`git diff --check`、GitHub Actions dry review、失败 job artifact 验证。
 
 ## P2
-
-### ENT-201：docs/architecture/handle-lifecycle.md
-
-- 目标：补齐 handle 生命周期架构文档，说明 `ENT_HANDLE` 的 Init / Run / Stop / Close 边界、资源归属和关闭顺序。
-- 非目标：不改代码，不调整测试，不恢复 `ENT_Runtime*` 文档。
-- 风险：R1。
-- 推荐授权等级：L2。
-- 预期验证命令：`git diff --check`、人工 review。
 
 ### ENT-202：docs/architecture/log-lifecycle.md
 
