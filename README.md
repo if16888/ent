@@ -308,10 +308,12 @@ int main(void)
 | API | Typical success / expected return | Common reject cases |
 | --- | --- | --- |
 | `ENT_Init(&handle, ...)` | `ENT_SYS_NORMAL` | `ENT_INIT_INVALID_ARGUMENT` for NULL output pointer or invalid args; `ENT_SYS_ALREADY_INITIALIZED` when `*handle != NULL` |
-| `ENT_Close(&handle)` | `ENT_SYS_NORMAL` | `ENT_INIT_INVALID_ARGUMENT` when the handle pointer itself is NULL; `ENT_SYS_CLOSE_UNINITIALIZED` when `*handle == NULL`; `ENT_SYS_BAD_HANDLE` for stale / invalid handles |
-| `ENT_Run(handle)` | `ENT_SYS_NORMAL` when the instance is stopped normally by `ENT_Stop()` | `ENT_SYS_RUN_UNINITIALIZED` when `handle == NULL`; `ENT_SYS_BAD_HANDLE` for stale / invalid handles; `ENT_SYS_STOPPED` when stop was already requested |
-| `ENT_Stop(handle)` | `ENT_SYS_NORMAL` | `ENT_SYS_INVALID_ARGUMENT` when `handle == NULL`; `ENT_SYS_BAD_HANDLE` for stale / invalid handles; `ENT_SYS_STOPPED` when the instance is already stopped |
-| `ENT_SetRtAttributes(handle, ...)` | `ENT_SYS_NORMAL`; `ENT_RT_NOTRT` is the expected return when realtime mode is not available | `ENT_RT_NOT_INITIALIZED` when the runtime side is not initialized; `ENT_SYS_BAD_HANDLE` for stale / invalid handles |
+| `ENT_Close(&handle)` | `ENT_SYS_NORMAL` | `ENT_INIT_INVALID_ARGUMENT` when the handle pointer itself is NULL; `ENT_SYS_CLOSE_UNINITIALIZED` when `*handle == NULL`; `ENT_SYS_BAD_HANDLE` for an invalid handle object / magic mismatch |
+| `ENT_Run(handle)` | `ENT_SYS_NORMAL` when the instance is stopped normally by `ENT_Stop()` | `ENT_SYS_RUN_UNINITIALIZED` when `handle == NULL`; `ENT_SYS_BAD_HANDLE` for an invalid handle object / magic mismatch; `ENT_SYS_STOPPED` when stop was already requested |
+| `ENT_Stop(handle)` | `ENT_SYS_NORMAL` | `ENT_SYS_INVALID_ARGUMENT` when `handle == NULL`; `ENT_SYS_BAD_HANDLE` for an invalid handle object / magic mismatch; `ENT_SYS_STOPPED` when the instance is already stopped |
+| `ENT_SetRtAttributes(handle, ...)` | `ENT_SYS_NORMAL`; `ENT_RT_NOTRT` is the expected return when realtime mode is not available | `ENT_RT_NOT_INITIALIZED` when the runtime side is not initialized; `ENT_SYS_BAD_HANDLE` for an invalid handle object / magic mismatch |
+
+成功 `ENT_Close(&handle)` 后，调用方变量会被置为 `NULL`，之前保存的 raw 复制值不再有可调用契约。
 
 ### 9.3 它的边界
 

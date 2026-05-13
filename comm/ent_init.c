@@ -41,6 +41,10 @@
 #include "ent_msg.h"
 #include "ent_utility.h"
 
+#ifdef ENT_INIT_TEST_HOOKS
+extern void ENT_InitTestHandleCtxFreed(void);
+#endif
+
 #if defined(_MSC_VER)
 #define ENT_THREAD_LOCAL __declspec(thread)
 #else
@@ -195,7 +199,14 @@ static MSG_ID_T iENT_HandleClose(ENT_HANDLE* handle)
     prevCtx = iENT_RuntimeSetActiveCtx(&handleCtx->ctx);
     sts = iENT_CTXClose(&handleCtx->ctx);
     iENT_RuntimeSetActiveCtx(prevCtx);
-    *handle = NULL;
+    if(sts == ENT_SYS_NORMAL)
+    {
+#ifdef ENT_INIT_TEST_HOOKS
+        ENT_InitTestHandleCtxFreed();
+#endif
+        free(handleCtx);
+        *handle = NULL;
+    }
     return sts;
 }
 
