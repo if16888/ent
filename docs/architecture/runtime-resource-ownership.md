@@ -17,7 +17,7 @@ next implementation steps can be staged safely.
 - `UTL_TIMER_T` owns timer lifecycles.
 - `ENT_THREAD` owns registered thread lifecycles.
 - `UTL_TPOOL` owns a pool registry with activeOps.
-- `ENT_SharedMap` owns a file-backed mapping handle.
+- `ENT_SharedMap` currently remains a caller-synchronized file-backed mapping handle.
 - `UTL_LOCK`, `UTL_CV`, and socket descriptors remain caller-owned primitives.
 
 The result is a fragmented shutdown story:
@@ -43,7 +43,7 @@ The current model is a mix of the following patterns:
    - parts of `UTL_TIMER_T`
 3. **Raw pointer handle with pointer-to-handle close**
    - `ENT_HANDLE`
-   - `ENT_SharedMap`
+     - `ENT_SharedMap` as a later candidate if caller-synchronized semantics are ever replaced
 4. **Raw service handle with join/close semantics**
    - `ENT_THREAD`
 5. **Raw caller-owned primitives**
@@ -189,8 +189,8 @@ Keep the existing APIs:
 - `ENT_DbInitHandle(&db, ...)`
 - `ENT_LogInitHandle(&log, ...)`
 - `UTL_TimerCreate(&timer, ...)`
-- `UTL_TPoolInit(&pool, ...)`
-- `ENT_SharedMapOpen(&map, ...)`
+  - `UTL_TPoolInit(&pool, ...)`
+  - `ENT_SharedMapOpen(&map, ...)` remains caller-synchronized on the legacy path
 
 These remain valid and continue to work on the legacy/default runtime path.
 
@@ -202,7 +202,7 @@ Add runtime-aware variants as opt-in APIs:
 - `ENT_LogInitHandleEx(ENT_HANDLE ent, ENT_LOG* log, ...)`
 - `ENT_TimerCreateEx(ENT_HANDLE ent, UTL_TIMER_T* timer, ...)`
 - `ENT_TPoolInitEx(ENT_HANDLE ent, UTL_TPOOL* pool, ...)`
-- `ENT_SharedMapOpenEx(ENT_HANDLE ent, ENT_SharedMap** map, ...)`
+- `ENT_SharedMapOpenEx(ENT_HANDLE ent, ENT_SharedMap** map, ...)` only if shared-map ownership is later migrated
 
 The `Ex` suffix is only a naming suggestion. The important property is that the
 runtime owner is explicit.
@@ -275,4 +275,3 @@ The strongest acceptance signal should be the same as it is today:
 This design document intentionally does not require a business-code build.
 The next implementation step should be a bounded follow-up task with its own
 impact-scan and targeted tests.
-

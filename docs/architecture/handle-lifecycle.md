@@ -11,7 +11,6 @@
 - 每个实例都必须有清晰的初始化、运行、停止和关闭边界。
 - 关闭必须是可审计、可等待、可回收的，而不是“直接 free 掉再赌调用方没有在跑”。
 - 如果调用方允许多线程入口，那么 close 与新入口之间必须由上层 owner lock / lifecycle lock 互斥；ent 不提供全局 handle registry 来替调用方做这层互斥。
-- 这是当前冻结的 public contract：`ENT_Close()` 只等待已经进入运行路径的调用退出，不承诺 close 开始后对新来的 `ENT_Run()` / `ENT_Stop()` / `ENT_SetRtAttributes()` 提供代码级全局安全。
 
 ## 生命周期状态
 
@@ -54,7 +53,7 @@
 - 它必须先让实例进入收口态，再等待正在运行的路径退出，最后才释放资源。
 - 成功后，调用方持有的句柄变量必须被置为 `NULL`。
 - 成功 close 后，旧 raw 复制值立即失效，不允许继续把关闭前保存的指针当成可调用 handle 使用。
-- `ENT_Close()` 只承诺等待已经进入运行路径的调用退出；它不承诺在 close 开始后，对其他线程刚刚发起的新 `ENT_Run()` / `ENT_Stop()` / `ENT_SetRtAttributes()` 入口提供代码级全局防御。这个 contract 是冻结的，不会通过 registry 追认成更强的并发安全保证。
+- `ENT_Close()` 只承诺等待已经进入运行路径的调用退出；它不承诺在 close 开始后，对其他线程刚刚发起的新 `ENT_Run()` / `ENT_Stop()` / `ENT_SetRtAttributes()` 入口提供代码级全局防御。
 
 ### `ENT_SetRtAttributes(ENT_HANDLE handle, ...)`
 
@@ -70,7 +69,6 @@
 3. 停止只负责触发退出，不负责直接销毁。
 4. 句柄失效后，当前仍可访问的无效对象必须被拒绝；成功 close 后保留下来的旧 raw 复制值不再有任何可调用契约。
 5. 如果上层需要多线程入口保证，必须用 owner lock / lifecycle lock 在 close 开始前先把新入口和 close 互斥掉。
-6. `ENT_Close()` 与新入口的并发边界是 contract 层冻结项，不承诺 close 开始后任意并发安全。
 
 这也是为什么实现里要保留 magic tag、running/stopRequested 和 active call 之类的状态。
 这些状态可以收口已经进入调用路径的实例，但它们不是全局 registry，也不负责把“close 开始后新来的调用”全部变成一个统一的强同步保证。
