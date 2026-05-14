@@ -1033,9 +1033,9 @@ static int test_ent_close_stops_running_handle(void)
 
 static int test_ent_close_waits_for_running_worker_before_free(void)
 {
-    /* This test covers reclamation for a worker already inside the run path.
-     * It does not promise that a brand-new concurrent call launched after
-     * close begins is code-level safe without an outer lifecycle lock. */
+    /* This test freezes the public contract for a worker already inside the
+     * run path. It does not promise that a brand-new concurrent call launched
+     * after close begins is code-level safe without an outer lifecycle lock. */
     TEST_THREAD runTh;
     TEST_THREAD closeTh;
     TEST_RUN_THREAD_CTX runCtx;
