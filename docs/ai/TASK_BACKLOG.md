@@ -79,17 +79,14 @@
 - 状态：已完成（文档 + 设计）
 - 说明：已完成对 runtime / log / db / timer / thread / tpool / shm / socket / lock / cv 的句柄生命周期审计，并输出 runtime 所有权迁移设计。
 
+### ENT-017：ENT_HANDLE close concurrency contract hardening
+
+- 状态：已完成（contract 冻结；无 registry）
+- 说明：已冻结 `ENT_Close()` 与 `ENT_Run` / `ENT_Stop` / `ENT_SetRtAttributes` 的并发契约，只承诺等待已进入运行路径的调用退出，不承诺 close 开始后的新入口任意并发安全。
+
 ## 进行中
 
 ## P0
-
-### ENT-017：ENT_HANDLE close concurrency contract hardening
-
-- 目标：把 `ENT_Close()` 与新入口并发的 public contract 收紧为可解释、可审计的 owner-lock 语义。
-- 非目标：不引入全局 registry，不恢复 stale raw pointer callable contract。
-- 风险：R3。
-- 推荐授权等级：L1 / L2。
-- 预期验证命令：`git diff --check`、`ctest --test-dir build --output-on-failure -R "test_ent_init"`.
 
 ### ENT-022：ent_shm lifecycle contract
 
