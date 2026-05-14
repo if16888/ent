@@ -83,6 +83,22 @@
 
 ## P0
 
+### ENT-017：ENT_HANDLE close concurrency contract hardening
+
+- 目标：把 `ENT_Close()` 与新入口并发的 public contract 收紧为可解释、可审计的 owner-lock 语义。
+- 非目标：不引入全局 registry，不恢复 stale raw pointer callable contract。
+- 风险：R3。
+- 推荐授权等级：L1 / L2。
+- 预期验证命令：`git diff --check`、`ctest --test-dir build --output-on-failure -R "test_ent_init"`.
+
+### ENT-022：ent_shm lifecycle contract
+
+- 目标：明确 `ENT_SharedMap` 的 caller-synchronized 语义，或者定义后续 state/registry 演进点。
+- 非目标：不改 shared-map 的文件映射实现。
+- 风险：R3。
+- 推荐授权等级：L1。
+- 预期验证命令：`git diff --check`、`ctest --test-dir build --output-on-failure -R "test_ent_shm"`.
+
 ## P1
 
 ### ENT-016：Runtime resource manager design review
@@ -92,14 +108,6 @@
 - 风险：R2。
 - 推荐授权等级：L1。
 - 预期验证命令：`git diff --check`、人工 review。
-
-### ENT-017：ENT_HANDLE close concurrency contract hardening
-
-- 目标：把 `ENT_Close()` 与新入口并发的 public contract 收紧为可解释、可审计的 owner-lock 语义。
-- 非目标：不引入全局 registry，不恢复 stale raw pointer callable contract。
-- 风险：R3。
-- 推荐授权等级：L1 / L2。
-- 预期验证命令：`git diff --check`、`ctest --test-dir build --output-on-failure -R "test_ent_init"`.
 
 ### ENT-018：ent_log ctx lifecycle hardening
 
@@ -132,14 +140,6 @@
 - 风险：R2。
 - 推荐授权等级：L1。
 - 预期验证命令：`git diff --check`、`ctest --test-dir build --output-on-failure -R "test_ent_thread"`.
-
-### ENT-022：ent_shm lifecycle contract
-
-- 目标：明确 `ENT_SharedMap` 的 caller-synchronized 语义，或者定义后续 state/registry 演进点。
-- 非目标：不改 shared-map 的文件映射实现。
-- 风险：R3。
-- 推荐授权等级：L1。
-- 预期验证命令：`git diff --check`、`ctest --test-dir build --output-on-failure -R "test_ent_shm"`.
 
 ## P2
 

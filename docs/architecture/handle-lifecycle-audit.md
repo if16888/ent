@@ -98,8 +98,8 @@ Key finding:
 
 | Handle name | Create / init API | Use APIs | Close API | Close API pointer-to-handle | Close success sets NULL | tag / magic | state | activeOps / refcount | registry | owner runtime / ENT_CTX | close waits already-entered op | close vs new operation | stale pointer callable contract | current test coverage | risk | recommended action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `ENT_LOG` | `ENT_LogInit`, `ENT_LogInitHandle(&log, ...)` | `ENT_LogSetOption`, `ENT_LogRaw`, `ENT_LogFatal/Error/Warn/Print/Debug` | `ENT_LogCloseHandle(log)`, `ENT_LogClose()` | no | no | no explicit magic; state-based validation | yes (`CREATED` / `ACTIVE` / `CLOSING` / `CLOSED`) | yes (`activeWriters`) | implicit service live-count only (`sLogNum`), not a runtime registry | service-owned; explicit context ownership exists for `ENT_LOG_CTX` | yes for writers / buffer thread drain | partial; writer path is protected, but context-level entry still depends on ownership checks and close sequencing | no contract after close for stale raw handles | `test_ent_log.c`, `test_ent_log_flush_deadline.c`, docs/log-return-codes.md | P1 | Keep the service/context split, but treat runtime-owned log handles as a future migration target rather than an immediate API break. |
-| `ENT_LOG_CTX` | `ENT_LogCtxInit(&ctx)` | `ENT_LogCtxInitHandle`, `ENT_LogCtxSetOption`, `ENT_LogCtxRaw`, `ENT_LogCtxFatal/Error/Warn/Print/Debug` | `ENT_LogCtxClose(ctx)`, `ENT_LogCtxCloseHandle(ctx, log)` | no | no | no explicit magic; ownership validation plus handle state | yes (`CREATED` / `ACTIVE` / `CLOSING` / `CLOSED`) | yes (`activeWriters`) | no | ctx-owned, not runtime-owned | yes for owned-handle drain | partial; same-context ownership is enforced, but not a global registry fence | no contract after close for stale raw copies | `test_ent_log.c`, `test_ent_log_flush_deadline.c`, docs/log-return-codes.md | P1 | Keep explicit context ownership, then decide later whether the runtime owner should register ctx-owned resources. |
+| `ENT_LOG` | `ENT_LogInit`, `ENT_LogInitHandle(&log, ...)` | `ENT_LogSetOption`, `ENT_LogRaw`, `ENT_LogFatal/Error/Warn/Print/Debug` | `ENT_LogCloseHandle(log)`, `ENT_LogClose()` | no | no | yes, tag-based validation via `ENTLOG_TAG`; no generation-stabilized registry | yes (`CREATED` / `ACTIVE` / `CLOSING` / `CLOSED`) | yes (`activeWriters`) | implicit service live-count only (`sLogNum`), not a runtime registry | service-owned; explicit context ownership exists for `ENT_LOG_CTX` | yes for writers / buffer thread drain | partial; writer path is protected, but context-level entry still depends on ownership checks and close sequencing | no contract after close for stale raw handles | `test_ent_log.c`, `test_ent_log_flush_deadline.c`, docs/log-return-codes.md | P1 | Keep the service/context split, but treat runtime-owned log handles as a future migration target rather than an immediate API break. |
+| `ENT_LOG_CTX` | `ENT_LogCtxInit(&ctx)` | `ENT_LogCtxInitHandle`, `ENT_LogCtxSetOption`, `ENT_LogCtxRaw`, `ENT_LogCtxFatal/Error/Warn/Print/Debug` | `ENT_LogCtxClose(ctx)`, `ENT_LogCtxCloseHandle(ctx, log)` | no | no | yes, tag-based validation via `ENTLOG_CTX_TAG`; no generation-stabilized registry | yes (`CREATED` / `ACTIVE` / `CLOSING` / `CLOSED`) | yes (`activeWriters`) | no | ctx-owned, not runtime-owned | yes for owned-handle drain | partial; same-context ownership is enforced, but not a global registry fence | no contract after close for stale raw copies | `test_ent_log.c`, `test_ent_log_flush_deadline.c`, docs/log-return-codes.md | P1 | Keep explicit context ownership, then decide later whether the runtime owner should register ctx-owned resources. |
 
 Key findings:
 
@@ -108,6 +108,8 @@ Key findings:
   a runtime-owned resource registry.
 - `ENT_LogClose()` and `ENT_LogCtxClose()` are closer to a service-owned model than to
   a runtime-owned model.
+- `ENT_LOG` and `ENT_LOG_CTX` rely on tag-based validation, but there is no
+  generation-stabilized registry yet.
 
 ### DB_HANDLE
 
@@ -127,7 +129,7 @@ Key findings:
 
 | Handle name | Create / init API | Use APIs | Close API | Close API pointer-to-handle | Close success sets NULL | tag / magic | state | activeOps / refcount | registry | owner runtime / ENT_CTX | close waits already-entered op | close vs new operation | stale pointer callable contract | current test coverage | risk | recommended action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `UTL_TIMER_T` | `UTL_TimerInit`, `UTL_TimerCreate`, `UTL_TimerCreateUs` | timer callback execution is implicit; public use is via the create/delete APIs | `UTL_TimerDelete(&timer)`, `UTL_TimerClose()` | yes for delete, no for service close | yes for delete | yes (`tag`) | partial; service closing flag + per-timer enable flag rather than a single explicit state enum | yes (`sTimerLifecycleOps` plus per-timer worker/callback counters) | yes (`sTimerCtx.dllHeader`) | no runtime owner today | yes for service shutdown and delete paths | partial; create/delete is gated by service lifecycle, but callback/RT worker/self-delete paths still need careful review | no contract after close for stale raw copies | `test_utl_timer.c`, perf timers, engineering hardening summary | P1 | Keep the current service registry model, but document the callback/free boundary sharply and treat runtime ownership as a future integration step. |
+| `UTL_TIMER_T` | `UTL_TimerInit`, `UTL_TimerCreate`, `UTL_TimerCreateUs` | timer callback execution is implicit; public use is via the create/delete APIs | `UTL_TimerDelete(&timer)`, `UTL_TimerClose()` | yes for delete, no for service close | yes for delete | yes (`tag`) | partial; service closing flag + per-timer enable flag rather than a single explicit state enum | service-level `sTimerLifecycleOps` exists; no generic per-timer activeOps/refcount | yes (`sTimerCtx.dllHeader`) | no runtime owner today | yes for service shutdown and delete paths | partial; create/delete is gated by service lifecycle, but callback/RT worker/self-delete paths still need careful review | no contract after close for stale raw copies | `test_utl_timer.c`, perf timers, engineering hardening summary | P1 | Keep the current service registry model, but document the callback/free boundary sharply and treat runtime ownership as a future integration step. |
 
 Key findings:
 
@@ -136,12 +138,14 @@ Key findings:
 - The Linux RT path and the callback/self-delete path are the most delicate places.
 - This module is a good candidate for runtime-owned registration, but it is not yet
   part of `ENT_CTX`.
+- Timer lifecycle protection is service-level and worker-specific, not equivalent to
+  `UTL_TPOOL`-style per-handle activeOps accounting.
 
 ### ENT_THREAD
 
 | Handle name | Create / init API | Use APIs | Close API | Close API pointer-to-handle | Close success sets NULL | tag / magic | state | activeOps / refcount | registry | owner runtime / ENT_CTX | close waits already-entered op | close vs new operation | stale pointer callable contract | current test coverage | risk | recommended action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `ENT_THREAD` | `ENT_ThreadInit(&th)` | `ENT_ThreadDetachCreate`, `ENT_ThreadCreate`, `ENT_ThreadWaitById` | `ENT_ThreadClose(th)` | no | no | yes (`ENT_TH_TAG`) | no explicit state enum; joinable thread records are tracked by tag | no explicit activeOps/refcount | yes (thread record DLL under the service handle) | no runtime owner today | yes for registered joinable threads | partial; the service handle joins and frees tracked thread records, but callers must still own the higher-level shutdown order | no contract after close for stale raw copies | `test_ent_thread.c`, `test_ent_thread_failures.c`, docs/threading-lifecycle.md | P1 | Keep it as an owner-thread lifecycle service for now; if runtime-owned child-thread tracking is needed later, add it as a child resource rather than changing the external handle type. |
+| `ENT_THREAD` | `ENT_ThreadInit(&th)` | `ENT_ThreadDetachCreate`, `ENT_ThreadCreate`, `ENT_ThreadWaitById` | `ENT_ThreadClose(th)` | no | no | yes (`ENT_TH_TAG`) | no explicit state enum; joinable thread records are tracked by tag | no explicit activeOps/refcount | internal thread-record list, not a stable public-handle registry | no runtime owner today | yes for registered joinable threads | partial; the service handle joins and frees tracked thread records, but callers must still own the higher-level shutdown order | no contract after close for stale raw copies | `test_ent_thread.c`, `test_ent_thread_failures.c`, docs/threading-lifecycle.md | P1 | Keep it as an owner-thread lifecycle service for now; if runtime-owned child-thread tracking is needed later, add it as a child resource rather than changing the external handle type. |
 
 Key findings:
 
@@ -149,6 +153,7 @@ Key findings:
   behavior.
 - It still uses a raw service handle, so there is no runtime owner attachment today.
 - The design is closer to "owner-thread lifecycle" than to a runtime-owned child resource.
+- The registry is an internal thread-record list, not a stable public-handle registry.
 
 ### UTL_TPOOL
 
@@ -250,4 +255,3 @@ Key findings:
    attachable to `ENT_CTX` as a child resource?
 5. Should `UTL_TPool` be copied as-is into the runtime owner registry, or should the
    registry get a simpler minimal interface first?
-
