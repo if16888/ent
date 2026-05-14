@@ -10,6 +10,7 @@
 - 同一个进程里可以同时管理多个实例。
 - 每个实例都必须有清晰的初始化、运行、停止和关闭边界。
 - 关闭必须是可审计、可等待、可回收的，而不是“直接 free 掉再赌调用方没有在跑”。
+- 如果调用方允许多线程入口，那么 close 与新入口之间必须由上层 owner lock / lifecycle lock 互斥；ent 不提供全局 handle registry 来替调用方做这层互斥。
 
 ## 生命周期状态
 
@@ -52,6 +53,7 @@
 - 它必须先让实例进入收口态，再等待正在运行的路径退出，最后才释放资源。
 - 成功后，调用方持有的句柄变量必须被置为 `NULL`。
 - 成功 close 后，旧 raw 复制值立即失效，不允许继续把关闭前保存的指针当成可调用 handle 使用。
+- `ENT_Close()` 只承诺等待已经进入运行路径的调用退出；它不承诺在 close 开始后，对其他线程刚刚发起的新 `ENT_Run()` / `ENT_Stop()` / `ENT_SetRtAttributes()` 入口提供代码级全局防御。
 
 ### `ENT_SetRtAttributes(ENT_HANDLE handle, ...)`
 
@@ -66,8 +68,10 @@
 2. 关闭不能在运行路径还在使用句柄时直接释放内存。
 3. 停止只负责触发退出，不负责直接销毁。
 4. 句柄失效后，当前仍可访问的无效对象必须被拒绝；成功 close 后保留下来的旧 raw 复制值不再有任何可调用契约。
+5. 如果上层需要多线程入口保证，必须用 owner lock / lifecycle lock 在 close 开始前先把新入口和 close 互斥掉。
 
 这也是为什么实现里要保留 magic tag、running/stopRequested 和 active call 之类的状态。
+这些状态可以收口已经进入调用路径的实例，但它们不是全局 registry，也不负责把“close 开始后新来的调用”全部变成一个统一的强同步保证。
 
 ## 对调用方的建议
 
@@ -75,6 +79,7 @@
 - 更常见的模式是：每个实例一个 worker thread，主线程负责 `ENT_Stop()` / `ENT_Close()` 收口。
 - 不要把同一个 `ENT_HANDLE` 重复 close。
 - 不要在句柄已经停止或关闭后继续复用旧指针；成功 `ENT_Close()` 后只应继续使用被置为 `NULL` 的那个句柄变量。
+- 如果外层会跨线程发起新的入口调用，必须先让 owner lock / lifecycle lock 保护 close、run、stop 和属性更新之间的互斥。
 
 ## 相关文档
 
