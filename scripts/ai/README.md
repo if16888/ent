@@ -8,7 +8,7 @@
 - task boundary checker。
 - review packet 生成脚本。
 - CI triage 日志裁剪脚本。
-- benchmark report 元数据校验脚本。
+- benchmark report 元数据校验脚本，配套模板见 `docs/benchmark-report-template.md`。
 
 当前状态：
 

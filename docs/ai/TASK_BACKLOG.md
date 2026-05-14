@@ -174,11 +174,8 @@
 
 ### ENT-203：benchmark/report 结构预研
 
-- 目标：设计 ent runtime / log / thread / shm benchmark 报告结构，包括 CSV、markdown、环境元数据和复现命令。
-- 非目标：不引入 benchmark 框架，不提交性能结论。
-- 风险：R1。
-- 推荐授权等级：L1 / L2。
-- 预期验证命令：`git diff --check`、样例报告人工 review。
+- 状态：已完成（模板已落地）
+- 说明：`docs/benchmark-report-template.md` 已补齐 benchmark/report 结构模板，覆盖 CSV、markdown、环境元数据、复现命令和统计字段。
 
 ### ENT-204：fgn 复用 ent_shm 的边界分析
 
