@@ -79,22 +79,22 @@
 - 状态：已完成（文档 + 设计）
 - 说明：已完成对 runtime / log / db / timer / thread / tpool / shm / socket / lock / cv 的句柄生命周期审计，并输出 runtime 所有权迁移设计。
 
-## 进行中
-
-## P0
-
 ### ENT-017：ENT_HANDLE close concurrency contract hardening
 
-- 目标：把 `ENT_Close()` 与新入口并发的 public contract 收紧为可解释、可审计的 owner-lock 语义。
-- 非目标：不引入全局 registry，不恢复 stale raw pointer callable contract。
-- 风险：R3。
-- 推荐授权等级：L1 / L2。
-- 预期验证命令：`git diff --check`、`ctest --test-dir build --output-on_failure -R "test_ent_init"`.
+- 状态：已完成（PR #28，contract 冻结；无 registry）
+- 说明：已冻结 `ENT_Close()` 与 `ENT_Run` / `ENT_Stop` / `ENT_SetRtAttributes` 的并发契约；只承诺等待已进入运行路径的调用退出，不承诺 close 开始后的新入口任意并发安全。
 
 ### ENT-022：ent_shm lifecycle contract
 
-- 状态：已完成（contract 冻结；无 registry）
-- 说明：已冻结 `ENT_SharedMap` 的 caller-synchronized 生命周期契约，只承诺顺序关闭和置空，不承诺 `Ptr` / `Size` / `Flush` 与 `Close` 并发安全。
+- 状态：已完成（PR #29，contract 冻结；无 registry）
+- 说明：已冻结 `ENT_SharedMap` caller-synchronized 生命周期契约；只承诺顺序关闭和置空，不承诺 `Ptr` / `Size` / `Flush` 与 `Close` 并发安全。
+
+### ENT-026：fgn / protocol-analyzer reuse validation
+
+- 状态：已完成（计划 + 只读扫描）
+- 说明：已完成 fgn / protocol-analyzer 复用验证计划和 fgn 只读扫描；结论是 `ent_log` 是 fgn 第一原型候选，`ent_msg` 是规约分析工具第一候选，`ent_shm` 是次级候选。
+
+## 进行中
 
 ## P1
 
@@ -138,6 +138,14 @@
 - 推荐授权等级：L1。
 - 预期验证命令：`git diff --check`、`ctest --test-dir build --output-on-failure -R "test_ent_thread"`.
 
+### ENT-027：fgn ent_log minimal prototype plan
+
+- 目标：基于 `ENT-026` 结论，设计 fgn 复用 `ent_log` 的最小原型方案。
+- 非目标：不迁移 fgn 全部代码，不接入 runtime registry，不改 ent public API。
+- 风险：R2。
+- 推荐授权等级：L1。
+- 预期验证命令：`git diff --check`、fgn 构建影响分析、原型前 review。
+
 ## P2
 
 ### ENT-023：runtime-aware API migration plan
@@ -153,16 +161,6 @@
 - 目标：基于 `ENT_CTX` 做一个最小的资源注册/析构原型。
 - 非目标：不做全量 API 迁移，不把所有句柄改成 `ENT_HANDLE`。
 - 风险：R3。
-
-### ENT-026：fgn minimal ent reuse validation plan
-
-- 目标：验证 `ent` 是否能被 `fgn` 以最小方式复用，优先验证 `ent_log` / `ent_shm` / `ent_msg`。
-- 非目标：不迁移 `fgn` 全部代码，不实现 runtime registry，不改 `ent` public API。
-- 风险：R2。
-- 推荐授权等级：L1。
-- 预期验证命令：`git diff --check`、文档 review。
-- 推荐授权等级：L1 / L2。
-- 预期验证命令：`git diff --check`、原型单测、相关模块回归。
 
 ### ENT-202：docs/architecture/log-lifecycle.md
 
