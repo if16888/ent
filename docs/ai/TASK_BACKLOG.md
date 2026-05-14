@@ -94,6 +94,11 @@
 - 状态：已完成（计划 + 只读扫描）
 - 说明：已完成 fgn / protocol-analyzer 复用验证计划和 fgn 只读扫描；结论是 `ent_log` 是 fgn 第一原型候选，`ent_msg` 是规约分析工具第一候选，`ent_shm` 是次级候选。
 
+### ENT-027：fgn ent_log minimal prototype plan
+
+- 状态：已完成（原型前计划）
+- 说明：已完成 fgn `ent_log` 最小原型前评估，输出候选方案、推荐方案、构建影响、验收标准和停止条件。
+
 ## 进行中
 
 ## P1
@@ -138,14 +143,6 @@
 - 推荐授权等级：L1。
 - 预期验证命令：`git diff --check`、`ctest --test-dir build --output-on-failure -R "test_ent_thread"`.
 
-### ENT-027：fgn ent_log minimal prototype plan
-
-- 目标：基于 `ENT-026` 结论，设计 fgn 复用 `ent_log` 的最小原型方案。
-- 非目标：不迁移 fgn 全部代码，不接入 runtime registry，不改 ent public API。
-- 风险：R2。
-- 推荐授权等级：L1。
-- 预期验证命令：`git diff --check`、fgn 构建影响分析、原型前 review。
-
 ## P2
 
 ### ENT-023：runtime-aware API migration plan
@@ -161,6 +158,14 @@
 - 目标：基于 `ENT_CTX` 做一个最小的资源注册/析构原型。
 - 非目标：不做全量 API 迁移，不把所有句柄改成 `ENT_HANDLE`。
 - 风险：R3。
+
+### FGN-ENT-001：fgn ent_log minimal prototype
+
+- 目标：基于 `ENT-027` 推荐方案，在 `fgn` 中实现一个最小 `ent_log` 复用原型。
+- 非目标：不改 ent public API，不引入 runtime registry，不迁移 `ent_shm` / `ent_msg`，不全量重构 logging。
+- 风险：R3。
+- 推荐授权等级：L1 / L2。
+- 预期验证命令：fgn Windows build、fgn smoke、日志输出检查、回滚检查。
 
 ### ENT-202：docs/architecture/log-lifecycle.md
 

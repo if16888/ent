@@ -140,3 +140,10 @@ depth and continue only with the smallest reuse path.
 - Record any API friction directly so future `ent` changes can stay compatible.
 - If the first useful reuse is only `ent_log` or `ent_msg`, do not expand the
   scope into runtime-owner migration.
+
+## 12. Follow-up Artifacts
+
+- `ENT-027` produced [`docs/architecture/fgn-ent-log-prototype-plan.md`](./fgn-ent-log-prototype-plan.md).
+- `ent_log` remains the first `fgn` prototype candidate.
+- `ent_msg` remains the protocol-analyzer-first candidate.
+- `ent_shm` remains the secondary candidate.
