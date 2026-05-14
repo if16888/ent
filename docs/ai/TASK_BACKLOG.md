@@ -153,6 +153,14 @@
 - 目标：基于 `ENT_CTX` 做一个最小的资源注册/析构原型。
 - 非目标：不做全量 API 迁移，不把所有句柄改成 `ENT_HANDLE`。
 - 风险：R3。
+
+### ENT-026：fgn minimal ent reuse validation plan
+
+- 目标：验证 `ent` 是否能被 `fgn` 以最小方式复用，优先验证 `ent_log` / `ent_shm` / `ent_msg`。
+- 非目标：不迁移 `fgn` 全部代码，不实现 runtime registry，不改 `ent` public API。
+- 风险：R2。
+- 推荐授权等级：L1。
+- 预期验证命令：`git diff --check`、文档 review。
 - 推荐授权等级：L1 / L2。
 - 预期验证命令：`git diff --check`、原型单测、相关模块回归。
 
