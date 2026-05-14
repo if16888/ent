@@ -272,7 +272,7 @@ int main(void)
     /* 实际项目中通常把 ENT_Run() 放到各自 worker thread 里：
        workerA: ENT_Run(handleA);
        workerB: ENT_Run(handleB);
-       main thread 负责 Stop / Close 收口。 */
+       main thread 负责 Stop -> join workers -> Close 收口。 */
 
     ENT_Stop(handleB);
     ENT_Stop(handleA);
@@ -314,6 +314,8 @@ int main(void)
 | `ENT_SetRtAttributes(handle, ...)` | `ENT_SYS_NORMAL`; `ENT_RT_NOTRT` is the expected return when realtime mode is not available | `ENT_RT_NOT_INITIALIZED` when the runtime side is not initialized; `ENT_SYS_BAD_HANDLE` for an invalid handle object / magic mismatch |
 
 成功 `ENT_Close(&handle)` 后，调用方变量会被置为 `NULL`，之前保存的 raw 复制值不再有可调用契约。
+一旦 `ENT_Close()` 开始，调用方就不应再从其他线程并发发起新的 `ENT_Run()`、`ENT_Stop()` 或 `ENT_SetRtAttributes()`；
+这类互斥应由上层 owner lock / lifecycle lock 自行保证。
 
 ### 9.3 它的边界
 
@@ -333,7 +335,7 @@ int main(void)
 - 不要把同一个 `ENT_HANDLE` 句柄重复 close
 - 如果需要并发运行多个实例，建议把 `ENT_Run()` 放到各自 worker thread 中调度
 - `ENT_Run()` 被 `ENT_Stop()` 正常唤醒后返回 `ENT_SYS_NORMAL`
-- 如果需要让 `ENT_Run()` 提前退出，先调用 `ENT_Stop()`，再调用 `ENT_Close()`
+- 如果需要让 `ENT_Run()` 提前退出，先调用 `ENT_Stop()`，join worker thread，再调用 `ENT_Close()`
 
 当前仓库测试已覆盖：
 
