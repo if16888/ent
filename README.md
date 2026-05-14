@@ -560,6 +560,8 @@ int main(void)
 
 `ENT_LogClose()` 只负责 service 级别资源收口，不会替代 `ENT_LogCloseHandle()` 去强行回收仍在使用中的句柄。
 
+更完整的日志生命周期说明见 [docs/architecture/log-lifecycle.md](docs/architecture/log-lifecycle.md)。
+
 #### `ENT_LogCtx*()` 的 ownership 语义
 
 显式 context API 只能操作同一个 context 创建的句柄：

@@ -59,6 +59,11 @@
 - 状态：已完成（已落地）
 - 说明：README 已补齐 handle-based public API 的返回语义速查表，并与 `docs/log-return-codes.md` 互相引用。
 
+### ENT-202：docs/architecture/log-lifecycle.md
+
+- 状态：已完成（已落地）
+- 说明：已补齐 log 生命周期文档，说明 service-level 和 handle-level close / flush 语义，以及当前 handle-based API 的收口边界。
+
 ### ENT-101：ENT_HANDLE 多实例并发/隔离边界强化
 
 - 状态：已完成（基础覆盖已存在，暂无立即实现缺口）
@@ -166,14 +171,6 @@
 - 风险：R3。
 - 推荐授权等级：L1 / L2。
 - 预期验证命令：fgn Windows build、fgn smoke、日志输出检查、回滚检查。
-
-### ENT-202：docs/architecture/log-lifecycle.md
-
-- 目标：补齐 log 生命周期文档，说明 service-level 和 handle-level close / flush 语义，以及当前 handle-based API 的收口边界。
-- 非目标：不统一返回码，不修改 log 实现。
-- 风险：R1。
-- 推荐授权等级：L2。
-- 预期验证命令：`git diff --check`、人工 review。
 
 ### ENT-203：benchmark/report 结构预研
 
