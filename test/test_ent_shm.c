@@ -417,6 +417,8 @@ static int test_open_existing_without_truncate(void)
 
 static int test_repeated_close_is_safe(void)
 {
+    /* This covers caller-owned, ordered lifecycle only. It does not promise
+     * close-vs-Ptr/Size/Flush concurrent safety. */
     ENT_SharedMapOptions options;
     ENT_SharedMap* map = NULL;
     char path[512];
@@ -475,6 +477,8 @@ static int test_repeated_close_is_safe(void)
 
 static int test_read_only_repeated_close_is_safe(void)
 {
+    /* This covers caller-owned, ordered lifecycle only. It does not promise
+     * close-vs-Ptr/Size/Flush concurrent safety. */
     ENT_SharedMapOptions options;
     ENT_SharedMap* map = NULL;
     char path[512];
@@ -551,6 +555,8 @@ static int test_read_only_repeated_close_is_safe(void)
 
 static int test_multiple_map_same_file(void)
 {
+    /* This covers caller-owned snapshot usage only. It does not promise
+     * close-vs-Ptr/Size/Flush concurrent safety on the same handle. */
     ENT_SharedMapOptions writer_options;
     ENT_SharedMapOptions reader_options;
     ENT_SharedMap* writer = NULL;

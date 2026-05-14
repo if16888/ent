@@ -84,17 +84,12 @@
 - 状态：已完成（contract 冻结；无 registry）
 - 说明：已冻结 `ENT_Close()` 与 `ENT_Run` / `ENT_Stop` / `ENT_SetRtAttributes` 的并发契约，只承诺等待已进入运行路径的调用退出，不承诺 close 开始后的新入口任意并发安全。
 
-## 进行中
-
-## P0
-
 ### ENT-022：ent_shm lifecycle contract
 
-- 目标：明确 `ENT_SharedMap` 的 caller-synchronized 语义，或者定义后续 state/registry 演进点。
-- 非目标：不改 shared-map 的文件映射实现。
-- 风险：R3。
-- 推荐授权等级：L1。
-- 预期验证命令：`git diff --check`、`ctest --test-dir build --output-on-failure -R "test_ent_shm"`.
+- 状态：已完成（contract 冻结；无 registry）
+- 说明：已冻结 `ENT_SharedMap` 的 caller-synchronized 生命周期契约，只承诺顺序关闭和置空，不承诺 `Ptr` / `Size` / `Flush` 与 `Close` 并发安全。
+
+## 进行中
 
 ## P1
 

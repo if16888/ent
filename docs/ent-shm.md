@@ -4,6 +4,9 @@
 It wraps the OS-specific mapping primitives behind a small C99 API so higher-level
 code can reuse the same implementation on Windows, Linux, and macOS.
 
+`ENT_SharedMap` is a caller-synchronized resource. It is intentionally a bare
+shared-map handle, not a runtime-owned child resource.
+
 ## Why file-backed mmap instead of POSIX shm only
 
 - A regular file gives the same fast shared-memory behavior as `shm_open`/`mmap`,
@@ -55,6 +58,20 @@ Lock failure does not fail the open call.
 
 `ENT_SharedMapClose(&map)` accepts a pointer to the map handle and sets `map`
 to `NULL` after releasing the mapping.
+
+The public lifecycle contract is conservative:
+
+- callers must not invoke `ENT_SharedMapPtr()`, `ENT_SharedMapSize()`, or
+  `ENT_SharedMapFlush()` concurrently with `ENT_SharedMapClose(&map)` on the same
+  handle;
+- once `ENT_SharedMapClose(&map)` succeeds, the caller's `map` variable becomes
+  `NULL`;
+- any raw pointer copied from a shared-map handle before close immediately loses
+  its callable contract after close;
+- there is no state machine, active-op counter, or registry behind
+  `ENT_SharedMap` today;
+- if runtime-owned shared-map management is ever needed, it should be designed
+  as a separate task with state, registry, and activeOps support.
 
 ## API Example
 
@@ -115,6 +132,10 @@ if(ENT_SharedMapOpen(&opts, &map) == ENT_SYS_NORMAL)
     ENT_SharedMapClose(&map);
 }
 ```
+
+The sequence above assumes caller-side serialization. It does not imply that
+`ENT_SharedMapPtr()`, `ENT_SharedMapSize()`, `ENT_SharedMapFlush()`, and
+`ENT_SharedMapClose(&map)` are safe to race on the same handle.
 
 ## fgn Integration Pattern
 

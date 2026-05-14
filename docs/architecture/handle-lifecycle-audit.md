@@ -32,7 +32,8 @@ The biggest remaining design gaps are:
 
 1. `ENT_HANDLE` still has a Validate -> BeginCall race window and no registry or
    generation-based stabilization.
-2. `ENT_SharedMap` has no lifecycle protection beyond pointer-to-handle close.
+2. `ENT_SharedMap` has no lifecycle protection beyond pointer-to-handle close and
+   remains caller-synchronized.
 3. `ENT_THREAD` and `UTL_Timer` still rely on service-local patterns rather than a
    runtime-owned resource registry.
 
@@ -72,7 +73,7 @@ The following rules were used to classify each handle/context:
 | `UTL_TIMER_T` | P1 | Lifecycle ops, tag checks, callback workers, and RT workers are all present; the close/free/callback edge is still more complex than the tpool pattern. |
 | `ENT_THREAD` | P1 | Join/close registry exists, but it is still a raw service handle with no runtime owner contract. |
 | `UTL_TPOOL` | P2 | Reference implementation; strong registry + state + activeOps already exist. |
-| `ENT_SharedMap` | P0 | Bare pointer handle with no state, registry, or activeOps; close/free vs Ptr/Size/Flush has no public concurrent-entry contract. |
+| `ENT_SharedMap` | P0 | Caller-synchronized bare pointer handle with no state, registry, or activeOps; close/free vs Ptr/Size/Flush has no public concurrent-entry contract. |
 | `UTL_LOCK` | P2 | Caller-owned primitive; close is by pointer, but it is not runtime-owned and does not require a registry. |
 | `UTL_CV` | P2 | Same as `UTL_LOCK`; caller-owned primitive, no runtime owner. |
 | `UTL_D_SOCKET` | P2 | Raw OS descriptor wrapper; no ent-level state machine or registry. |
@@ -176,7 +177,7 @@ Key findings:
 
 Key findings:
 
-- `ENT_SharedMap` is a bare pointer handle.
+- `ENT_SharedMap` is a bare, caller-synchronized pointer handle.
 - It is fine as a file-mapped snapshot primitive, but it is not currently safe to
   describe it as close-drain capable or concurrent-entry safe.
 - The current public contract should stay conservative: caller serializes `Ptr` /
