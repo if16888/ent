@@ -74,13 +74,90 @@
 - 状态：已完成（review 完成，无立即实现缺口）
 - 说明：已完成对库内裸数字返回和私有错误码的只读扫描，当前未发现必须立即修改实现的 public contract 缺口。
 
+### ENT-015：全库句柄生命周期审计与 runtime 所有权设计
+
+- 状态：已完成（文档 + 设计）
+- 说明：已完成对 runtime / log / db / timer / thread / tpool / shm / socket / lock / cv 的句柄生命周期审计，并输出 runtime 所有权迁移设计。
+
 ## 进行中
 
 ## P0
 
 ## P1
 
+### ENT-016：Runtime resource manager design review
+
+- 目标：把 `ENT_CTX` 作为 runtime owner 的资源注册器设计成可实现的最小模型。
+- 非目标：不实现 registry，不修改 public API。
+- 风险：R2。
+- 推荐授权等级：L1。
+- 预期验证命令：`git diff --check`、人工 review。
+
+### ENT-017：ENT_HANDLE close concurrency contract hardening
+
+- 目标：把 `ENT_Close()` 与新入口并发的 public contract 收紧为可解释、可审计的 owner-lock 语义。
+- 非目标：不引入全局 registry，不恢复 stale raw pointer callable contract。
+- 风险：R3。
+- 推荐授权等级：L1 / L2。
+- 预期验证命令：`git diff --check`、`ctest --test-dir build --output-on-failure -R "test_ent_init"`.
+
+### ENT-018：ent_log ctx lifecycle hardening
+
+- 目标：审计并收口 `ENT_LOG_CTX` 的 owner-context 生命周期、close/free 边界和 writer/callback 竞争。
+- 非目标：不统一 log 返回码，不重构日志格式化路径。
+- 风险：R3。
+- 推荐授权等级：L1 / L2。
+- 预期验证命令：`git diff --check`、`ctest --test-dir build --output-on-failure -R "test_ent_log"`.
+
+### ENT-019：timer lifecycle hardening
+
+- 目标：收紧 `UTL_TimerDelete` / `UTL_TimerClose` / callback worker / RT worker 的生命周期边界。
+- 非目标：不改 timer 调度策略，不改公开 timer 类型。
+- 风险：R3。
+- 推荐授权等级：L1 / L2。
+- 预期验证命令：`git diff --check`、`ctest --test-dir build --output-on-failure -R "test_utl_timer"`.
+
+### ENT-020：db init/close edge cleanup
+
+- 目标：继续清理 DB init/close / reinit / service-close 边界，并为 runtime owner 迁移保留接口形状。
+- 非目标：不改 backend 连接策略，不新增数据库依赖。
+- 风险：R3。
+- 推荐授权等级：L1 / L2。
+- 预期验证命令：`git diff --check`、`ctest --test-dir build --output-on-failure -R "test_ent_db"`.
+
+### ENT-021：ent_thread lifecycle contract
+
+- 目标：明确 `ENT_THREAD` 的 join/close 语义、owner-thread 责任和并发边界。
+- 非目标：不把线程服务改成 runtime owner。
+- 风险：R2。
+- 推荐授权等级：L1。
+- 预期验证命令：`git diff --check`、`ctest --test-dir build --output-on-failure -R "test_ent_thread"`.
+
+### ENT-022：ent_shm lifecycle contract
+
+- 目标：明确 `ENT_SharedMap` 的 caller-synchronized 语义，或者定义后续 state/registry 演进点。
+- 非目标：不改 shared-map 的文件映射实现。
+- 风险：R3。
+- 推荐授权等级：L1。
+- 预期验证命令：`git diff --check`、`ctest --test-dir build --output-on-failure -R "test_ent_shm"`.
+
 ## P2
+
+### ENT-023：runtime-aware API migration plan
+
+- 目标：为 `ENT_DbInitHandleEx` / `ENT_LogInitHandleEx` / `UTL_TimerCreateEx` / `UTL_TPoolInitEx` / `ENT_SharedMapOpenEx` 设计迁移路线。
+- 非目标：不立即实现所有 Ex API。
+- 风险：R2。
+- 推荐授权等级：L1。
+- 预期验证命令：`git diff --check`、人工 review。
+
+### ENT-024：resource registry implementation prototype
+
+- 目标：基于 `ENT_CTX` 做一个最小的资源注册/析构原型。
+- 非目标：不做全量 API 迁移，不把所有句柄改成 `ENT_HANDLE`。
+- 风险：R3。
+- 推荐授权等级：L1 / L2。
+- 预期验证命令：`git diff --check`、原型单测、相关模块回归。
 
 ### ENT-202：docs/architecture/log-lifecycle.md
 
