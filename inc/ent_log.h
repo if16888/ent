@@ -65,6 +65,7 @@ ENT_PUBLIC MSG_ID_T  ENT_LogInitHandle(ENT_LOG* pLogHandle,const char* moduleNam
  */
 ENT_PUBLIC MSG_ID_T  ENT_LogCtxInit(ENT_LOG_CTX* pCtx);
 
+/* Close drains entered ctx calls; callers must prevent new calls once close begins. */
 ENT_PUBLIC MSG_ID_T  ENT_LogCtxClose(ENT_LOG_CTX ctx);
 
 ENT_PUBLIC MSG_ID_T  ENT_LogCtxInitHandle(ENT_LOG_CTX ctx,ENT_LOG* pLogHandle,const char* moduleName,const char* logPath);

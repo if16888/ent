@@ -44,6 +44,7 @@ static pthread_mutex_t sLogMutex;
 #endif
 
 static int sLogNum = 0;
+static int sLogCtxNum = 0;
 volatile bool sLogMutexInit = false;
 
 static ENT_LOG_CTX_INTERNAL sDefLog;
@@ -86,6 +87,74 @@ static MSG_ID_T iENT_LogCtxValidateOwnedHandle(const struct ENT_LOG_CTX_TAG* ctx
     }
 
     return ENT_SYS_NORMAL;
+}
+
+static MSG_ID_T iENT_LogCtxBeginCall(struct ENT_LOG_CTX_TAG* ctx,
+                                     ENT_LOG logHandle,
+                                     bool requireOwnedHandle,
+                                     bool requireEmptyHandle)
+{
+    MSG_ID_T sts = ENT_SYS_NORMAL;
+
+#ifdef WIN32
+    EnterCriticalSection(&sLogMutex);
+#else
+    pthread_mutex_lock(&sLogMutex);
+#endif
+    if(ctx == NULL || ctx->tag != ENTLOG_CTX_TAG || ctx->isInit == false ||
+       ctx->state != ENT_LOG_HANDLE_ACTIVE_E)
+    {
+        sts = ENT_LOG_BAD_HANDLE;
+    }
+    else if(requireOwnedHandle && (ctx->logHandle == NULL || ctx->logHandle != logHandle))
+    {
+        sts = ENT_LOG_BAD_HANDLE;
+    }
+    else if(requireEmptyHandle && ctx->logHandle != NULL)
+    {
+        sts = ENT_LOG_BAD_HANDLE;
+    }
+    else
+    {
+        ctx->activeCalls++;
+    }
+#ifdef WIN32
+    LeaveCriticalSection(&sLogMutex);
+#else
+    pthread_mutex_unlock(&sLogMutex);
+#endif
+    return sts;
+}
+
+static void iENT_LogCtxEndCall(struct ENT_LOG_CTX_TAG* ctx)
+{
+    if(ctx == NULL)
+    {
+        return;
+    }
+
+#ifdef WIN32
+    EnterCriticalSection(&sLogMutex);
+#else
+    pthread_mutex_lock(&sLogMutex);
+#endif
+    if(ctx->activeCalls > 0)
+    {
+        ctx->activeCalls--;
+    }
+    if(ctx->state == ENT_LOG_HANDLE_CLOSING_E && ctx->activeCalls == 0)
+    {
+#ifdef WIN32
+        WakeAllConditionVariable(&ctx->closeCv);
+#else
+        pthread_cond_broadcast(&ctx->closeCv);
+#endif
+    }
+#ifdef WIN32
+    LeaveCriticalSection(&sLogMutex);
+#else
+    pthread_mutex_unlock(&sLogMutex);
+#endif
 }
 
 MSG_ID_T iENT_LogPathCheck(const char* path)
@@ -256,6 +325,7 @@ static MSG_ID_T iENT_LogInitCtx(ENT_LOG_CTX_INTERNAL* log,
     log->activeWriters = 0;
     log->bufferThreadStarted = false;
     log->bufferThreadStop = false;
+    log->closeAttemptActive = false;
     log->pendingFlushes = 0;
     log->flushBatch = 256;
     log->flushIntervalMs = 0;
@@ -466,7 +536,7 @@ MSG_ID_T iENT_LogClose(void)
 #else
     pthread_mutex_lock(&sLogMutex);
 #endif
-    if(sLogNum > 0)
+    if(sLogNum > 0 || sLogCtxNum > 0)
     {
 #ifdef WIN32
         LeaveCriticalSection(&sLogMutex);
@@ -514,6 +584,28 @@ MSG_ID_T ENT_LogCtxInit(ENT_LOG_CTX* pCtx)
     ctx->tag = ENTLOG_CTX_TAG;
     ctx->isInit = true;
     ctx->logHandle = NULL;
+#ifdef WIN32
+    InitializeConditionVariable(&ctx->closeCv);
+#else
+    if(pthread_cond_init(&ctx->closeCv, NULL) != 0)
+    {
+        free(ctx);
+        return ENT_LOG_THREAD_FAILED;
+    }
+#endif
+    ctx->state = ENT_LOG_HANDLE_ACTIVE_E;
+    ctx->activeCalls = 0;
+#ifdef WIN32
+    EnterCriticalSection(&sLogMutex);
+#else
+    pthread_mutex_lock(&sLogMutex);
+#endif
+    sLogCtxNum++;
+#ifdef WIN32
+    LeaveCriticalSection(&sLogMutex);
+#else
+    pthread_mutex_unlock(&sLogMutex);
+#endif
     *pCtx = ctx;
     return ENT_SYS_NORMAL;
 }
@@ -521,6 +613,7 @@ MSG_ID_T ENT_LogCtxInit(ENT_LOG_CTX* pCtx)
 MSG_ID_T ENT_LogCtxClose(ENT_LOG_CTX ctx)
 {
     struct ENT_LOG_CTX_TAG* logCtx = (struct ENT_LOG_CTX_TAG*)ctx;
+    MSG_ID_T closeSts = ENT_SYS_NORMAL;
 
     if(sLogMutexInit == false)
     {
@@ -528,15 +621,40 @@ MSG_ID_T ENT_LogCtxClose(ENT_LOG_CTX ctx)
         return ENT_LOG_NOT_INITIALIZED;
     }
 
-    if(logCtx == NULL || logCtx->tag != ENTLOG_CTX_TAG || logCtx->isInit == false)
+#ifdef WIN32
+    EnterCriticalSection(&sLogMutex);
+#else
+    pthread_mutex_lock(&sLogMutex);
+#endif
+    if(logCtx == NULL || logCtx->tag != ENTLOG_CTX_TAG || logCtx->isInit == false ||
+       (logCtx->state != ENT_LOG_HANDLE_ACTIVE_E && logCtx->state != ENT_LOG_HANDLE_CLOSING_E))
     {
+#ifdef WIN32
+        LeaveCriticalSection(&sLogMutex);
+#else
+        pthread_mutex_unlock(&sLogMutex);
+#endif
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxClose", __LINE__);
         return ENT_LOG_BAD_HANDLE;
     }
+    logCtx->state = ENT_LOG_HANDLE_CLOSING_E;
+    while(logCtx->activeCalls > 0)
+    {
+#ifdef WIN32
+        SleepConditionVariableCS(&logCtx->closeCv, &sLogMutex, INFINITE);
+#else
+        pthread_cond_wait(&logCtx->closeCv, &sLogMutex);
+#endif
+    }
+#ifdef WIN32
+    LeaveCriticalSection(&sLogMutex);
+#else
+    pthread_mutex_unlock(&sLogMutex);
+#endif
 
     if(logCtx->logHandle != NULL)
     {
-        MSG_ID_T closeSts = iENT_LogCloseHandle(logCtx->logHandle);
+        closeSts = iENT_LogCloseHandle(logCtx->logHandle);
         if(closeSts != ENT_SYS_NORMAL)
         {
             return closeSts;
@@ -544,9 +662,28 @@ MSG_ID_T ENT_LogCtxClose(ENT_LOG_CTX ctx)
         logCtx->logHandle = NULL;
     }
 
+#ifdef WIN32
+    EnterCriticalSection(&sLogMutex);
+#else
+    pthread_mutex_lock(&sLogMutex);
+#endif
     logCtx->isInit = false;
+    logCtx->state = ENT_LOG_HANDLE_CLOSED_E;
+    logCtx->tag = 0;
+    if(sLogCtxNum > 0)
+    {
+        sLogCtxNum--;
+    }
+#ifdef WIN32
+    LeaveCriticalSection(&sLogMutex);
+#else
+    pthread_mutex_unlock(&sLogMutex);
+#endif
+#ifndef WIN32
+    pthread_cond_destroy(&logCtx->closeCv);
+#endif
     free(logCtx);
-    return ENT_SYS_NORMAL;
+    return closeSts;
 }
 
 MSG_ID_T ENT_LogCtxInitHandle(ENT_LOG_CTX ctx, ENT_LOG* pLogHandle, const char* moduleName, const char* logPath)
@@ -559,7 +696,7 @@ MSG_ID_T ENT_LogCtxInitHandle(ENT_LOG_CTX ctx, ENT_LOG* pLogHandle, const char* 
         return ENT_LOG_NOT_INITIALIZED;
     }
 
-    if(iENT_LogCtxValidate(logCtx, NULL) != 0)
+    if(iENT_LogCtxBeginCall(logCtx, NULL, false, true) != ENT_SYS_NORMAL)
     {
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxInitHandle", __LINE__);
         return ENT_LOG_BAD_HANDLE;
@@ -568,12 +705,14 @@ MSG_ID_T ENT_LogCtxInitHandle(ENT_LOG_CTX ctx, ENT_LOG* pLogHandle, const char* 
     if(pLogHandle == NULL)
     {
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxInitHandle", __LINE__);
+        iENT_LogCtxEndCall(logCtx);
         return ENT_LOG_BAD_ARGUMENT;
     }
 
     if(logCtx->logHandle != NULL)
     {
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxInitHandle", __LINE__);
+        iENT_LogCtxEndCall(logCtx);
         return ENT_LOG_BAD_HANDLE;
     }
 
@@ -584,6 +723,7 @@ MSG_ID_T ENT_LogCtxInitHandle(ENT_LOG_CTX ctx, ENT_LOG* pLogHandle, const char* 
             logCtx->logHandle = *pLogHandle;
             ((ENT_LOG_CTX_INTERNAL*)(*pLogHandle))->ownerCtx = logCtx;
         }
+        iENT_LogCtxEndCall(logCtx);
         return sts;
     }
 }
@@ -598,13 +738,17 @@ MSG_ID_T ENT_LogCtxSetOption(ENT_LOG_CTX ctx, ENT_LOG logHandle, ENT_LOG_OPTIONS
         return ENT_LOG_NOT_INITIALIZED;
     }
 
-    if(iENT_LogCtxValidateOwnedHandle(logCtx, logHandle) != 0)
+    if(iENT_LogCtxBeginCall(logCtx, logHandle, true, false) != ENT_SYS_NORMAL)
     {
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxSetOption", __LINE__);
         return ENT_LOG_BAD_HANDLE;
     }
 
-    return ENT_LogSetOption(logHandle, option, arg);
+    {
+        MSG_ID_T sts = ENT_LogSetOption(logHandle, option, arg);
+        iENT_LogCtxEndCall(logCtx);
+        return sts;
+    }
 }
 
 MSG_ID_T ENT_LogCtxCloseHandle(ENT_LOG_CTX ctx, ENT_LOG logHandle)
@@ -617,7 +761,7 @@ MSG_ID_T ENT_LogCtxCloseHandle(ENT_LOG_CTX ctx, ENT_LOG logHandle)
         return ENT_LOG_NOT_INITIALIZED;
     }
 
-    if(iENT_LogCtxValidateOwnedHandle(logCtx, logHandle) != 0)
+    if(iENT_LogCtxBeginCall(logCtx, logHandle, true, false) != ENT_SYS_NORMAL)
     {
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxCloseHandle", __LINE__);
         return ENT_LOG_BAD_HANDLE;
@@ -629,6 +773,7 @@ MSG_ID_T ENT_LogCtxCloseHandle(ENT_LOG_CTX ctx, ENT_LOG logHandle)
         {
             logCtx->logHandle = NULL;
         }
+        iENT_LogCtxEndCall(logCtx);
         return sts;
     }
 }
@@ -636,6 +781,7 @@ MSG_ID_T ENT_LogCtxCloseHandle(ENT_LOG_CTX ctx, ENT_LOG logHandle)
 MSG_ID_T ENT_LogCtxRaw(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format, ...)
 {
     MSG_ID_T sts = ENT_SYS_NORMAL;
+    struct ENT_LOG_CTX_TAG* ownerCtx = (struct ENT_LOG_CTX_TAG*)ctx;
     ENT_LOG_CTX_INTERNAL* logCtx = NULL;
     va_list va_args;
 
@@ -645,7 +791,7 @@ MSG_ID_T ENT_LogCtxRaw(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format, .
         return ENT_LOG_NOT_INITIALIZED;
     }
 
-    if(iENT_LogCtxValidateOwnedHandle((struct ENT_LOG_CTX_TAG*)ctx, logHandle) != 0)
+    if(iENT_LogCtxBeginCall(ownerCtx, logHandle, true, false) != ENT_SYS_NORMAL)
     {
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxRaw", __LINE__);
         return ENT_LOG_BAD_HANDLE;
@@ -654,6 +800,7 @@ MSG_ID_T ENT_LogCtxRaw(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format, .
     sts = iENT_LogAcquireWriter(&logCtx, logHandle);
     if(sts < 0)
     {
+        iENT_LogCtxEndCall(ownerCtx);
         return sts;
     }
 
@@ -661,12 +808,14 @@ MSG_ID_T ENT_LogCtxRaw(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format, .
     sts = iENT_LogVRaw(logCtx, format, va_args);
     va_end(va_args);
     iENT_LogReleaseWriter(logCtx);
+    iENT_LogCtxEndCall(ownerCtx);
     return sts;
 }
 
 MSG_ID_T ENT_LogCtxFatal(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format, ...)
 {
     MSG_ID_T sts = ENT_SYS_NORMAL;
+    struct ENT_LOG_CTX_TAG* ownerCtx = (struct ENT_LOG_CTX_TAG*)ctx;
     ENT_LOG_CTX_INTERNAL* logCtx = NULL;
     va_list va_args;
 
@@ -676,7 +825,7 @@ MSG_ID_T ENT_LogCtxFatal(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
         return ENT_LOG_NOT_INITIALIZED;
     }
 
-    if(iENT_LogCtxValidateOwnedHandle((struct ENT_LOG_CTX_TAG*)ctx, logHandle) != 0)
+    if(iENT_LogCtxBeginCall(ownerCtx, logHandle, true, false) != ENT_SYS_NORMAL)
     {
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxFatal", __LINE__);
         return ENT_LOG_BAD_HANDLE;
@@ -685,11 +834,13 @@ MSG_ID_T ENT_LogCtxFatal(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
     sts = iENT_LogAcquireWriter(&logCtx, logHandle);
     if(sts < 0)
     {
+        iENT_LogCtxEndCall(ownerCtx);
         return sts;
     }
     if(LOG_LEV_FATAL_E > logCtx->logLevel)
     {
         iENT_LogReleaseWriter(logCtx);
+        iENT_LogCtxEndCall(ownerCtx);
         return ENT_LOG_NON_FATAL;
     }
 
@@ -697,12 +848,14 @@ MSG_ID_T ENT_LogCtxFatal(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
     sts = iENT_LogVPrint(logCtx, LOG_LEV_FATAL_E, format, va_args);
     va_end(va_args);
     iENT_LogReleaseWriter(logCtx);
+    iENT_LogCtxEndCall(ownerCtx);
     return sts;
 }
 
 MSG_ID_T ENT_LogCtxError(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format, ...)
 {
     MSG_ID_T sts = ENT_SYS_NORMAL;
+    struct ENT_LOG_CTX_TAG* ownerCtx = (struct ENT_LOG_CTX_TAG*)ctx;
     ENT_LOG_CTX_INTERNAL* logCtx = NULL;
     va_list va_args;
 
@@ -712,7 +865,7 @@ MSG_ID_T ENT_LogCtxError(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
         return ENT_LOG_NOT_INITIALIZED;
     }
 
-    if(iENT_LogCtxValidateOwnedHandle((struct ENT_LOG_CTX_TAG*)ctx, logHandle) != 0)
+    if(iENT_LogCtxBeginCall(ownerCtx, logHandle, true, false) != ENT_SYS_NORMAL)
     {
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxError", __LINE__);
         return ENT_LOG_BAD_HANDLE;
@@ -721,11 +874,13 @@ MSG_ID_T ENT_LogCtxError(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
     sts = iENT_LogAcquireWriter(&logCtx, logHandle);
     if(sts < 0)
     {
+        iENT_LogCtxEndCall(ownerCtx);
         return sts;
     }
     if(LOG_LEV_ERROR_E > logCtx->logLevel)
     {
         iENT_LogReleaseWriter(logCtx);
+        iENT_LogCtxEndCall(ownerCtx);
         return ENT_LOG_NON_FATAL;
     }
 
@@ -733,12 +888,14 @@ MSG_ID_T ENT_LogCtxError(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
     sts = iENT_LogVPrint(logCtx, LOG_LEV_ERROR_E, format, va_args);
     va_end(va_args);
     iENT_LogReleaseWriter(logCtx);
+    iENT_LogCtxEndCall(ownerCtx);
     return sts;
 }
 
 MSG_ID_T ENT_LogCtxWarn(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format, ...)
 {
     MSG_ID_T sts = ENT_SYS_NORMAL;
+    struct ENT_LOG_CTX_TAG* ownerCtx = (struct ENT_LOG_CTX_TAG*)ctx;
     ENT_LOG_CTX_INTERNAL* logCtx = NULL;
     va_list va_args;
 
@@ -748,7 +905,7 @@ MSG_ID_T ENT_LogCtxWarn(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format, 
         return ENT_LOG_NOT_INITIALIZED;
     }
 
-    if(iENT_LogCtxValidateOwnedHandle((struct ENT_LOG_CTX_TAG*)ctx, logHandle) != 0)
+    if(iENT_LogCtxBeginCall(ownerCtx, logHandle, true, false) != ENT_SYS_NORMAL)
     {
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxWarn", __LINE__);
         return ENT_LOG_BAD_HANDLE;
@@ -757,11 +914,13 @@ MSG_ID_T ENT_LogCtxWarn(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format, 
     sts = iENT_LogAcquireWriter(&logCtx, logHandle);
     if(sts < 0)
     {
+        iENT_LogCtxEndCall(ownerCtx);
         return sts;
     }
     if(LOG_LEV_WARN_E > logCtx->logLevel)
     {
         iENT_LogReleaseWriter(logCtx);
+        iENT_LogCtxEndCall(ownerCtx);
         return ENT_LOG_NON_FATAL;
     }
 
@@ -769,12 +928,14 @@ MSG_ID_T ENT_LogCtxWarn(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format, 
     sts = iENT_LogVPrint(logCtx, LOG_LEV_WARN_E, format, va_args);
     va_end(va_args);
     iENT_LogReleaseWriter(logCtx);
+    iENT_LogCtxEndCall(ownerCtx);
     return sts;
 }
 
 MSG_ID_T ENT_LogCtxPrint(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format, ...)
 {
     MSG_ID_T sts = ENT_SYS_NORMAL;
+    struct ENT_LOG_CTX_TAG* ownerCtx = (struct ENT_LOG_CTX_TAG*)ctx;
     ENT_LOG_CTX_INTERNAL* logCtx = NULL;
     va_list va_args;
 
@@ -784,7 +945,7 @@ MSG_ID_T ENT_LogCtxPrint(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
         return ENT_LOG_NOT_INITIALIZED;
     }
 
-    if(iENT_LogCtxValidateOwnedHandle((struct ENT_LOG_CTX_TAG*)ctx, logHandle) != 0)
+    if(iENT_LogCtxBeginCall(ownerCtx, logHandle, true, false) != ENT_SYS_NORMAL)
     {
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxPrint", __LINE__);
         return ENT_LOG_BAD_HANDLE;
@@ -793,11 +954,13 @@ MSG_ID_T ENT_LogCtxPrint(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
     sts = iENT_LogAcquireWriter(&logCtx, logHandle);
     if(sts < 0)
     {
+        iENT_LogCtxEndCall(ownerCtx);
         return sts;
     }
     if(LOG_LEV_INFO_E > logCtx->logLevel)
     {
         iENT_LogReleaseWriter(logCtx);
+        iENT_LogCtxEndCall(ownerCtx);
         return ENT_LOG_NON_FATAL;
     }
 
@@ -805,12 +968,14 @@ MSG_ID_T ENT_LogCtxPrint(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
     sts = iENT_LogVPrint(logCtx, LOG_LEV_INFO_E, format, va_args);
     va_end(va_args);
     iENT_LogReleaseWriter(logCtx);
+    iENT_LogCtxEndCall(ownerCtx);
     return sts;
 }
 
 MSG_ID_T ENT_LogCtxDebug(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format, ...)
 {
     MSG_ID_T sts = ENT_SYS_NORMAL;
+    struct ENT_LOG_CTX_TAG* ownerCtx = (struct ENT_LOG_CTX_TAG*)ctx;
     ENT_LOG_CTX_INTERNAL* logCtx = NULL;
     va_list va_args;
 
@@ -820,7 +985,7 @@ MSG_ID_T ENT_LogCtxDebug(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
         return ENT_LOG_NOT_INITIALIZED;
     }
 
-    if(iENT_LogCtxValidateOwnedHandle((struct ENT_LOG_CTX_TAG*)ctx, logHandle) != 0)
+    if(iENT_LogCtxBeginCall(ownerCtx, logHandle, true, false) != ENT_SYS_NORMAL)
     {
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxDebug", __LINE__);
         return ENT_LOG_BAD_HANDLE;
@@ -829,11 +994,13 @@ MSG_ID_T ENT_LogCtxDebug(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
     sts = iENT_LogAcquireWriter(&logCtx, logHandle);
     if(sts < 0)
     {
+        iENT_LogCtxEndCall(ownerCtx);
         return sts;
     }
     if(LOG_LEV_DEBUG_E > logCtx->logLevel)
     {
         iENT_LogReleaseWriter(logCtx);
+        iENT_LogCtxEndCall(ownerCtx);
         return ENT_LOG_NON_FATAL;
     }
 
@@ -841,6 +1008,7 @@ MSG_ID_T ENT_LogCtxDebug(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
     sts = iENT_LogVPrint(logCtx, LOG_LEV_DEBUG_E, format, va_args);
     va_end(va_args);
     iENT_LogReleaseWriter(logCtx);
+    iENT_LogCtxEndCall(ownerCtx);
     return sts;
 }
 
@@ -918,6 +1086,7 @@ END_OF_ROUTINE:
 MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
 {
     MSG_ID_T sts = ENT_SYS_NORMAL;
+    bool closeStarted = false;
 
     if(sLogMutexInit == false)
     {
@@ -949,18 +1118,24 @@ MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
         fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "iENT_LogCloseHandle", __LINE__);
         goto END_OF_ROUTINE;
     }
-    if(iENT_LogStateGet(log) == ENT_LOG_HANDLE_CLOSING_E)
+    if(iENT_LogStateGet(log) == ENT_LOG_HANDLE_CLOSING_E && log->closeAttemptActive)
     {
         sts = ENT_LOG_IN_USE;
         goto END_OF_ROUTINE;
     }
-    if(iENT_LogStateGet(log) != ENT_LOG_HANDLE_ACTIVE_E)
+    if(iENT_LogStateGet(log) != ENT_LOG_HANDLE_ACTIVE_E &&
+       iENT_LogStateGet(log) != ENT_LOG_HANDLE_CLOSING_E)
     {
         sts = ENT_LOG_BAD_HANDLE;
         goto END_OF_ROUTINE;
     }
 
-    iENT_LogStateSet(log, ENT_LOG_HANDLE_CLOSING_E);
+    if(iENT_LogStateGet(log) == ENT_LOG_HANDLE_ACTIVE_E)
+    {
+        iENT_LogStateSet(log, ENT_LOG_HANDLE_CLOSING_E);
+    }
+    log->closeAttemptActive = true;
+    closeStarted = true;
     while(iENT_LogActiveGet(log) > 0)
     {
 #ifdef WIN32
@@ -986,13 +1161,14 @@ MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
     {
         if(fclose(log->logFp) != 0)
         {
+            log->logFp = NULL;
             sts = ENT_LOG_IO_FAILED;
             goto END_OF_ROUTINE;
         }
+        log->logFp = NULL;
     }
 
     log->isInit = false;
-    log->logFp = NULL;
     iENT_LogStateSet(log, ENT_LOG_HANDLE_CLOSED_E);
 #ifdef WIN32
     DeleteCriticalSection(&log->cs);
@@ -1024,6 +1200,10 @@ MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
     sLogNum--;
 
 END_OF_ROUTINE:
+    if(sts < 0 && closeStarted)
+    {
+        log->closeAttemptActive = false;
+    }
 #ifdef WIN32
     LeaveCriticalSection(&sLogMutex);
 #else

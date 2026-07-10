@@ -25,12 +25,20 @@ They do not make it safe to close a lock or condition variable while another thr
 
 It waits for every still-registered joinable thread under the `ENT_THREAD` service handle to finish, then releases the internal thread records and the service handle.
 
+`ENT_ThreadClose()` also waits for public thread-service calls that have already
+entered the service lifecycle guard. This drain guarantee does not make the raw
+handle safe for arbitrary close/new-entry races. The owner must prevent new
+`ENT_ThreadDetachCreate()`, `ENT_ThreadCreate()`, or `ENT_ThreadWaitById()` calls
+once close begins. A copied raw handle is invalid after close returns.
+
 Important behavior:
 
 - it does not cancel running threads;
 - it does not interrupt blocked thread functions;
 - it has no timeout;
 - if a registered thread never exits, `ENT_ThreadClose()` can block indefinitely.
+- callers that expose the handle to multiple threads need an owner lock that
+  serializes shutdown against new public API entry.
 
 Use `ENT_ThreadWaitById()` when the caller needs to wait for a specific thread earlier in the lifecycle. Use a positive timeout with `ENT_ThreadWaitById()` when the caller needs a bounded wait.
 

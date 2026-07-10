@@ -21,6 +21,8 @@ static int s_dll_ins_fail = 0;
 static int s_join_calls = 0;
 static int s_wait_calls = 0;
 static int s_close_calls = 0;
+static int s_lock_close_calls = 0;
+static int s_cv_init_fail = 0;
 
 static int expect_true(int condition, const char* message)
 {
@@ -48,6 +50,10 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle, const char* format, ...){(void)logHandl
 #define UTL_LockClose mock_UTL_LockClose
 #define UTL_LockEnter mock_UTL_LockEnter
 #define UTL_LockLeave mock_UTL_LockLeave
+#define UTL_CVInit mock_UTL_CVInit
+#define UTL_CVClose mock_UTL_CVClose
+#define UTL_CVWait mock_UTL_CVWait
+#define UTL_CVWakeAll mock_UTL_CVWakeAll
 #define UTL_DllInitHead mock_UTL_DllInitHead
 #define UTL_DllInsHead mock_UTL_DllInsHead
 #define UTL_DllRemHead mock_UTL_DllRemHead
@@ -80,6 +86,7 @@ static MSG_ID_T mock_UTL_LockInit(UTL_LOCK* lock,const char* name)
 static MSG_ID_T mock_UTL_LockClose(UTL_LOCK* lock)
 {
     (void)lock;
+    s_lock_close_calls++;
     return ENT_SYS_NORMAL;
 }
 
@@ -92,6 +99,39 @@ static MSG_ID_T mock_UTL_LockEnter(UTL_LOCK lock)
 static MSG_ID_T mock_UTL_LockLeave(UTL_LOCK lock)
 {
     (void)lock;
+    return ENT_SYS_NORMAL;
+}
+
+static MSG_ID_T mock_UTL_CVInit(UTL_CV* cv,const char* name)
+{
+    static int dummy;
+    (void)name;
+    if(s_cv_init_fail)
+    {
+        return ENT_UTHD_INIT_FAILED;
+    }
+    *cv = &dummy;
+    return ENT_SYS_NORMAL;
+}
+
+static MSG_ID_T mock_UTL_CVClose(UTL_CV* cv)
+{
+    (void)cv;
+    return ENT_SYS_NORMAL;
+}
+
+static MSG_ID_T mock_UTL_CVWait(UTL_CV cv,UTL_LOCK lock,int ms,UTL_LOCK_RW_TYPE_T rwType)
+{
+    (void)cv;
+    (void)lock;
+    (void)ms;
+    (void)rwType;
+    return ENT_SYS_NORMAL;
+}
+
+static MSG_ID_T mock_UTL_CVWakeAll(UTL_CV cv)
+{
+    (void)cv;
     return ENT_SYS_NORMAL;
 }
 
@@ -241,10 +281,34 @@ static DWORD WINAPI dummy_thread(void* data)
 static void* dummy_thread(void* data)
 #endif
 {
+#ifdef WIN32
+    return (DWORD)(ULONG_PTR)data;
+#else
     return data;
+#endif
 }
 
 #include "../comm/ent_thread.c"
+
+static int test_thread_init_releases_lock_when_cv_init_fails(void)
+{
+    ENT_THREAD handle = NULL;
+
+    s_lock_close_calls = 0;
+    s_cv_init_fail = 1;
+    if(expect_true(ENT_ThreadInit(&handle) == ENT_THRD_LOCK_FAILED,
+                   "ENT_ThreadInit should report lifecycle CV initialization failure") != 0 ||
+       expect_true(handle == NULL,
+                   "ENT_ThreadInit should not publish a handle after lifecycle CV initialization failure") != 0 ||
+       expect_true(s_lock_close_calls == 1,
+                   "ENT_ThreadInit should release the lifecycle lock after CV initialization failure") != 0)
+    {
+        s_cv_init_fail = 0;
+        return 1;
+    }
+    s_cv_init_fail = 0;
+    return 0;
+}
 
 static int test_thread_create_reclaims_created_thread_if_registration_fails(void)
 {
@@ -309,6 +373,7 @@ static int test_thread_create_reclaims_created_thread_if_registration_fails(void
 int main(void)
 {
     int failures = 0;
+    failures += test_thread_init_releases_lock_when_cv_init_fails();
     failures += test_thread_create_reclaims_created_thread_if_registration_fails();
     if(failures != 0)
     {

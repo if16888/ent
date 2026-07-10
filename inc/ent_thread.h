@@ -44,6 +44,7 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
 
 ENT_PUBLIC MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int ms);
 
+/* Close drains entered calls; callers must prevent new calls once close begins. */
 ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle);
 
 #ifdef __cplusplus

@@ -23,7 +23,7 @@ The log module now uses the repository-wide `msg/ent.msg` message-code system. I
 | API | Success | Non-fatal | Bad argument | Not initialized | Bad handle | In use | Alloc failed | Path failed | Format failed | Thread failed | IO failed |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | `ENT_LogInit()` | `ENT_SYS_NORMAL` | `ENT_LOG_NON_FATAL` when already initialized | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A |
-| `ENT_LogClose()` | `ENT_SYS_NORMAL` | N/A | N/A | `ENT_LOG_NOT_INITIALIZED` | N/A | `ENT_LOG_IN_USE` when live handles still exist | N/A | N/A | N/A | N/A | N/A |
+| `ENT_LogClose()` | `ENT_SYS_NORMAL` | N/A | N/A | `ENT_LOG_NOT_INITIALIZED` | N/A | `ENT_LOG_IN_USE` when live handles or explicit contexts still exist | N/A | N/A | N/A | N/A | N/A |
 | `ENT_LogInitHandle()` | `ENT_SYS_NORMAL` | `ENT_LOG_NON_FATAL` when the default handle is already open | `ENT_LOG_BAD_ARGUMENT` for missing input or invalid option state | `ENT_LOG_NOT_INITIALIZED` | N/A | N/A | `ENT_LOG_ALLOC_FAILED` | `ENT_LOG_PATH_FAILED` | N/A | N/A | N/A |
 | `ENT_LogCloseHandle()` | `ENT_SYS_NORMAL` | N/A | N/A | `ENT_LOG_NOT_INITIALIZED` | `ENT_LOG_BAD_HANDLE` for invalid or already closed handles | `ENT_LOG_IN_USE` for an already-closing handle | N/A | N/A | N/A | `ENT_LOG_THREAD_FAILED` if buffer thread join fails | `ENT_LOG_IO_FAILED` for file close/flush failures |
 | `ENT_LogSetOption()` | `ENT_SYS_NORMAL` | N/A | `ENT_LOG_BAD_ARGUMENT` for bad arguments or invalid option values | `ENT_LOG_NOT_INITIALIZED` | `ENT_LOG_BAD_HANDLE` for invalid handles | `ENT_LOG_IN_USE` when the handle is not `ACTIVE` | `ENT_LOG_ALLOC_FAILED` when option processing allocates memory and that allocation fails | `ENT_LOG_PATH_FAILED` when path validation or creation fails | N/A | `ENT_LOG_THREAD_FAILED` when enabling the buffer thread fails | `ENT_LOG_IO_FAILED` for file option IO failures |
@@ -46,6 +46,8 @@ The log module now uses the repository-wide `msg/ent.msg` message-code system. I
 - Passing a foreign context-owned handle, a non-context explicit handle, or `NULL` default-handle proxy to a context API returns `ENT_LOG_BAD_HANDLE`.
 - Use the non-context `ENT_LogSetOption()`, `ENT_LogCloseHandle()`, and `ENT_LogRaw()` / level-specific `ENT_Log*()` APIs for the default handle and handles created by `ENT_LogInitHandle()`.
 - `ENT_LogCtxClose(ctx)` closes the context and automatically closes its live context-owned handle before releasing the context.
+- `ENT_LogCtxClose(ctx)` waits for context calls that already entered the lifecycle guard. The owner must prevent new context calls once close begins; stale raw context copies have no callable contract.
+- If handle close reports a buffer-thread or file-close failure, the handle remains in `CLOSING` and a later close call may retry cleanup. New writes remain rejected while cleanup is incomplete.
 
 ## Lifecycle Summary
 

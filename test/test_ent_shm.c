@@ -225,6 +225,61 @@ static int test_flush_rejects_out_of_range(void)
     return 0;
 }
 
+static int test_flush_accepts_unaligned_offset(void)
+{
+    ENT_SharedMapOptions options;
+    ENT_SharedMap* map = NULL;
+    char path[512];
+    char* ptr = NULL;
+
+    memset(&options, 0, sizeof(options));
+    memset(path, 0, sizeof(path));
+
+    if(prepare_temp_path(path, sizeof(path)) != 0)
+    {
+        return 1;
+    }
+
+    options.path = path;
+    options.size = TEST_SHM_SMALL_SIZE;
+    options.mode = ENT_SHM_MODE_READ_WRITE;
+    options.flags = ENT_SHM_F_CREATE_IF_MISSING | ENT_SHM_F_TRUNCATE_IF_EXISTS;
+
+    if(expect_true(ENT_SharedMapOpen(&options, &map) == ENT_SYS_NORMAL,
+                   "ENT_SharedMapOpen should create a writable mapping") != 0)
+    {
+        cleanup_temp_path(path);
+        return 1;
+    }
+
+    ptr = (char*)ENT_SharedMapPtr(map);
+    if(expect_true(ptr != NULL, "ENT_SharedMapPtr should return a valid pointer") != 0)
+    {
+        ENT_SharedMapClose(&map);
+        cleanup_temp_path(path);
+        return 1;
+    }
+
+    ptr[1] = 'x';
+    if(expect_true(ENT_SharedMapFlush(map, (ENT_OFFSET)1u, (ENT_SIZE)1u) == ENT_SYS_NORMAL,
+                   "ENT_SharedMapFlush should accept a valid unaligned offset") != 0)
+    {
+        ENT_SharedMapClose(&map);
+        cleanup_temp_path(path);
+        return 1;
+    }
+
+    if(expect_true(ENT_SharedMapClose(&map) == ENT_SYS_NORMAL,
+                   "ENT_SharedMapClose should close after an unaligned flush") != 0)
+    {
+        cleanup_temp_path(path);
+        return 1;
+    }
+
+    cleanup_temp_path(path);
+    return 0;
+}
+
 static int test_create_map_write_read(void)
 {
     ENT_SharedMapOptions options;
@@ -656,6 +711,7 @@ int main(void)
 
     failures += test_invalid_args();
     failures += test_flush_rejects_out_of_range();
+    failures += test_flush_accepts_unaligned_offset();
     failures += test_create_map_write_read();
     failures += test_open_existing_without_truncate();
     failures += test_repeated_close_is_safe();

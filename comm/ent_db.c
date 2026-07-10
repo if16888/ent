@@ -869,6 +869,15 @@ ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE* dbHandle)
             break;
     }
 
+    if(sts < 0)
+    {
+        iENT_DbLifecycleLock(dbCfg);
+        dbCfg->isInit = true;
+        dbCfg->handleState = ENT_DB_HANDLE_ACTIVE_E;
+        iENT_DbLifecycleUnlock(dbCfg);
+        return sts;
+    }
+
     iENT_DbGlobalLock();
     iENT_DbLifecycleLock(dbCfg);
     dbCfg->handleState = ENT_DB_HANDLE_CLOSED_E;
