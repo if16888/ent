@@ -49,6 +49,36 @@ volatile bool sLogMutexInit = false;
 
 static ENT_LOG_CTX_INTERNAL sDefLog;
 static struct ENT_LOG_CTX_TAG* sLogCtxHead = NULL;
+static ENT_LOG_CTX_INTERNAL* sLogHandleHead = NULL;
+
+static ENT_LOG_CTX_INTERNAL* iENT_LogHandleFindLocked(const ENT_LOG_CTX_INTERNAL* target)
+{
+    ENT_LOG_CTX_INTERNAL* current = sLogHandleHead;
+    while(current != NULL)
+    {
+        if(current == target)
+        {
+            return current;
+        }
+        current = current->registryNext;
+    }
+    return NULL;
+}
+
+static void iENT_LogHandleUnlinkLocked(ENT_LOG_CTX_INTERNAL* target)
+{
+    ENT_LOG_CTX_INTERNAL** current = &sLogHandleHead;
+    while(*current != NULL)
+    {
+        if(*current == target)
+        {
+            *current = target->registryNext;
+            target->registryNext = NULL;
+            return;
+        }
+        current = &(*current)->registryNext;
+    }
+}
 
 static void iENT_LogGlobalLock(void)
 {
@@ -394,6 +424,8 @@ static MSG_ID_T iENT_LogInitCtx(ENT_LOG_CTX_INTERNAL* log,
     log->logLevel = LOG_LEV_WARN_E;
     log->maxNum = DEF_MAX_NUM_LOG;
     log->tag = ENTLOG_TAG;
+    log->registryNext = sLogHandleHead;
+    sLogHandleHead = log;
     iENT_LogStateSet(log, ENT_LOG_HANDLE_ACTIVE_E);
     return ENT_SYS_NORMAL;
 }
@@ -519,8 +551,8 @@ MSG_ID_T iENT_LogAcquireWriter(ENT_LOG_CTX_INTERNAL** logCtx, ENT_LOG logHandle)
     }
     else
     {
-        log = (ENT_LOG_CTX_INTERNAL*)logHandle;
-        if(log->tag != ENTLOG_TAG || log->isInit == false)
+        log = iENT_LogHandleFindLocked((ENT_LOG_CTX_INTERNAL*)logHandle);
+        if(log == NULL || log->tag != ENTLOG_TAG || log->isInit == false)
         {
 #ifdef WIN32
             iENT_LogGlobalUnlock();
@@ -1204,11 +1236,15 @@ MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
             goto END_OF_ROUTINE;
         }
     }
-    else if(log->tag != ENTLOG_TAG || log->isInit == false)
+    else
     {
-        sts = ENT_LOG_BAD_HANDLE;
-        fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "iENT_LogCloseHandle", __LINE__);
-        goto END_OF_ROUTINE;
+        log = iENT_LogHandleFindLocked(log);
+        if(log == NULL || log->tag != ENTLOG_TAG || log->isInit == false)
+        {
+            sts = ENT_LOG_BAD_HANDLE;
+            fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "iENT_LogCloseHandle", __LINE__);
+            goto END_OF_ROUTINE;
+        }
     }
     if(iENT_LogStateGet(log) == ENT_LOG_HANDLE_CLOSING_E && log->closeAttemptActive)
     {
@@ -1262,6 +1298,7 @@ MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
 
     log->isInit = false;
     iENT_LogStateSet(log, ENT_LOG_HANDLE_CLOSED_E);
+    iENT_LogHandleUnlinkLocked(log);
 #ifdef WIN32
     DeleteCriticalSection(&log->cs);
 #else

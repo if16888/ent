@@ -177,6 +177,7 @@ static int iENT_ThreadCondInit(pthread_cond_t* cond)
 static void* iENT_ThreadProc(void* data)
 {
     THREAD_DB* thDb = (THREAD_DB*)data;
+    void* retVal = NULL;
     if(thDb == NULL || thDb->thProc == NULL)
     {
         return NULL;
@@ -189,12 +190,13 @@ static void* iENT_ThreadProc(void* data)
     }
     pthread_mutex_unlock(&thDb->doneMutex);
 
-    thDb->thRet = thDb->thProc(thDb->thData);
+    retVal = thDb->thProc(thDb->thData);
     pthread_mutex_lock(&thDb->doneMutex);
+    thDb->thRet = retVal;
     thDb->finished = true;
     pthread_cond_broadcast(&thDb->doneCv);
     pthread_mutex_unlock(&thDb->doneMutex);
-    return thDb->thRet;
+    return retVal;
 }
 #endif
 

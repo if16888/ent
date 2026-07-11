@@ -100,6 +100,7 @@ typedef struct ENT_LOG_CTX_INTERNAL_TAG
     char*            moduleName;
     char*            logPath;
     struct ENT_LOG_CTX_TAG* ownerCtx;
+    struct ENT_LOG_CTX_INTERNAL_TAG* registryNext;
     int              maxNum;
     time_t           nextCreate;
 } ENT_LOG_CTX_INTERNAL;
