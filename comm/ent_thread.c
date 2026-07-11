@@ -841,6 +841,10 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
         pthread_mutex_lock(&thDb->doneMutex);
         thDb->registered = true;
         pthread_cond_broadcast(&thDb->doneCv);
+        while(!thDb->finished)
+        {
+            pthread_cond_wait(&thDb->doneCv, &thDb->doneMutex);
+        }
         pthread_mutex_unlock(&thDb->doneMutex);
         sts = pthread_join(thDb->thId,&retVal);
         if(sts != 0)
