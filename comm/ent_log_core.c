@@ -1273,10 +1273,20 @@ MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
 #endif
     }
 
+#ifdef WIN32
+    EnterCriticalSection(&log->cs);
+#else
+    pthread_mutex_lock(&log->cs);
+#endif
     log->isBuffer = false;
     iENT_LogFastFlagSet(&log->isBufferFast, 0);
     log->isDebug = false;
     iENT_LogFastFlagSet(&log->isDebugFast, 0);
+#ifdef WIN32
+    LeaveCriticalSection(&log->cs);
+#else
+    pthread_mutex_unlock(&log->cs);
+#endif
 
     sts = iENT_LogStopBufferThread(log);
     if(sts < 0)
