@@ -159,6 +159,20 @@ int main(void)
     }
 
 #if ENT_ENABLE_LUA
+    sts = ENT_ScriptReload("../ent_script_escape.lua");
+    if(expect_true(sts == ENT_SCR_BAD_ARGUMENT,
+                   "ENT_ScriptReload should reject script paths outside the configured root") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
+    sts = ENT_ScriptReload("subdir/../../ent_script_escape.lua");
+    if(expect_true(sts == ENT_SCR_BAD_ARGUMENT,
+                   "ENT_ScriptReload should reject nested traversal script paths") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
     fp = ENT_FOpen(scriptPath, "wb");
     if(expect_true(fp != NULL, "test should create a temporary lua script file") != 0)
     {

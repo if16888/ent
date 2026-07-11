@@ -107,9 +107,9 @@ ENT_PUBLIC MSG_ID_T UTL_SocketInit()
  *-----------------------------------------------------------------------------
  */
 ENT_PUBLIC MSG_ID_T  UTL_Socket(
-    int           AddrFamily,	  
-    int           SocketType,	  
-    int		      Protocol,	  
+    int           AddrFamily,
+    int           SocketType,
+    int           Protocol,
     UTL_D_SOCKET *pSocketDesc)
 {
     MSG_ID_T  sts = 0;	       
@@ -118,6 +118,11 @@ ENT_PUBLIC MSG_ID_T  UTL_Socket(
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
+    }
+
+    if(pSocketDesc == NULL)
+    {
+        return ENT_SOCK_BAD_ARGUMENT;
     }
 
     while ( ( (*pSocketDesc = socket (AddrFamily,SocketType,Protocol)) == INVALID_SOCKET )
@@ -155,12 +160,12 @@ MSG_ID_T	UTL_Bind(
     MSG_ID_T	    sts = 0;	     	          
     int     	    stat;
 
-    if (!sUtlInitFlag) 
+    if (!sUtlInitFlag)
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
     }
-    if (addr == NULL )
+    if (addr == NULL || addr_size <= 0 )
     {
         IENT_LOG_ERROR("unvalid args.\n");
         return ENT_SOCK_BAD_ARGUMENT;
@@ -210,7 +215,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Connect(
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
     }
-    if (addr == NULL )
+    if (addr == NULL || addr_size <= 0 )
     {
         IENT_LOG_ERROR("unvalid args.\n");
         return ENT_SOCK_BAD_ARGUMENT;
@@ -263,6 +268,11 @@ ENT_PUBLIC MSG_ID_T  UTL_Listen(
         return ENT_SOCK_NOT_INITIALIZED;
     }
 
+    if(MaxBacklog <= 0)
+    {
+        return ENT_SOCK_BAD_ARGUMENT;
+    }
+
     while ( ( (stat = listen (SocketDesc,MaxBacklog)) == SOCKET_ERROR )
 	&& ( (WSAGetLastError() == WSAEINTR) && sUtlRetryFlag )  );
 
@@ -305,7 +315,9 @@ ENT_PUBLIC MSG_ID_T  UTL_Accept(
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
     }
-    if(pSocketDesc == NULL || (addr != NULL && addr_size == NULL))
+    if(pSocketDesc == NULL ||
+       (addr != NULL && (addr_size == NULL || *addr_size <= 0)) ||
+       (addr == NULL && addr_size != NULL))
     {
         IENT_LOG_ERROR("unvalid args.\n");
         return ENT_SOCK_BAD_ARGUMENT;
@@ -402,6 +414,11 @@ ENT_PUBLIC MSG_ID_T  UTL_Recv(
         return ENT_SOCK_NOT_INITIALIZED;
     }
 
+    if(pBuffer == NULL || BufferLength < 0 || pBytesRecvd == NULL)
+    {
+        return ENT_SOCK_BAD_ARGUMENT;
+    }
+
     while ( ((BytesRecvd=recv (
 	        SocketDesc,
 	        pBuffer,
@@ -451,6 +468,11 @@ ENT_PUBLIC MSG_ID_T  UTL_Send(
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
+    }
+
+    if(pBuffer == NULL || BufferLength < 0 || pBytesSent == NULL)
+    {
+        return ENT_SOCK_BAD_ARGUMENT;
     }
 
     while ( ((TempBytesSent=send (
@@ -669,6 +691,11 @@ ENT_PUBLIC MSG_ID_T  UTL_Socket(
         return ENT_SOCK_NOT_INITIALIZED;
     }
 
+    if(pSocketDesc == NULL)
+    {
+        return ENT_SOCK_BAD_ARGUMENT;
+    }
+
     while ( ( (*pSocketDesc = socket(AddrFamily,SocketType,Protocol)) < 0 )
 	&& ( (errno == EINTR) && sUtlRetryFlag )  );
 
@@ -709,7 +736,7 @@ MSG_ID_T	UTL_Bind(
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
     }
-    if (addr == NULL )
+    if (addr == NULL || addr_size <= 0 )
     {
         IENT_LOG_ERROR("unvalid args.\n");
         return ENT_SOCK_BAD_ARGUMENT;
@@ -763,7 +790,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Connect(
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
     }
-    if (addr == NULL )
+    if (addr == NULL || addr_size <= 0 )
     {
         IENT_LOG_ERROR("unvalid args.\n");
         return ENT_SOCK_BAD_ARGUMENT;
@@ -817,6 +844,11 @@ ENT_PUBLIC MSG_ID_T  UTL_Listen(
         return ENT_SOCK_NOT_INITIALIZED;
     }
 
+    if(MaxBacklog <= 0)
+    {
+        return ENT_SOCK_BAD_ARGUMENT;
+    }
+
     while ( ( (stat = listen (SocketDesc,MaxBacklog)) < 0 )
 	&& ( (errno == EINTR) && sUtlRetryFlag )  );
 
@@ -861,7 +893,9 @@ ENT_PUBLIC MSG_ID_T  UTL_Accept(
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
     }
-    if(pSocketDesc == NULL || (addr != NULL && addr_size == NULL))
+    if(pSocketDesc == NULL ||
+       (addr != NULL && (addr_size == NULL || *addr_size <= 0)) ||
+       (addr == NULL && addr_size != NULL))
     {
         IENT_LOG_ERROR("unvalid args.\n");
         return ENT_SOCK_BAD_ARGUMENT;
@@ -967,6 +1001,11 @@ ENT_PUBLIC MSG_ID_T  UTL_Recv(
         return ENT_SOCK_NOT_INITIALIZED;
     }
 
+    if(pBuffer == NULL || BufferLength < 0 || pBytesRecvd == NULL)
+    {
+        return ENT_SOCK_BAD_ARGUMENT;
+    }
+
     while ( ((BytesRecvd=recv (
 	        SocketDesc,
 	        pBuffer,
@@ -1016,6 +1055,11 @@ ENT_PUBLIC MSG_ID_T  UTL_Send(
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
+    }
+
+    if(pBuffer == NULL || BufferLength < 0 || pBytesSent == NULL)
+    {
+        return ENT_SOCK_BAD_ARGUMENT;
     }
 
     while ( ((TempBytesSent=send (

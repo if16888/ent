@@ -42,7 +42,7 @@ static void defSqlResultCb(char** fields,char** rowRes,long long rowNum,int colu
 
     for(colIdx = 0; colIdx<columnNum; colIdx++)
     {
-        printf("%s ",fields[colIdx]);
+        printf("%s ",fields[colIdx] ? fields[colIdx] : "(null)");
     }
     printf("\n");
 
@@ -50,7 +50,8 @@ static void defSqlResultCb(char** fields,char** rowRes,long long rowNum,int colu
     {
         for(colIdx = 0; colIdx<columnNum; colIdx++)
         {
-            printf("%s ",rowRes[rowIdx*columnNum+colIdx]);
+            printf("%s ",rowRes[rowIdx*columnNum+colIdx] ?
+                   rowRes[rowIdx*columnNum+colIdx] : "(null)");
         }
         printf("\n");
     }
@@ -426,6 +427,12 @@ static MSG_ID_T iENT_DbMySQLCollectRows(MYSQL_STMT* stmt,
         if((unsigned long long)allocationRows != (rowCount > 0 ? rowCount : 1) ||
            !iENT_DbCheckedSizeMultiply(allocationRows, (size_t)fieldCount, &cellCount))
         {
+            free(fields);
+            return ENT_DBS_ALLOC_FAILED;
+        }
+        if(cellCount > ENT_DB_MAX_RESULT_CELLS)
+        {
+            IENT_LOG_ERROR("mysql result exceeds the materialization limit.\n");
             free(fields);
             return ENT_DBS_ALLOC_FAILED;
         }

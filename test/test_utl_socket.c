@@ -167,6 +167,13 @@ static int test_socket_bind_and_connect_reject_null_addr(void)
         return 1;
     }
 
+    if(expect_true(UTL_Socket(AF_INET, SOCK_STREAM, 0, NULL) == ENT_SOCK_BAD_ARGUMENT,
+                   "UTL_Socket should reject a NULL output descriptor") != 0)
+    {
+        UTL_CloseSocket(sock);
+        return 1;
+    }
+
     if(expect_true(UTL_Bind(sock, NULL, 0) == ENT_SOCK_BAD_ARGUMENT,
                    "UTL_Bind should reject a NULL address") != 0)
     {
@@ -176,6 +183,15 @@ static int test_socket_bind_and_connect_reject_null_addr(void)
 
     if(expect_true(UTL_Connect(sock, NULL, 0) == ENT_SOCK_BAD_ARGUMENT,
                    "UTL_Connect should reject a NULL address") != 0)
+    {
+        UTL_CloseSocket(sock);
+        return 1;
+    }
+
+    if(expect_true(UTL_Recv(sock, NULL, 0, 0, NULL) == ENT_SOCK_BAD_ARGUMENT,
+                   "UTL_Recv should reject invalid buffer arguments") != 0 ||
+       expect_true(UTL_Send(sock, NULL, 0, 0, NULL) == ENT_SOCK_BAD_ARGUMENT,
+                   "UTL_Send should reject invalid buffer arguments") != 0)
     {
         UTL_CloseSocket(sock);
         return 1;

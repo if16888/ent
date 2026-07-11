@@ -57,6 +57,11 @@
 #define ENTDB_S_TAG (0xEADBEB90)
 #define ENTDB_E_TAG (0xEB90EADB)
 
+/* Result callbacks receive a fully materialized pointer matrix. Bound it before allocation. */
+#ifndef ENT_DB_MAX_RESULT_CELLS
+#define ENT_DB_MAX_RESULT_CELLS (1024u * 1024u)
+#endif
+
 typedef enum DB_HANDLE_STATE_TAG
 {
     ENT_DB_HANDLE_CREATED_E = 0,
