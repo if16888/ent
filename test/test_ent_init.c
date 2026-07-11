@@ -23,6 +23,24 @@ static int s_block_wait_mode = 0;
 static UTL_CV s_block_wait_cv = NULL;
 static volatile int s_block_wait_entered = 0;
 static volatile int s_block_wait_released = 0;
+
+static int test_flag_load(volatile int* value)
+{
+#ifdef WIN32
+    return *value;
+#else
+    return __sync_fetch_and_add(value, 0);
+#endif
+}
+
+static void test_flag_store(volatile int* value, int state)
+{
+#ifdef WIN32
+    *value = state;
+#else
+    __sync_lock_test_and_set(value, state);
+#endif
+}
 static volatile int s_close_thread_started = 0;
 static volatile int s_close_wait_entered = 0;
 static int s_log_init_calls = 0;
@@ -96,8 +114,8 @@ static void reset_wait_capture(void)
     s_auto_stop_after_wait = 0;
     s_block_wait_mode = 0;
     s_block_wait_cv = NULL;
-    s_block_wait_entered = 0;
-    s_block_wait_released = 0;
+    test_flag_store(&s_block_wait_entered, 0);
+    test_flag_store(&s_block_wait_released, 0);
     s_close_thread_started = 0;
     s_close_wait_entered = 0;
 }
@@ -111,8 +129,8 @@ static void enable_blocking_wait(UTL_CV cv)
 {
     s_block_wait_mode = 1;
     s_block_wait_cv = cv;
-    s_block_wait_entered = 0;
-    s_block_wait_released = 0;
+    test_flag_store(&s_block_wait_entered, 0);
+    test_flag_store(&s_block_wait_released, 0);
 }
 
 static void iENT_TestSleepMs(unsigned int ms)
@@ -130,7 +148,7 @@ static void iENT_TestSleepMs(unsigned int ms)
 
 static void wait_until_blocking_wait_entered(void)
 {
-    while(!s_block_wait_entered)
+    while(!test_flag_load(&s_block_wait_entered))
     {
         iENT_TestSleepMs(1);
     }
@@ -154,7 +172,7 @@ static void wait_until_close_wait_entered(void)
 
 static void release_blocking_wait(void)
 {
-    s_block_wait_released = 1;
+    test_flag_store(&s_block_wait_released, 1);
 }
 
 static void reset_close_counters(void)
@@ -586,12 +604,12 @@ MSG_ID_T UTL_CVWait(UTL_CV cv, UTL_LOCK lock, int ms, UTL_LOCK_RW_TYPE_T rwType)
     {
         ENT_CTX* ctx = iENT_RuntimeActiveCtx();
 
-        s_block_wait_entered = 1;
+        test_flag_store(&s_block_wait_entered, 1);
         if(ctx != NULL && ctx->handleState == ENT_HANDLE_STATE_CLOSING_E)
         {
             s_close_wait_entered = 1;
         }
-        while(!s_block_wait_released)
+        while(!test_flag_load(&s_block_wait_released))
         {
             iENT_TestSleepMs(1);
         }
