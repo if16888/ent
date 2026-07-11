@@ -4,6 +4,8 @@
 #include <time.h>
 #ifdef WIN32
 #include <windows.h>
+#else
+#include <pthread.h>
 #endif
 
 #include "ient_comm.h"
@@ -36,17 +38,110 @@ static void reset_thread_probes(void)
     s_cancel_call_count = 0;
 }
 
+/* ---------------------------------------------------------------------------
+ * Thread-safe one-shot completion event.
+ * publish() writes the result under lock, sets completed=1, and signals.
+ * wait()    blocks until completed==1 under lock, then returns the result.
+ * No volatile, no polling, no fixed sleep.
+ * --------------------------------------------------------------------------- */
+typedef struct TEST_RESULT_EVENT
+{
+#ifdef WIN32
+    CRITICAL_SECTION lock;
+    CONDITION_VARIABLE cv;
+#else
+    pthread_mutex_t lock;
+    pthread_cond_t  cv;
+#endif
+    int        completed;
+    MSG_ID_T   result;
+} TEST_RESULT_EVENT;
+
+static int test_result_event_init(TEST_RESULT_EVENT* ev)
+{
+    if(ev == NULL)
+        return -1;
+    ev->completed = 0;
+    ev->result    = 0;
+#ifdef WIN32
+    InitializeCriticalSection(&ev->lock);
+    InitializeConditionVariable(&ev->cv);
+    return 0;
+#else
+    {
+        int s = pthread_mutex_init(&ev->lock, NULL);
+        if(s != 0)
+            return s;
+        s = pthread_cond_init(&ev->cv, NULL);
+        if(s != 0)
+        {
+            pthread_mutex_destroy(&ev->lock);
+            return s;
+        }
+        return 0;
+    }
+#endif
+}
+
+static void test_result_event_destroy(TEST_RESULT_EVENT* ev)
+{
+    if(ev == NULL)
+        return;
+#ifdef WIN32
+    DeleteCriticalSection(&ev->lock);
+#else
+    pthread_cond_destroy(&ev->cv);
+    pthread_mutex_destroy(&ev->lock);
+#endif
+}
+
+static void test_result_event_publish(TEST_RESULT_EVENT* ev, MSG_ID_T result)
+{
+#ifdef WIN32
+    EnterCriticalSection(&ev->lock);
+    ev->result    = result;
+    ev->completed = 1;
+    LeaveCriticalSection(&ev->lock);
+    WakeConditionVariable(&ev->cv);
+#else
+    pthread_mutex_lock(&ev->lock);
+    ev->result    = result;
+    ev->completed = 1;
+    pthread_cond_broadcast(&ev->cv);
+    pthread_mutex_unlock(&ev->lock);
+#endif
+}
+
+static MSG_ID_T test_result_event_wait(TEST_RESULT_EVENT* ev)
+{
+    MSG_ID_T r;
+#ifdef WIN32
+    EnterCriticalSection(&ev->lock);
+    while(!ev->completed)
+        SleepConditionVariableCS(&ev->cv, &ev->lock, INFINITE);
+    r = ev->result;
+    LeaveCriticalSection(&ev->lock);
+#else
+    pthread_mutex_lock(&ev->lock);
+    while(!ev->completed)
+        pthread_cond_wait(&ev->cv, &ev->lock);
+    r = ev->result;
+    pthread_mutex_unlock(&ev->lock);
+#endif
+    return r;
+}
+
 typedef struct TEST_SELF_CLOSE_CTX
 {
-    ENT_THREAD handle;
-    volatile MSG_ID_T closeRc;
+    ENT_THREAD       handle;
+    TEST_RESULT_EVENT completed;
 } TEST_SELF_CLOSE_CTX;
 
 typedef struct TEST_SELF_WAIT_CTX
 {
-    ENT_THREAD handle;
-    ENT_THREAD_ID tid;
-    volatile MSG_ID_T waitRc;
+    ENT_THREAD       handle;
+    ENT_THREAD_ID    tid;
+    TEST_RESULT_EVENT completed;
 } TEST_SELF_WAIT_CTX;
 
 #ifdef WIN32
@@ -56,15 +151,8 @@ static void* self_close_thread(void* data)
 #endif
 {
     TEST_SELF_CLOSE_CTX* ctx = (TEST_SELF_CLOSE_CTX*)data;
-#ifdef WIN32
-    Sleep(50);
-#else
-    struct timespec ts;
-    ts.tv_sec = 0;
-    ts.tv_nsec = 50 * 1000000L;
-    nanosleep(&ts, NULL);
-#endif
-    ctx->closeRc = ENT_ThreadClose(ctx->handle);
+    MSG_ID_T rc = ENT_ThreadClose(ctx->handle);
+    test_result_event_publish(&ctx->completed, rc);
 #ifdef WIN32
     return 0;
 #else
@@ -79,15 +167,12 @@ static void* self_wait_thread(void* data)
 #endif
 {
     TEST_SELF_WAIT_CTX* ctx = (TEST_SELF_WAIT_CTX*)data;
-#ifdef WIN32
-    Sleep(50);
-#else
-    struct timespec ts;
-    ts.tv_sec = 0;
-    ts.tv_nsec = 50 * 1000000L;
-    nanosleep(&ts, NULL);
-#endif
-    ctx->waitRc = ENT_ThreadWaitById(&ctx->tid, ctx->handle, 0);
+    /* ctx->tid was written by ENT_ThreadCreate before the worker was
+     * allowed to start (production registration barrier), so no sleep
+     * is needed here.  See comm/ent_thread.c: registered flag + condvar
+     * (Linux) and CREATE_SUSPENDED + ResumeThread (Windows). */
+    MSG_ID_T rc = ENT_ThreadWaitById(&ctx->tid, ctx->handle, 0);
+    test_result_event_publish(&ctx->completed, rc);
 #ifdef WIN32
     return 0;
 #else
@@ -431,14 +516,18 @@ static int test_thread_close_rejects_self_close(void)
 {
     ENT_THREAD handle = NULL;
     TEST_SELF_CLOSE_CTX ctx;
-#ifndef WIN32
-    struct timespec ts;
-#endif
+    MSG_ID_T rc;
 
     memset(&ctx, 0, sizeof(ctx));
+    if(test_result_event_init(&ctx.completed) != 0)
+    {
+        fprintf(stderr, "test_result_event_init failed\n");
+        return 1;
+    }
     if(expect_true(ENT_ThreadInit(&handle) == ENT_SYS_NORMAL,
                    "ENT_ThreadInit should create a context for self-close checks") != 0)
     {
+        test_result_event_destroy(&ctx.completed);
         return 1;
     }
     ctx.handle = handle;
@@ -446,22 +535,22 @@ static int test_thread_close_rejects_self_close(void)
                    "ENT_ThreadCreate should create a worker for self-close checks") != 0)
     {
         ENT_ThreadClose(handle);
+        test_result_event_destroy(&ctx.completed);
         return 1;
     }
-#ifdef WIN32
-    Sleep(150);
-#else
-    ts.tv_sec = 0;
-    ts.tv_nsec = 150 * 1000000L;
-    nanosleep(&ts, NULL);
-#endif
-    if(expect_true(ctx.closeRc == ENT_THRD_IN_USE,
+    /* Wait for the worker to publish its result before touching ctx or handle. */
+    rc = test_result_event_wait(&ctx.completed);
+    if(expect_true(rc == ENT_THRD_IN_USE,
                    "ENT_ThreadClose should reject a close requested by its own worker") != 0)
     {
         ENT_ThreadClose(handle);
+        test_result_event_destroy(&ctx.completed);
         return 1;
     }
-    return expect_true(ENT_ThreadClose(handle) == ENT_SYS_NORMAL,
+    /* Worker has returned; now the main thread can safely close the context. */
+    rc = ENT_ThreadClose(handle);
+    test_result_event_destroy(&ctx.completed);
+    return expect_true(rc == ENT_SYS_NORMAL,
                        "ENT_ThreadClose should succeed after the self-close worker exits");
 }
 
@@ -469,37 +558,43 @@ static int test_thread_wait_rejects_self_wait(void)
 {
     ENT_THREAD handle = NULL;
     TEST_SELF_WAIT_CTX ctx;
-#ifndef WIN32
-    struct timespec ts;
-#endif
+    MSG_ID_T rc;
 
     memset(&ctx, 0, sizeof(ctx));
+    if(test_result_event_init(&ctx.completed) != 0)
+    {
+        fprintf(stderr, "test_result_event_init failed\n");
+        return 1;
+    }
     if(expect_true(ENT_ThreadInit(&handle) == ENT_SYS_NORMAL,
                    "ENT_ThreadInit should create a context for self-wait checks") != 0)
     {
+        test_result_event_destroy(&ctx.completed);
         return 1;
     }
     ctx.handle = handle;
+    /* ENT_ThreadCreate writes ctx.tid under the production registration
+     * barrier before the worker is allowed to run, so the worker can
+     * safely read ctx.tid without an extra sleep or barrier here. */
     if(expect_true(ENT_ThreadCreate(&ctx.tid, handle, self_wait_thread, &ctx) == ENT_SYS_NORMAL,
                    "ENT_ThreadCreate should create a worker for self-wait checks") != 0)
     {
         ENT_ThreadClose(handle);
+        test_result_event_destroy(&ctx.completed);
         return 1;
     }
-#ifdef WIN32
-    Sleep(150);
-#else
-    ts.tv_sec = 0;
-    ts.tv_nsec = 150 * 1000000L;
-    nanosleep(&ts, NULL);
-#endif
-    if(expect_true(ctx.waitRc == ENT_THRD_IN_USE,
+    /* Block until the worker has published its result. */
+    rc = test_result_event_wait(&ctx.completed);
+    if(expect_true(rc == ENT_THRD_IN_USE,
                    "ENT_ThreadWaitById should reject a worker waiting on itself") != 0)
     {
         ENT_ThreadClose(handle);
+        test_result_event_destroy(&ctx.completed);
         return 1;
     }
-    return expect_true(ENT_ThreadClose(handle) == ENT_SYS_NORMAL,
+    rc = ENT_ThreadClose(handle);
+    test_result_event_destroy(&ctx.completed);
+    return expect_true(rc == ENT_SYS_NORMAL,
                        "ENT_ThreadClose should join the worker after self-wait rejection");
 }
 
