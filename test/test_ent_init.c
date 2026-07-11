@@ -1568,6 +1568,53 @@ static int test_ent_set_rt_attributes_rejects_uninitialized_context(void)
                        "ENT_SetRtAttributes should reject an uninitialized context");
 }
 
+static int test_ent_rt_memory_lock_is_process_owned(void)
+{
+#ifdef WIN32
+    return 0;
+#else
+    ENT_HANDLE first = NULL;
+    ENT_HANDLE second = NULL;
+
+    reset_close_counters();
+    reset_log_failures();
+    s_mlockall_result = 0;
+    s_munlockall_result = 0;
+
+    if(expect_true(ENT_Init(&first, "rt-first", "/tmp/rt-first", LOG_LEV_WARN_E, ENT_MODE_REALTIME_E) == ENT_SYS_NORMAL,
+                   "first realtime handle should initialize") != 0 ||
+       expect_true(ENT_Init(&second, "rt-second", "/tmp/rt-second", LOG_LEV_WARN_E, ENT_MODE_REALTIME_E) == ENT_SYS_NORMAL,
+                   "second realtime handle should initialize") != 0)
+    {
+        close_handle_if_needed(&first);
+        close_handle_if_needed(&second);
+        return 1;
+    }
+
+    if(expect_true(s_mlockall_calls == 1,
+                   "process memory lock should be acquired only once for two realtime handles") != 0)
+    {
+        close_handle_if_needed(&first);
+        close_handle_if_needed(&second);
+        return 1;
+    }
+
+    if(expect_true(ENT_Close(&first) == ENT_SYS_NORMAL && s_munlockall_calls == 0,
+                   "closing a non-last realtime owner must not unlock process memory") != 0)
+    {
+        close_handle_if_needed(&second);
+        return 1;
+    }
+
+    if(expect_true(ENT_Close(&second) == ENT_SYS_NORMAL && s_munlockall_calls == 1,
+                   "closing the last realtime owner must unlock process memory") != 0)
+    {
+        return 1;
+    }
+    return 0;
+#endif
+}
+
 static int test_ent_set_rt_attributes_allows_noop_after_init(void)
 {
     ENT_HANDLE handle = NULL;
@@ -2037,6 +2084,7 @@ int main(void)
     failures += test_ent_init_rejects_double_init_same_handle();
     failures += test_ent_init_realtime_mode_can_degrade_to_normal();
     failures += test_ent_set_rt_attributes_rejects_uninitialized_context();
+    failures += test_ent_rt_memory_lock_is_process_owned();
     failures += test_ent_set_rt_attributes_allows_noop_after_init();
     failures += test_ent_set_rt_attributes_rejects_normal_mode();
     failures += test_ent_stop_rejects_bad_magic_handle();

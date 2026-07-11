@@ -79,6 +79,7 @@ static void iENT_RuntimeUnlock(void)
 #endif
 
 static unsigned int sEntLogUsers = 0;
+static unsigned int sEntRtMemoryOwners = 0;
 
 ENT_CTX* iENT_RuntimeActiveCtx(void)
 {
@@ -187,13 +188,19 @@ static MSG_ID_T iENT_HandleClose(ENT_HANDLE* handle)
     }
 
     UTL_LockEnter(handleCtx->ctx.entLock);
-    if(handleCtx->ctx.handleState != ENT_HANDLE_STATE_ACTIVE_E)
+    if(handleCtx->ctx.handleState != ENT_HANDLE_STATE_ACTIVE_E &&
+       handleCtx->ctx.handleState != ENT_HANDLE_STATE_CLOSING_E)
+    {
+        UTL_LockLeave(handleCtx->ctx.entLock);
+        return ENT_SYS_BAD_HANDLE;
+    }
+    if(handleCtx->ctx.closeInProgress)
     {
         UTL_LockLeave(handleCtx->ctx.entLock);
         return ENT_SYS_BAD_HANDLE;
     }
     handleCtx->ctx.handleState = ENT_HANDLE_STATE_CLOSING_E;
-    handleCtx->magic = 0u;
+    handleCtx->ctx.closeInProgress = true;
     UTL_LockLeave(handleCtx->ctx.entLock);
 
     prevCtx = iENT_RuntimeSetActiveCtx(&handleCtx->ctx);
@@ -201,11 +208,18 @@ static MSG_ID_T iENT_HandleClose(ENT_HANDLE* handle)
     iENT_RuntimeSetActiveCtx(prevCtx);
     if(sts == ENT_SYS_NORMAL)
     {
+        handleCtx->magic = 0u;
 #ifdef ENT_INIT_TEST_HOOKS
         ENT_InitTestHandleCtxFreed();
 #endif
         free(handleCtx);
         *handle = NULL;
+    }
+    else
+    {
+        UTL_LockEnter(handleCtx->ctx.entLock);
+        handleCtx->ctx.closeInProgress = false;
+        UTL_LockLeave(handleCtx->ctx.entLock);
     }
     return sts;
 }
@@ -434,10 +448,12 @@ static inline void iENT_CTXResetRuntime(ENT_CTX* ctx)
     ctx->rtEnabled = false;
     ctx->running = false;
     ctx->stopRequested = false;
+    ctx->closeInProgress = false;
     ctx->rtCpu = -1;
     ctx->rtPolicy = ENT_RT_POLICY_OTHER_E;
     ctx->rtPriority = 0;
     ctx->rtLastError = 0;
+    ctx->rtMemoryOwner = false;
     ctx->logLevel = LOG_LEV_WARN_E;
     ctx->handleState = ENT_HANDLE_STATE_CLOSED_E;
     ctx->activeCalls = 0u;
@@ -560,17 +576,28 @@ static MSG_ID_T iENT_CTXApplyRtMode(ENT_CTX* ctx,
 #ifdef WIN32
     IENT_LOG_WARN("rt mode not supported on current platform,fallback to normal mode\n");
 #else
-    if(mlockall(MCL_CURRENT | MCL_FUTURE) == 0)
+    iENT_RuntimeLock();
+    if(ctx->rtMemoryOwner)
     {
-        ctx->rtEnabled = true;
-        IENT_LOG_PRINT("rt mode enabled via mlockall\n");
+        iENT_RuntimeUnlock();
+        return ENT_SYS_NORMAL;
     }
-    else
+    if(sEntRtMemoryOwners == 0 && mlockall(MCL_CURRENT | MCL_FUTURE) != 0)
     {
         ctx->rtLastError = errno;
+        iENT_RuntimeUnlock();
         IENT_LOG_WARN("mlockall failed,error [%d]->[%s],fallback to normal mode\n",
                       errno,
                       strerror(errno));
+        return ENT_SYS_NORMAL;
+    }
+    sEntRtMemoryOwners++;
+    ctx->rtMemoryOwner = true;
+    ctx->rtEnabled = true;
+    iENT_RuntimeUnlock();
+    if(ctx->rtEnabled)
+    {
+        IENT_LOG_PRINT("rt mode enabled via mlockall\n");
     }
 #endif
     return ENT_SYS_NORMAL;
@@ -799,6 +826,43 @@ static MSG_ID_T iENT_CTXInit(ENT_CTX* ctx,
     return ENT_SYS_NORMAL;
 }
 
+static MSG_ID_T iENT_CTXReleaseRtMemory(ENT_CTX* ctx)
+{
+#ifndef WIN32
+    if(ctx != NULL && ctx->rtMemoryOwner)
+    {
+        bool lastOwner;
+        int unlockSts = 0;
+
+        iENT_RuntimeLock();
+        lastOwner = (sEntRtMemoryOwners == 1);
+        if(lastOwner)
+        {
+            unlockSts = munlockall();
+        }
+        if(unlockSts != 0)
+        {
+            ctx->rtLastError = errno;
+            iENT_RuntimeUnlock();
+            IENT_LOG_WARN("munlockall failed,error [%d]->[%s]\n",
+                          ctx->rtLastError,
+                          strerror(ctx->rtLastError));
+            return ENT_RT_SCHED_SETFAIL;
+        }
+        if(sEntRtMemoryOwners > 0)
+        {
+            sEntRtMemoryOwners--;
+        }
+        ctx->rtMemoryOwner = false;
+        ctx->rtEnabled = false;
+        iENT_RuntimeUnlock();
+    }
+#else
+    (void)ctx;
+#endif
+    return ENT_SYS_NORMAL;
+}
+
 static MSG_ID_T iENT_CTXClose(ENT_CTX* ctx)
 {
     MSG_ID_T sts = ENT_SYS_NORMAL;
@@ -826,15 +890,11 @@ static MSG_ID_T iENT_CTXClose(ENT_CTX* ctx)
     }
     UTL_LockLeave(ctx->entLock);
 
-#ifndef WIN32
-    if(ctx->rtEnabled)
+    sts = iENT_CTXReleaseRtMemory(ctx);
+    if(sts < 0)
     {
-        if(munlockall() != 0)
-        {
-            IENT_LOG_WARN("munlockall failed,error [%d]->[%s]\n",errno,strerror(errno));
-        }
+        return sts;
     }
-#endif
 
     UTL_CVClose(&ctx->entCV);
     ctx->entCV = NULL;
