@@ -125,10 +125,13 @@ jobs:
       - name: Run concurrency tests
         env:
           TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1:history_size=7:log_path=${{ github.workspace }}/ci-logs/tsan/tsan
-        run: >-
-          mkdir -p "$CI_LOG_DIR" &&
-          ctest --test-dir "$BUILD_DIR" --output-on-failure
-          -R "^(test_ent_init_concurrency|test_ent_log|test_ent_db|test_ent_thread|test_utl_tpool_integration)$"
+        run: |
+          mkdir -p "$CI_LOG_DIR"
+          set +e
+          ctest --test-dir "$BUILD_DIR" --output-on-failure -V \
+            -R "^(test_ent_init_concurrency|test_ent_log|test_ent_db|test_ent_thread|test_utl_tpool_integration)$" \
+            2>&1 | tee "$CI_LOG_DIR/ctest-tsan.log"
+          test "${PIPESTATUS[0]}" -eq 0
 
       - name: Upload sanitizer logs
         if: always()
