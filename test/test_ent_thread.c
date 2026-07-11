@@ -170,16 +170,6 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle, const char* format, ...)
 }
 
 #ifndef WIN32
-int pthread_join(pthread_t thread, void** retval)
-{
-    (void)thread;
-    if(retval != NULL)
-    {
-        *retval = NULL;
-    }
-    return 0;
-}
-
 int pthread_cancel(pthread_t thread)
 {
     (void)thread;
