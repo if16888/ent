@@ -1328,6 +1328,158 @@ join_cleanup:
     return rc;
 }
 
+typedef struct TEST_CTX_CLOSE_THREAD_CTX_TAG
+{
+    ENT_LOG_CTX ctx;
+    TEST_EVENT done;
+    MSG_ID_T closeRc;
+} TEST_CTX_CLOSE_THREAD_CTX;
+
+#ifdef WIN32
+static DWORD WINAPI close_ctx_thread_proc(LPVOID data)
+#else
+static void* close_ctx_thread_proc(void* data)
+#endif
+{
+    TEST_CTX_CLOSE_THREAD_CTX* ctx = (TEST_CTX_CLOSE_THREAD_CTX*)data;
+    ctx->closeRc = ENT_LogCtxClose(ctx->ctx);
+    test_event_signal(&ctx->done);
+#ifdef WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
+static int test_log_ctx_close_rejects_concurrent_second_close(void)
+{
+    ENT_LOG_CTX ctx = NULL;
+    ENT_LOG privateLog = NULL;
+    ENT_LOG_CTX_INTERNAL* writerCtx = NULL;
+    TEST_CTX_CLOSE_THREAD_CTX closeCtx;
+    char dirPath[256];
+    int serviceOpen = 0;
+    int tempDirCreated = 0;
+    int rc = 1;
+#ifdef WIN32
+    HANDLE th = NULL;
+#else
+    pthread_t th;
+#endif
+
+    memset(&closeCtx, 0, sizeof(closeCtx));
+    if(make_temp_dir(dirPath, sizeof(dirPath)) != 0)
+    {
+        return 1;
+    }
+    tempDirCreated = 1;
+
+    if(expect_true(ENT_LogInit() == ENT_SYS_NORMAL,
+                   "ENT_LogInit should initialize before concurrent context close testing") != 0)
+    {
+        goto cleanup;
+    }
+    serviceOpen = 1;
+
+    if(expect_true(ENT_LogCtxInit(&ctx) == ENT_SYS_NORMAL,
+                   "ENT_LogCtxInit should create a context before concurrent close testing") != 0 ||
+       expect_true(ENT_LogCtxInitHandle(ctx, &privateLog, "CtxCloseRace", dirPath) == ENT_SYS_NORMAL,
+                   "ENT_LogCtxInitHandle should create a context-owned handle before concurrent close testing") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(iENT_LogAcquireWriter(&writerCtx, privateLog) == ENT_SYS_NORMAL,
+                   "iENT_LogAcquireWriter should hold the owned handle during context close testing") != 0)
+    {
+        goto cleanup;
+    }
+    if(expect_true(test_event_init(&closeCtx.done) == 0,
+                   "test_event_init should initialize the context close event") != 0)
+    {
+        iENT_LogReleaseWriter(writerCtx);
+        writerCtx = NULL;
+        goto cleanup;
+    }
+    closeCtx.ctx = ctx;
+#ifdef WIN32
+    th = CreateThread(NULL, 0, close_ctx_thread_proc, &closeCtx, 0, NULL);
+    if(expect_true(th != NULL, "CreateThread should start the context close worker") != 0)
+#else
+    if(expect_true(pthread_create(&th, NULL, close_ctx_thread_proc, &closeCtx) == 0,
+                   "pthread_create should start the context close worker") != 0)
+#endif
+    {
+        test_event_destroy(&closeCtx.done);
+        iENT_LogReleaseWriter(writerCtx);
+        writerCtx = NULL;
+        goto cleanup;
+    }
+
+    test_sleep_ms(50);
+    if(expect_true(ENT_LogCtxClose(ctx) == ENT_LOG_IN_USE,
+                   "a second ENT_LogCtxClose should reject an already closing context") != 0)
+    {
+        iENT_LogReleaseWriter(writerCtx);
+        writerCtx = NULL;
+        goto join_cleanup;
+    }
+
+    iENT_LogReleaseWriter(writerCtx);
+    writerCtx = NULL;
+    if(expect_true(test_event_wait(&closeCtx.done, 2000) == 0,
+                   "the first context close should finish after the writer is released") != 0 ||
+       expect_true(closeCtx.closeRc == ENT_SYS_NORMAL,
+                   "the first context close should report success") != 0)
+    {
+        goto join_cleanup;
+    }
+    ctx = NULL;
+    privateLog = NULL;
+    if(expect_true(ENT_LogClose() == ENT_SYS_NORMAL,
+                   "ENT_LogClose should succeed after concurrent context close testing") != 0)
+    {
+        goto join_cleanup;
+    }
+    serviceOpen = 0;
+    rc = 0;
+
+join_cleanup:
+#ifdef WIN32
+    if(th != NULL)
+    {
+        WaitForSingleObject(th, INFINITE);
+        CloseHandle(th);
+    }
+#else
+    pthread_join(th, NULL);
+#endif
+    test_event_destroy(&closeCtx.done);
+    if(writerCtx != NULL)
+    {
+        iENT_LogReleaseWriter(writerCtx);
+    }
+    if(closeCtx.closeRc == ENT_SYS_NORMAL)
+    {
+        ctx = NULL;
+        privateLog = NULL;
+    }
+cleanup:
+    if(ctx != NULL)
+    {
+        ENT_LogCtxClose(ctx);
+    }
+    if(serviceOpen)
+    {
+        ENT_LogClose();
+    }
+    if(tempDirCreated)
+    {
+        remove_dir_contents(dirPath);
+    }
+    return rc;
+}
+
 static int test_log_close_rejects_invalid_handle(void)
 {
     TEST_BAD_LOG_CTX badLog;
@@ -2180,6 +2332,7 @@ int main(void)
     failures += test_default_handle_close_boundaries();
     failures += test_log_service_close_rejects_live_handle();
     failures += test_log_close_handle_blocks_until_active_writer_released();
+    failures += test_log_ctx_close_rejects_concurrent_second_close();
     failures += test_log_close_rejects_invalid_handle();
     failures += test_log_set_option_validates_arguments();
     failures += test_log_path_option_trims_trailing_separator_and_writes_file();

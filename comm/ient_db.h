@@ -62,6 +62,11 @@
 #define ENT_DB_MAX_RESULT_CELLS (1024u * 1024u)
 #endif
 
+/* Bound the copied payload held by the callback materialization layer. */
+#ifndef ENT_DB_MAX_RESULT_BYTES
+#define ENT_DB_MAX_RESULT_BYTES (64u * 1024u * 1024u)
+#endif
+
 typedef enum DB_HANDLE_STATE_TAG
 {
     ENT_DB_HANDLE_CREATED_E = 0,
@@ -121,6 +126,16 @@ static int iENT_DbCheckedSizeMultiply(size_t left, size_t right, size_t* result)
         return 0;
     }
     *result = left * right;
+    return 1;
+}
+
+static int iENT_DbCheckedSizeAdd(size_t left, size_t right, size_t* result)
+{
+    if(result == NULL || right > ((size_t)-1) - left)
+    {
+        return 0;
+    }
+    *result = left + right;
     return 1;
 }
 

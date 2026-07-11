@@ -19,6 +19,7 @@
 
 #include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef WIN32
@@ -27,6 +28,7 @@
 
 #ifndef WIN32
 #include <pthread.h>
+#include <unistd.h>
 #endif
 
 #if ENT_ENABLE_LUA
@@ -204,6 +206,137 @@ static MSG_ID_T iENT_ScriptJoinPath(char* out,
     return ENT_SYS_NORMAL;
 }
 
+static bool iENT_ScriptPathHasRootPrefix(const char* root, const char* path)
+{
+    size_t rootLength;
+
+    if(root == NULL || path == NULL)
+    {
+        return false;
+    }
+    rootLength = strlen(root);
+    if(strlen(path) < rootLength)
+    {
+        return false;
+    }
+#ifdef WIN32
+    if(_strnicmp(root, path, rootLength) != 0)
+#else
+    if(strncmp(root, path, rootLength) != 0)
+#endif
+    {
+        return false;
+    }
+
+    return path[rootLength] == '\0' || path[rootLength] == '/' || path[rootLength] == '\\';
+}
+
+static MSG_ID_T iENT_ScriptResolvePath(char* out,
+                                       size_t outSize,
+                                       const char* base,
+                                       const char* name)
+{
+    char candidate[ENT_SCRIPT_PATH_MAX * 4] = {0};
+
+    if(out == NULL || outSize == 0)
+    {
+        return ENT_SCR_BAD_ARGUMENT;
+    }
+    if(iENT_ScriptJoinPath(candidate, sizeof(candidate), base, name) != ENT_SYS_NORMAL)
+    {
+        return ENT_SCR_BAD_ARGUMENT;
+    }
+
+#ifdef WIN32
+    {
+        char fullRoot[ENT_SCRIPT_PATH_MAX * 4] = {0};
+        char rootFinal[ENT_SCRIPT_PATH_MAX * 4] = {0};
+        char candidateFinal[ENT_SCRIPT_PATH_MAX * 4] = {0};
+        DWORD fullRootLength;
+        DWORD rootFinalLength;
+        DWORD candidateFinalLength;
+        HANDLE rootHandle = INVALID_HANDLE_VALUE;
+        HANDLE candidateHandle = INVALID_HANDLE_VALUE;
+
+        fullRootLength = GetFullPathNameA(base, (DWORD)sizeof(fullRoot), fullRoot, NULL);
+        if(fullRootLength == 0 || fullRootLength >= sizeof(fullRoot))
+        {
+            return ENT_SCR_LOAD_FAILED;
+        }
+        rootHandle = CreateFileA(fullRoot,
+                                 0,
+                                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                 NULL,
+                                 OPEN_EXISTING,
+                                 FILE_FLAG_BACKUP_SEMANTICS,
+                                 NULL);
+        candidateHandle = CreateFileA(candidate,
+                                      GENERIC_READ,
+                                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                      NULL,
+                                      OPEN_EXISTING,
+                                      FILE_ATTRIBUTE_NORMAL,
+                                      NULL);
+        if(rootHandle == INVALID_HANDLE_VALUE || candidateHandle == INVALID_HANDLE_VALUE)
+        {
+            if(rootHandle != INVALID_HANDLE_VALUE)
+            {
+                CloseHandle(rootHandle);
+            }
+            if(candidateHandle != INVALID_HANDLE_VALUE)
+            {
+                CloseHandle(candidateHandle);
+            }
+            return ENT_SCR_LOAD_FAILED;
+        }
+
+        rootFinalLength = GetFinalPathNameByHandleA(rootHandle,
+                                                     rootFinal,
+                                                     (DWORD)sizeof(rootFinal),
+                                                     FILE_NAME_NORMALIZED);
+        candidateFinalLength = GetFinalPathNameByHandleA(candidateHandle,
+                                                          candidateFinal,
+                                                          (DWORD)sizeof(candidateFinal),
+                                                          FILE_NAME_NORMALIZED);
+        CloseHandle(rootHandle);
+        CloseHandle(candidateHandle);
+        if(rootFinalLength == 0 || candidateFinalLength == 0 ||
+           rootFinalLength >= sizeof(rootFinal) || candidateFinalLength >= sizeof(candidateFinal) ||
+           !iENT_ScriptPathHasRootPrefix(rootFinal, candidateFinal))
+        {
+            return ENT_SCR_BAD_ARGUMENT;
+        }
+    }
+
+    if(strlen(candidate) >= outSize)
+    {
+        return ENT_SCR_LOAD_FAILED;
+    }
+    snprintf(out, outSize, "%s", candidate);
+    return ENT_SYS_NORMAL;
+#else
+    {
+        char rootResolved[PATH_MAX] = {0};
+        char candidateResolved[PATH_MAX] = {0};
+
+        if(realpath(base, rootResolved) == NULL || realpath(candidate, candidateResolved) == NULL)
+        {
+            return ENT_SCR_LOAD_FAILED;
+        }
+        if(!iENT_ScriptPathHasRootPrefix(rootResolved, candidateResolved))
+        {
+            return ENT_SCR_BAD_ARGUMENT;
+        }
+        if(strlen(candidateResolved) >= outSize)
+        {
+            return ENT_SCR_LOAD_FAILED;
+        }
+        snprintf(out, outSize, "%s", candidateResolved);
+    }
+    return ENT_SYS_NORMAL;
+#endif
+}
+
 static void iENT_ScriptDisableDangerousGlobals(lua_State* state)
 {
     lua_pushnil(state);
@@ -289,10 +422,10 @@ ENT_PUBLIC MSG_ID_T ENT_ScriptReload(const char* scriptName)
     }
 
 #if ENT_ENABLE_LUA
-    sts = iENT_ScriptJoinPath(scriptPath,
-                              sizeof(scriptPath),
-                              gEntScriptCtx.scriptRoot,
-                              scriptName);
+    sts = iENT_ScriptResolvePath(scriptPath,
+                                 sizeof(scriptPath),
+                                 gEntScriptCtx.scriptRoot,
+                                 scriptName);
     if(sts != ENT_SYS_NORMAL)
     {
         ret = sts;

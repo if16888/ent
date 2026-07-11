@@ -626,8 +626,26 @@ MSG_ID_T ENT_LogCtxClose(ENT_LOG_CTX ctx)
 #else
     pthread_mutex_lock(&sLogMutex);
 #endif
-    if(logCtx == NULL || logCtx->tag != ENTLOG_CTX_TAG || logCtx->isInit == false ||
-       (logCtx->state != ENT_LOG_HANDLE_ACTIVE_E && logCtx->state != ENT_LOG_HANDLE_CLOSING_E))
+    if(logCtx == NULL || logCtx->tag != ENTLOG_CTX_TAG || logCtx->isInit == false)
+    {
+#ifdef WIN32
+        LeaveCriticalSection(&sLogMutex);
+#else
+        pthread_mutex_unlock(&sLogMutex);
+#endif
+        fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxClose", __LINE__);
+        return ENT_LOG_BAD_HANDLE;
+    }
+    if(logCtx->state == ENT_LOG_HANDLE_CLOSING_E)
+    {
+#ifdef WIN32
+        LeaveCriticalSection(&sLogMutex);
+#else
+        pthread_mutex_unlock(&sLogMutex);
+#endif
+        return ENT_LOG_IN_USE;
+    }
+    if(logCtx->state != ENT_LOG_HANDLE_ACTIVE_E)
     {
 #ifdef WIN32
         LeaveCriticalSection(&sLogMutex);
@@ -657,6 +675,20 @@ MSG_ID_T ENT_LogCtxClose(ENT_LOG_CTX ctx)
         closeSts = iENT_LogCloseHandle(logCtx->logHandle);
         if(closeSts != ENT_SYS_NORMAL)
         {
+#ifdef WIN32
+            EnterCriticalSection(&sLogMutex);
+#else
+            pthread_mutex_lock(&sLogMutex);
+#endif
+            if(logCtx->tag == ENTLOG_CTX_TAG && logCtx->isInit)
+            {
+                logCtx->state = ENT_LOG_HANDLE_ACTIVE_E;
+            }
+#ifdef WIN32
+            LeaveCriticalSection(&sLogMutex);
+#else
+            pthread_mutex_unlock(&sLogMutex);
+#endif
             return closeSts;
         }
         logCtx->logHandle = NULL;

@@ -113,6 +113,33 @@ static void iENT_ThreadEndCall(ENT_TH_CTX* thCtx)
     UTL_LockLeave(thCtx->dllLock);
 }
 
+static bool iENT_ThreadHasCurrentThread(ENT_TH_CTX* thCtx)
+{
+    DLL_D_HDR* current;
+
+    if(thCtx == NULL)
+    {
+        return false;
+    }
+
+    current = thCtx->dllHeader.fw_ptr;
+    while(current != &thCtx->dllHeader)
+    {
+        THREAD_DB* thDb = (THREAD_DB*)current;
+#ifdef WIN32
+        if(thDb->thId == GetCurrentThreadId())
+#else
+        if(pthread_equal(thDb->thId, pthread_self()) != 0)
+#endif
+        {
+            return true;
+        }
+        current = current->fw_ptr;
+    }
+
+    return false;
+}
+
 #ifndef WIN32
 static clockid_t iENT_ThreadCondClockId(void)
 {
@@ -388,6 +415,9 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
     ENT_TH_CTX*  thCtx = NULL;
     THREAD_DB*   thDb  = NULL;
     DLL_D_HDR*   tmp;
+#ifdef WIN32
+    DWORD        waitSts;
+#endif
     
     if(handle==NULL)
     {
@@ -408,6 +438,11 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
     {
         UTL_LockLeave(thCtx->dllLock);
         return ENT_THRD_INVALID_HANDLE;
+    }
+    if(iENT_ThreadHasCurrentThread(thCtx))
+    {
+        UTL_LockLeave(thCtx->dllLock);
+        return ENT_THRD_IN_USE;
     }
     thCtx->state = ENT_TH_STATE_CLOSING_E;
     while(thCtx->activeCalls > 0)
@@ -433,7 +468,16 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
         thDb = (THREAD_DB*)tmp;
         if(thDb->thHandle)
         {
-            WaitForSingleObject(thDb->thHandle, INFINITE);
+            waitSts = WaitForSingleObject(thDb->thHandle, INFINITE);
+            if(waitSts != WAIT_OBJECT_0)
+            {
+                IENT_LOG_ERROR("WaitForSingleObject failed,error [%lu]\n", GetLastError());
+                UTL_LockEnter(thCtx->dllLock);
+                UTL_DllInsHead(&thCtx->dllHeader,(DLL_D_HDR*)thDb);
+                thCtx->state = ENT_TH_STATE_ACTIVE_E;
+                UTL_LockLeave(thCtx->dllLock);
+                return ENT_THRD_WAIT_FAILED;
+            }
             CloseHandle(thDb->thHandle);
             thDb->thHandle = NULL;
             thDb->thId = 0;
@@ -642,6 +686,12 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int 
             if(s!=0)
             {
                 IENT_LOG_WARN("join,error [%d]->[%s]\n",s,strerror(s));
+                UTL_LockEnter(thCtx->dllLock);
+                UTL_DllInsHead(&thCtx->dllHeader,(DLL_D_HDR*)thDb);
+                *tid = thDb;
+                UTL_LockLeave(thCtx->dllLock);
+                iENT_ThreadEndCall(thCtx);
+                return ENT_THRD_WAIT_FAILED;
             }
         }
         else
@@ -685,6 +735,12 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int 
             if(s!=0)
             {
                 IENT_LOG_WARN("join,error [%d]->[%s]\n",s,strerror(s));
+                UTL_LockEnter(thCtx->dllLock);
+                UTL_DllInsHead(&thCtx->dllHeader,(DLL_D_HDR*)thDb);
+                *tid = thDb;
+                UTL_LockLeave(thCtx->dllLock);
+                iENT_ThreadEndCall(thCtx);
+                return ENT_THRD_WAIT_FAILED;
             }
         }
         thDb->thHandle = NULL;
@@ -726,6 +782,11 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
         UTL_LockLeave(thCtx->dllLock);
         return ENT_THRD_INVALID_HANDLE;
     }
+    if(iENT_ThreadHasCurrentThread(thCtx))
+    {
+        UTL_LockLeave(thCtx->dllLock);
+        return ENT_THRD_IN_USE;
+    }
     thCtx->state = ENT_TH_STATE_CLOSING_E;
     while(thCtx->activeCalls > 0)
     {
@@ -750,7 +811,16 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
         thDb = (THREAD_DB*)tmp;
         if(thDb->thId)
         {
-            pthread_join(thDb->thId,&retVal);
+            sts = pthread_join(thDb->thId,&retVal);
+            if(sts != 0)
+            {
+                IENT_LOG_ERROR("pthread_join failed,error [%d]->[%s]\n",sts,strerror(sts));
+                UTL_LockEnter(thCtx->dllLock);
+                UTL_DllInsHead(&thCtx->dllHeader,(DLL_D_HDR*)thDb);
+                thCtx->state = ENT_TH_STATE_ACTIVE_E;
+                UTL_LockLeave(thCtx->dllLock);
+                return ENT_THRD_WAIT_FAILED;
+            }
             thDb->thHandle = NULL;
             thDb->thId = 0;
             thDb->tag = 0x0;

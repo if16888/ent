@@ -110,6 +110,7 @@ typedef struct SQLITE_RESULT_TAG
     int columnCount;
     size_t rowCount;
     size_t rowCapacity;
+    size_t payloadBytes;
 } SQLITE_RESULT;
 
 static void iENT_DbSqliteDefaultCb(char** fields,char** rowRes,long long rowNum,int columnNum,void* data)
@@ -176,6 +177,8 @@ static MSG_ID_T iENT_DbSqliteAppendCell(SQLITE_RESULT* result,
     const unsigned char* textValue = sqlite3_column_text(stmt, colIdx);
     int byteCount = sqlite3_column_bytes(stmt, colIdx);
     char* copy = NULL;
+    size_t allocationSize = 0;
+    size_t newPayloadBytes = 0;
 
     if(sqlite3_column_type(stmt, colIdx) == SQLITE_NULL)
     {
@@ -188,7 +191,15 @@ static MSG_ID_T iENT_DbSqliteAppendCell(SQLITE_RESULT* result,
         byteCount = 0;
     }
 
-    copy = (char*)malloc((size_t)byteCount + 1);
+    if(!iENT_DbCheckedSizeAdd((size_t)byteCount, 1, &allocationSize) ||
+       !iENT_DbCheckedSizeAdd(result->payloadBytes, allocationSize, &newPayloadBytes) ||
+       newPayloadBytes > ENT_DB_MAX_RESULT_BYTES)
+    {
+        IENT_LOG_ERROR("sqlite result exceeds the payload limit.\n");
+        return ENT_DBS_ALLOC_FAILED;
+    }
+
+    copy = (char*)malloc(allocationSize);
     if(copy == NULL)
     {
         IENT_LOG_ERROR("sqlite cell allocation failed.\n");
@@ -201,6 +212,7 @@ static MSG_ID_T iENT_DbSqliteAppendCell(SQLITE_RESULT* result,
     }
     copy[byteCount] = '\0';
     result->rows[rowIdx * (size_t)result->columnCount + (size_t)colIdx] = copy;
+    result->payloadBytes = newPayloadBytes;
     return ENT_SYS_NORMAL;
 }
 

@@ -4,6 +4,7 @@
 
 #ifndef WIN32
 #include <pthread.h>
+#include <unistd.h>
 #endif
 
 #include "ient_comm.h"
@@ -172,6 +173,26 @@ int main(void)
     {
         return EXIT_FAILURE;
     }
+
+#ifndef WIN32
+    {
+        const char* outsidePath = "/etc/hosts";
+        const char* symlinkPath = "/tmp/ent_script_symlink.lua";
+        unlink(symlinkPath);
+        if(expect_true(symlink(outsidePath, symlinkPath) == 0,
+                       "test should create a symlink outside the configured script root") != 0)
+        {
+            return EXIT_FAILURE;
+        }
+        sts = ENT_ScriptReload("ent_script_symlink.lua");
+        unlink(symlinkPath);
+        if(expect_true(sts == ENT_SCR_BAD_ARGUMENT,
+                       "ENT_ScriptReload should reject symlink targets outside the configured root") != 0)
+        {
+            return EXIT_FAILURE;
+        }
+    }
+#endif
 
     fp = ENT_FOpen(scriptPath, "wb");
     if(expect_true(fp != NULL, "test should create a temporary lua script file") != 0)

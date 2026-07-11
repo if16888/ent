@@ -36,6 +36,35 @@ static void reset_thread_probes(void)
     s_cancel_call_count = 0;
 }
 
+typedef struct TEST_SELF_CLOSE_CTX
+{
+    ENT_THREAD handle;
+    volatile MSG_ID_T closeRc;
+} TEST_SELF_CLOSE_CTX;
+
+#ifdef WIN32
+static DWORD WINAPI self_close_thread(void* data)
+#else
+static void* self_close_thread(void* data)
+#endif
+{
+    TEST_SELF_CLOSE_CTX* ctx = (TEST_SELF_CLOSE_CTX*)data;
+#ifdef WIN32
+    Sleep(50);
+#else
+    struct timespec ts;
+    ts.tv_sec = 0;
+    ts.tv_nsec = 50 * 1000000L;
+    nanosleep(&ts, NULL);
+#endif
+    ctx->closeRc = ENT_ThreadClose(ctx->handle);
+#ifdef WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
 MSG_ID_T ENT_LogInit(void)
 {
     return 0;
@@ -378,6 +407,44 @@ static int test_thread_close_does_not_call_pthread_cancel(void)
 #endif
 }
 
+static int test_thread_close_rejects_self_close(void)
+{
+    ENT_THREAD handle = NULL;
+    TEST_SELF_CLOSE_CTX ctx;
+#ifndef WIN32
+    struct timespec ts;
+#endif
+
+    memset(&ctx, 0, sizeof(ctx));
+    if(expect_true(ENT_ThreadInit(&handle) == ENT_SYS_NORMAL,
+                   "ENT_ThreadInit should create a context for self-close checks") != 0)
+    {
+        return 1;
+    }
+    ctx.handle = handle;
+    if(expect_true(ENT_ThreadCreate(NULL, handle, self_close_thread, &ctx) == ENT_SYS_NORMAL,
+                   "ENT_ThreadCreate should create a worker for self-close checks") != 0)
+    {
+        ENT_ThreadClose(handle);
+        return 1;
+    }
+#ifdef WIN32
+    Sleep(150);
+#else
+    ts.tv_sec = 0;
+    ts.tv_nsec = 150 * 1000000L;
+    nanosleep(&ts, NULL);
+#endif
+    if(expect_true(ctx.closeRc == ENT_THRD_IN_USE,
+                   "ENT_ThreadClose should reject a close requested by its own worker") != 0)
+    {
+        ENT_ThreadClose(handle);
+        return 1;
+    }
+    return expect_true(ENT_ThreadClose(handle) == ENT_SYS_NORMAL,
+                       "ENT_ThreadClose should succeed after the self-close worker exits");
+}
+
 int main(void)
 {
     int failures = 0;
@@ -389,6 +456,7 @@ int main(void)
     failures += test_thread_wait_returns_success_when_thread_finishes_before_timeout();
     failures += test_thread_close_releases_thread_context();
     failures += test_thread_close_does_not_call_pthread_cancel();
+    failures += test_thread_close_rejects_self_close();
 
     if(failures != 0)
     {

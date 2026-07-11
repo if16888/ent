@@ -321,6 +321,7 @@ static MSG_ID_T iENT_DbMySQLBindResults(MYSQL_STMT* stmt,
 {
     MYSQL_FIELD* fields;
     size_t i;
+    size_t bufferBytes = 0;
     unsigned int fieldCount;
 
     if(stmt == NULL || meta == NULL || resultCtx == NULL)
@@ -355,6 +356,14 @@ static MSG_ID_T iENT_DbMySQLBindResults(MYSQL_STMT* stmt,
     for(i = 0; i < fieldCount; i++)
     {
         size_t bufferSize = iENT_DbMySQLResultBufferSize(&fields[i]);
+
+        if(!iENT_DbCheckedSizeAdd(bufferBytes, bufferSize, &bufferBytes) ||
+           bufferBytes > ENT_DB_MAX_RESULT_BYTES)
+        {
+            IENT_LOG_ERROR("mysql result buffers exceed the payload limit.\n");
+            iENT_DbMySQLFreeResultBindCtx(resultCtx, fieldCount);
+            return ENT_DBS_ALLOC_FAILED;
+        }
 
         resultCtx->bufferSizes[i] = bufferSize;
         resultCtx->buffers[i] = (char*)calloc(bufferSize, sizeof(char));
@@ -397,6 +406,7 @@ static MSG_ID_T iENT_DbMySQLCollectRows(MYSQL_STMT* stmt,
     unsigned long long rowCount;
     unsigned long long rowIdx = 0;
     size_t cellCount = 0;
+    size_t payloadBytes = 0;
     int fetchRc;
     size_t i;
 
@@ -474,6 +484,16 @@ static MSG_ID_T iENT_DbMySQLCollectRows(MYSQL_STMT* stmt,
                 }
                 else
                 {
+                    size_t cellBytes = 0;
+                    size_t newPayloadBytes = 0;
+                    if(!iENT_DbCheckedSizeAdd((size_t)resultCtx.lengths[i], 1, &cellBytes) ||
+                       !iENT_DbCheckedSizeAdd(payloadBytes, cellBytes, &newPayloadBytes) ||
+                       newPayloadBytes > ENT_DB_MAX_RESULT_BYTES)
+                    {
+                        IENT_LOG_ERROR("mysql result exceeds the payload limit.\n");
+                        sts = ENT_DBS_ALLOC_FAILED;
+                        goto END_OF_ROUTINE;
+                    }
                     rows[cellIdx] = ENT_StrDup(resultCtx.buffers[i]);
                     if(rows[cellIdx] == NULL)
                     {
@@ -481,6 +501,7 @@ static MSG_ID_T iENT_DbMySQLCollectRows(MYSQL_STMT* stmt,
                         sts = ENT_DBS_ALLOC_FAILED;
                         goto END_OF_ROUTINE;
                     }
+                    payloadBytes = newPayloadBytes;
                 }
             }
             rowIdx++;
@@ -734,6 +755,12 @@ MSG_ID_T ENT_DbMySQLRead(MYSQL* dbHandle,const char* query,SqlResultCB userCb,vo
         mysql_free_result(result);
         return ENT_DBS_ALLOC_FAILED;
     }
+    if(cell_count > ENT_DB_MAX_RESULT_CELLS)
+    {
+        free(fields);
+        mysql_free_result(result);
+        return ENT_DBS_ALLOC_FAILED;
+    }
     char** rows = (char**)calloc(cell_count, sizeof(char*));
     if (rows == NULL)
     {
@@ -746,6 +773,7 @@ MSG_ID_T ENT_DbMySQLRead(MYSQL* dbHandle,const char* query,SqlResultCB userCb,vo
     MYSQL_ROW    row;
     MYSQL_FIELD* field;
     long long    rowIdx = 0;
+    size_t       payloadBytes = 0;
 
     {
         int colIdx = 0;
@@ -761,7 +789,23 @@ MSG_ID_T ENT_DbMySQLRead(MYSQL* dbHandle,const char* query,SqlResultCB userCb,vo
         int i;
         for(i = 0; i < num_fields; i++)
         {
+            size_t cellBytes = 0;
+            size_t newPayloadBytes = 0;
+            if(row[i] != NULL &&
+               (!iENT_DbCheckedSizeAdd(strlen(row[i]), 1, &cellBytes) ||
+                !iENT_DbCheckedSizeAdd(payloadBytes, cellBytes, &newPayloadBytes) ||
+                newPayloadBytes > ENT_DB_MAX_RESULT_BYTES))
+            {
+                free(fields);
+                free(rows);
+                mysql_free_result(result);
+                return ENT_DBS_ALLOC_FAILED;
+            }
             rows[(size_t)rowIdx * (size_t)num_fields + (size_t)i] = row[i];
+            if(row[i] != NULL)
+            {
+                payloadBytes = newPayloadBytes;
+            }
         }
         rowIdx++;
     }

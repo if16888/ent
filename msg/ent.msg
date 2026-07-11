@@ -83,6 +83,7 @@ WAIT_TIMEOUT     ok  1  wait thread timeout
 NOT_FOUND        err 6  thread id not found
 ATTR_FAILED      err 7  configure thread attribute failed
 LOCK_FAILED      err 8  thread lock operation failed
+IN_USE           err 9  thread handle or worker is still in use
 
 # ----------------------------------------------------------------------------
 # UTHD: utility lock / cv service

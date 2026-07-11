@@ -651,7 +651,6 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
         sts=ENT_DbCloseHandle(pdbHandle);
         if(sts < 0)
         {
-            *pdbHandle = NULL;
             return sts;
         }
     }

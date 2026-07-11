@@ -188,6 +188,27 @@ static int test_socket_bind_and_connect_reject_null_addr(void)
         return 1;
     }
 
+    {
+        int optionValue = 0;
+        int optionLength = (int)sizeof(optionValue);
+        int zeroLength = 0;
+
+        if(expect_true(UTL_SetSockOpt(sock, SOL_SOCKET, SO_KEEPALIVE, NULL, optionLength) == ENT_SOCK_BAD_ARGUMENT,
+                       "UTL_SetSockOpt should reject a NULL option value") != 0 ||
+           expect_true(UTL_SetSockOpt(sock, SOL_SOCKET, SO_KEEPALIVE, (char*)&optionValue, 0) == ENT_SOCK_BAD_ARGUMENT,
+                       "UTL_SetSockOpt should reject a non-positive option length") != 0 ||
+           expect_true(UTL_GetSockOpt(sock, SOL_SOCKET, SO_KEEPALIVE, NULL, &optionLength) == ENT_SOCK_BAD_ARGUMENT,
+                       "UTL_GetSockOpt should reject a NULL option value") != 0 ||
+           expect_true(UTL_GetSockOpt(sock, SOL_SOCKET, SO_KEEPALIVE, (char*)&optionValue, NULL) == ENT_SOCK_BAD_ARGUMENT,
+                       "UTL_GetSockOpt should reject a NULL option length") != 0 ||
+           expect_true(UTL_GetSockOpt(sock, SOL_SOCKET, SO_KEEPALIVE, (char*)&optionValue, &zeroLength) == ENT_SOCK_BAD_ARGUMENT,
+                       "UTL_GetSockOpt should reject a non-positive option length") != 0)
+        {
+            UTL_CloseSocket(sock);
+            return 1;
+        }
+    }
+
     if(expect_true(UTL_Recv(sock, NULL, 0, 0, NULL) == ENT_SOCK_BAD_ARGUMENT,
                    "UTL_Recv should reject invalid buffer arguments") != 0 ||
        expect_true(UTL_Send(sock, NULL, 0, 0, NULL) == ENT_SOCK_BAD_ARGUMENT,

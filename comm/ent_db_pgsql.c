@@ -580,6 +580,7 @@ static MSG_ID_T iENT_DbPgSQLCollectRows(PGconn* pgConn, PGresult* res, SqlResult
     int cols;
     size_t fieldsCount;
     size_t rowCount;
+    size_t payloadBytes = 0;
     char** fields;
     char** rowRes;
 
@@ -628,7 +629,23 @@ static MSG_ID_T iENT_DbPgSQLCollectRows(PGconn* pgConn, PGresult* res, SqlResult
             int c;
             for(c = 0; c < cols; c++)
             {
+                size_t cellBytes = 0;
+                size_t newPayloadBytes = 0;
+                if(!PQgetisnull(res, r, c) &&
+                   (!iENT_DbCheckedSizeAdd((size_t)PQgetlength(res, r, c), 1, &cellBytes) ||
+                    !iENT_DbCheckedSizeAdd(payloadBytes, cellBytes, &newPayloadBytes) ||
+                    newPayloadBytes > ENT_DB_MAX_RESULT_BYTES))
+                {
+                    free(fields);
+                    free(rowRes);
+                    IENT_LOG_ERROR("PgSQL result exceeds the payload limit.\n");
+                    return ENT_DBS_ALLOC_FAILED;
+                }
                 rowRes[(size_t)r * (size_t)cols + (size_t)c] = (char*)PQgetvalue(res, r, c);
+                if(!PQgetisnull(res, r, c))
+                {
+                    payloadBytes = newPayloadBytes;
+                }
             }
         }
     }

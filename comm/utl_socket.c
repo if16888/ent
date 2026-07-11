@@ -520,10 +520,16 @@ ENT_PUBLIC MSG_ID_T  UTL_SetSockOpt(
     MSG_ID_T  sts = 0;	       /* Completion status			       */
     int       stat;
 
-    if (!sUtlInitFlag) 
+    if (!sUtlInitFlag)
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
+    }
+
+    if(pOptionValue == NULL || OptionLength <= 0)
+    {
+        IENT_LOG_ERROR("invalid socket option argument.\n");
+        return ENT_SOCK_BAD_ARGUMENT;
     }
 
     while ( ((stat =  setsockopt (
@@ -610,10 +616,16 @@ ENT_PUBLIC MSG_ID_T  UTL_GetSockOpt(
     MSG_ID_T  sts = 0;	       
     int       stat;
 
-    if (!sUtlInitFlag) 
+    if (!sUtlInitFlag)
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
+    }
+
+    if(pOptionValue == NULL || pOptionLength == NULL || *pOptionLength <= 0)
+    {
+        IENT_LOG_ERROR("invalid socket option argument.\n");
+        return ENT_SOCK_BAD_ARGUMENT;
     }
 
     if ( ( (stat = getsockopt (
@@ -1107,10 +1119,16 @@ ENT_PUBLIC MSG_ID_T  UTL_SetSockOpt(
     MSG_ID_T  sts = 0;	       /* Completion status			       */
     int       stat;
 
-    if (!sUtlInitFlag) 
+    if (!sUtlInitFlag)
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
+    }
+
+    if(pOptionValue == NULL || OptionLength <= 0)
+    {
+        IENT_LOG_ERROR("invalid socket option argument.\n");
+        return ENT_SOCK_BAD_ARGUMENT;
     }
 
     while ( ((stat =  setsockopt (
@@ -1197,10 +1215,16 @@ ENT_PUBLIC MSG_ID_T  UTL_GetSockOpt(
     MSG_ID_T  sts = 0;	       
     int       stat;
 
-    if (!sUtlInitFlag) 
+    if (!sUtlInitFlag)
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
+    }
+
+    if(pOptionValue == NULL || pOptionLength == NULL || *pOptionLength <= 0)
+    {
+        IENT_LOG_ERROR("invalid socket option argument.\n");
+        return ENT_SOCK_BAD_ARGUMENT;
     }
 
     if ( ( (stat = getsockopt(
