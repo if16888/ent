@@ -125,7 +125,7 @@ static void iENT_DbSqliteDefaultCb(char** fields,char** rowRes,long long rowNum,
 
     for(colIdx = 0; colIdx < columnNum; colIdx++)
     {
-        printf("%s ", fields[colIdx]);
+        printf("%s ", fields[colIdx] ? fields[colIdx] : "(null)");
     }
     printf("\n");
 
@@ -133,7 +133,8 @@ static void iENT_DbSqliteDefaultCb(char** fields,char** rowRes,long long rowNum,
     {
         for(colIdx = 0; colIdx < columnNum; colIdx++)
         {
-            printf("%s ", rowRes[rowIdx * columnNum + colIdx]);
+            printf("%s ", rowRes[rowIdx * columnNum + colIdx] ?
+                   rowRes[rowIdx * columnNum + colIdx] : "(null)");
         }
         printf("\n");
     }
@@ -238,8 +239,10 @@ static MSG_ID_T iENT_DbSqliteCollectRows(sqlite3* dbHandle,
             }
             newCapacity = (result.rowCapacity == 0) ? 8 : result.rowCapacity * 2;
             if(!iENT_DbCheckedSizeMultiply(newCapacity, (size_t)result.columnCount, &cellCount) ||
+               cellCount > ENT_DB_MAX_RESULT_CELLS ||
                !iENT_DbCheckedSizeMultiply(cellCount, sizeof(char*), &allocationSize))
             {
+                IENT_LOG_ERROR("sqlite result exceeds the materialization limit.\n");
                 sts = ENT_DBS_ALLOC_FAILED;
                 goto END_OF_ROUTINE;
             }

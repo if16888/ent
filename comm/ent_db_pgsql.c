@@ -42,7 +42,7 @@ static void defSqlResultCb(char** fields,char** rowRes,long long rowNum,int colu
 
     for(colIdx = 0; colIdx<columnNum; colIdx++)
     {
-        printf("%s ",fields[colIdx]);
+        printf("%s ",fields[colIdx] ? fields[colIdx] : "(null)");
     }
     printf("\n");
 
@@ -50,7 +50,8 @@ static void defSqlResultCb(char** fields,char** rowRes,long long rowNum,int colu
     {
         for(colIdx = 0; colIdx<columnNum; colIdx++)
         {
-            printf("%s ",rowRes[rowIdx*columnNum+colIdx]);
+            printf("%s ",rowRes[rowIdx*columnNum+colIdx] ?
+                   rowRes[rowIdx*columnNum+colIdx] : "(null)");
         }
         printf("\n");
     }
@@ -591,6 +592,11 @@ static MSG_ID_T iENT_DbPgSQLCollectRows(PGconn* pgConn, PGresult* res, SqlResult
         {
             return ENT_DBS_ALLOC_FAILED;
         }
+        if(rowCount > ENT_DB_MAX_RESULT_CELLS)
+        {
+            IENT_LOG_ERROR("PgSQL result exceeds the materialization limit.\n");
+            return ENT_DBS_ALLOC_FAILED;
+        }
     }
     else
     {
@@ -783,7 +789,10 @@ MSG_ID_T ENT_DbPgSQLInit(DB_HANDLE dbHandle)
 #if ENT_ENABLE_PGSQL && ENT_PGSQL_FOUND
     DB_CFG* dbCfg = (DB_CFG*)dbHandle;
     PGconn* pgConn;
-    char conninfo[1024];
+    char port[16];
+    const char* keywords[] = {"host", "port", "dbname", "user", "password", NULL};
+    const char* values[6];
+    int written;
 
     if(dbHandle == NULL)
     {
@@ -799,14 +808,21 @@ MSG_ID_T ENT_DbPgSQLInit(DB_HANDLE dbHandle)
         return ENT_DBS_BAD_HANDLE;
     }
 
-    snprintf(conninfo, sizeof(conninfo), "host=%s port=%d dbname=%s user=%s password=%s",
-             dbCfg->host ? dbCfg->host : "",
-             dbCfg->portNo ? dbCfg->portNo : 5432,
-             dbCfg->database ? dbCfg->database : "",
-             dbCfg->userName ? dbCfg->userName : "",
-             dbCfg->passwd ? dbCfg->passwd : "");
+    written = snprintf(port, sizeof(port), "%d", dbCfg->portNo ? dbCfg->portNo : 5432);
+    if(written < 0 || (size_t)written >= sizeof(port))
+    {
+        IENT_LOG_ERROR("PgSQL port formatting failed.\n");
+        return ENT_DBS_BAD_PARAMS;
+    }
 
-    pgConn = PQconnectdb(conninfo);
+    values[0] = dbCfg->host ? dbCfg->host : "";
+    values[1] = port;
+    values[2] = dbCfg->database ? dbCfg->database : "";
+    values[3] = dbCfg->userName ? dbCfg->userName : "";
+    values[4] = dbCfg->passwd ? dbCfg->passwd : "";
+    values[5] = NULL;
+
+    pgConn = PQconnectdbParams(keywords, values, 0);
     if(pgConn == NULL)
     {
         IENT_LOG_ERROR("PgSQL Connection failed: connection handle is null.\n");

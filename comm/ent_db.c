@@ -63,7 +63,7 @@ static void defSqlResultCb(char** fields,char** rowRes,long long rowNum,int colu
 
     for(colIdx = 0; colIdx<columnNum; colIdx++)
     {
-        printf("%s ",fields[colIdx]);
+        printf("%s ",fields[colIdx] ? fields[colIdx] : "(null)");
     }
     printf("\n");
 
@@ -71,7 +71,8 @@ static void defSqlResultCb(char** fields,char** rowRes,long long rowNum,int colu
     {
         for(colIdx = 0; colIdx<columnNum; colIdx++)
         {
-            printf("%s ",rowRes[rowIdx*columnNum+colIdx]);
+            printf("%s ",rowRes[rowIdx*columnNum+colIdx] ?
+                   rowRes[rowIdx*columnNum+colIdx] : "(null)");
         }
         printf("\n");
     }

@@ -109,6 +109,61 @@ static MSG_ID_T iENT_ScriptCopyPath(char* out,
 }
 
 #if ENT_ENABLE_LUA
+static bool iENT_ScriptNameIsSafe(const char* name)
+{
+    const char* componentStart;
+    const char* cursor;
+
+    if(name == NULL || name[0] == '\0')
+    {
+        return false;
+    }
+
+    if(name[0] == '/' || name[0] == '\\')
+    {
+        return false;
+    }
+
+#ifdef WIN32
+    if((name[0] >= 'A' && name[0] <= 'Z') ||
+       (name[0] >= 'a' && name[0] <= 'z'))
+    {
+        if(name[1] == ':')
+        {
+            return false;
+        }
+    }
+#endif
+
+    componentStart = name;
+    for(cursor = name;; cursor++)
+    {
+        if(*cursor == '/' || *cursor == '\\' || *cursor == '\0')
+        {
+            size_t componentLength = (size_t)(cursor - componentStart);
+
+            if(componentLength == 2 &&
+               componentStart[0] == '.' && componentStart[1] == '.')
+            {
+                return false;
+            }
+
+            if(componentLength == 1 && componentStart[0] == '.')
+            {
+                return false;
+            }
+
+            if(*cursor == '\0')
+            {
+                break;
+            }
+            componentStart = cursor + 1;
+        }
+    }
+
+    return true;
+}
+
 static MSG_ID_T iENT_ScriptJoinPath(char* out,
                                     size_t outSize,
                                     const char* base,
@@ -118,6 +173,11 @@ static MSG_ID_T iENT_ScriptJoinPath(char* out,
     char sep = ENT_FILE_SEP_C;
 
     if(base == NULL || name == NULL)
+    {
+        return ENT_SCR_BAD_ARGUMENT;
+    }
+
+    if(!iENT_ScriptNameIsSafe(name))
     {
         return ENT_SCR_BAD_ARGUMENT;
     }
