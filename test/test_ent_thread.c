@@ -42,6 +42,13 @@ typedef struct TEST_SELF_CLOSE_CTX
     volatile MSG_ID_T closeRc;
 } TEST_SELF_CLOSE_CTX;
 
+typedef struct TEST_SELF_WAIT_CTX
+{
+    ENT_THREAD handle;
+    ENT_THREAD_ID tid;
+    volatile MSG_ID_T waitRc;
+} TEST_SELF_WAIT_CTX;
+
 #ifdef WIN32
 static DWORD WINAPI self_close_thread(void* data)
 #else
@@ -58,6 +65,29 @@ static void* self_close_thread(void* data)
     nanosleep(&ts, NULL);
 #endif
     ctx->closeRc = ENT_ThreadClose(ctx->handle);
+#ifdef WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
+#ifdef WIN32
+static DWORD WINAPI self_wait_thread(void* data)
+#else
+static void* self_wait_thread(void* data)
+#endif
+{
+    TEST_SELF_WAIT_CTX* ctx = (TEST_SELF_WAIT_CTX*)data;
+#ifdef WIN32
+    Sleep(50);
+#else
+    struct timespec ts;
+    ts.tv_sec = 0;
+    ts.tv_nsec = 50 * 1000000L;
+    nanosleep(&ts, NULL);
+#endif
+    ctx->waitRc = ENT_ThreadWaitById(&ctx->tid, ctx->handle, 0);
 #ifdef WIN32
     return 0;
 #else
@@ -445,6 +475,44 @@ static int test_thread_close_rejects_self_close(void)
                        "ENT_ThreadClose should succeed after the self-close worker exits");
 }
 
+static int test_thread_wait_rejects_self_wait(void)
+{
+    ENT_THREAD handle = NULL;
+    TEST_SELF_WAIT_CTX ctx;
+#ifndef WIN32
+    struct timespec ts;
+#endif
+
+    memset(&ctx, 0, sizeof(ctx));
+    if(expect_true(ENT_ThreadInit(&handle) == ENT_SYS_NORMAL,
+                   "ENT_ThreadInit should create a context for self-wait checks") != 0)
+    {
+        return 1;
+    }
+    ctx.handle = handle;
+    if(expect_true(ENT_ThreadCreate(&ctx.tid, handle, self_wait_thread, &ctx) == ENT_SYS_NORMAL,
+                   "ENT_ThreadCreate should create a worker for self-wait checks") != 0)
+    {
+        ENT_ThreadClose(handle);
+        return 1;
+    }
+#ifdef WIN32
+    Sleep(150);
+#else
+    ts.tv_sec = 0;
+    ts.tv_nsec = 150 * 1000000L;
+    nanosleep(&ts, NULL);
+#endif
+    if(expect_true(ctx.waitRc == ENT_THRD_IN_USE,
+                   "ENT_ThreadWaitById should reject a worker waiting on itself") != 0)
+    {
+        ENT_ThreadClose(handle);
+        return 1;
+    }
+    return expect_true(ENT_ThreadClose(handle) == ENT_SYS_NORMAL,
+                       "ENT_ThreadClose should join the worker after self-wait rejection");
+}
+
 int main(void)
 {
     int failures = 0;
@@ -457,6 +525,7 @@ int main(void)
     failures += test_thread_close_releases_thread_context();
     failures += test_thread_close_does_not_call_pthread_cancel();
     failures += test_thread_close_rejects_self_close();
+    failures += test_thread_wait_rejects_self_wait();
 
     if(failures != 0)
     {

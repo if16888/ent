@@ -48,6 +48,38 @@ static int sLogCtxNum = 0;
 volatile bool sLogMutexInit = false;
 
 static ENT_LOG_CTX_INTERNAL sDefLog;
+static struct ENT_LOG_CTX_TAG* sLogCtxHead = NULL;
+
+static struct ENT_LOG_CTX_TAG* iENT_LogCtxFindLocked(const struct ENT_LOG_CTX_TAG* target)
+{
+    struct ENT_LOG_CTX_TAG* current = sLogCtxHead;
+
+    while(current != NULL)
+    {
+        if(current == target)
+        {
+            return current;
+        }
+        current = current->registryNext;
+    }
+    return NULL;
+}
+
+static void iENT_LogCtxUnlinkLocked(struct ENT_LOG_CTX_TAG* target)
+{
+    struct ENT_LOG_CTX_TAG** current = &sLogCtxHead;
+
+    while(*current != NULL)
+    {
+        if(*current == target)
+        {
+            *current = target->registryNext;
+            target->registryNext = NULL;
+            return;
+        }
+        current = &(*current)->registryNext;
+    }
+}
 
 ENT_LOG_CTX_INTERNAL* iENT_LogDefaultCtx(void)
 {
@@ -101,6 +133,7 @@ static MSG_ID_T iENT_LogCtxBeginCall(struct ENT_LOG_CTX_TAG* ctx,
 #else
     pthread_mutex_lock(&sLogMutex);
 #endif
+    ctx = iENT_LogCtxFindLocked(ctx);
     if(ctx == NULL || ctx->tag != ENTLOG_CTX_TAG || ctx->isInit == false ||
        ctx->state != ENT_LOG_HANDLE_ACTIVE_E)
     {
@@ -595,11 +628,14 @@ MSG_ID_T ENT_LogCtxInit(ENT_LOG_CTX* pCtx)
 #endif
     ctx->state = ENT_LOG_HANDLE_ACTIVE_E;
     ctx->activeCalls = 0;
+    ctx->registryNext = NULL;
 #ifdef WIN32
     EnterCriticalSection(&sLogMutex);
 #else
     pthread_mutex_lock(&sLogMutex);
 #endif
+    ctx->registryNext = sLogCtxHead;
+    sLogCtxHead = ctx;
     sLogCtxNum++;
 #ifdef WIN32
     LeaveCriticalSection(&sLogMutex);
@@ -626,6 +662,16 @@ MSG_ID_T ENT_LogCtxClose(ENT_LOG_CTX ctx)
 #else
     pthread_mutex_lock(&sLogMutex);
 #endif
+    logCtx = iENT_LogCtxFindLocked(logCtx);
+    if(logCtx == NULL)
+    {
+#ifdef WIN32
+        LeaveCriticalSection(&sLogMutex);
+#else
+        pthread_mutex_unlock(&sLogMutex);
+#endif
+        return ENT_LOG_BAD_HANDLE;
+    }
     if(logCtx == NULL || logCtx->tag != ENTLOG_CTX_TAG || logCtx->isInit == false)
     {
 #ifdef WIN32
@@ -702,6 +748,7 @@ MSG_ID_T ENT_LogCtxClose(ENT_LOG_CTX ctx)
     logCtx->isInit = false;
     logCtx->state = ENT_LOG_HANDLE_CLOSED_E;
     logCtx->tag = 0;
+    iENT_LogCtxUnlinkLocked(logCtx);
     if(sLogCtxNum > 0)
     {
         sLogCtxNum--;

@@ -1480,6 +1480,109 @@ cleanup:
     return rc;
 }
 
+typedef struct TEST_CTX_CLOSE_RACE_ARG_TAG
+{
+    ENT_LOG_CTX ctx;
+    TEST_EVENT* start;
+    MSG_ID_T closeRc;
+} TEST_CTX_CLOSE_RACE_ARG;
+
+#ifdef WIN32
+static DWORD WINAPI close_ctx_race_thread_proc(LPVOID data)
+#else
+static void* close_ctx_race_thread_proc(void* data)
+#endif
+{
+    TEST_CTX_CLOSE_RACE_ARG* arg = (TEST_CTX_CLOSE_RACE_ARG*)data;
+    test_event_wait(arg->start, -1);
+    arg->closeRc = ENT_LogCtxClose(arg->ctx);
+#ifdef WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
+static int test_log_ctx_close_race_after_reclamation(void)
+{
+    int iteration;
+
+    if(expect_true(ENT_LogInit() == ENT_SYS_NORMAL,
+                   "ENT_LogInit should initialize before context reclamation race testing") != 0)
+    {
+        return 1;
+    }
+
+    for(iteration = 0; iteration < 32; iteration++)
+    {
+        ENT_LOG_CTX ctx = NULL;
+        TEST_EVENT start;
+        TEST_CTX_CLOSE_RACE_ARG args[2];
+#ifdef WIN32
+        HANDLE threads[2] = {NULL, NULL};
+#else
+        pthread_t threads[2];
+#endif
+        int i;
+        int normalCount = 0;
+        int retryCount = 0;
+
+        if(expect_true(ENT_LogCtxInit(&ctx) == ENT_SYS_NORMAL,
+                       "ENT_LogCtxInit should create a context for reclamation race testing") != 0 ||
+           expect_true(test_event_init(&start) == 0,
+                       "test_event_init should initialize the reclamation race barrier") != 0)
+        {
+            ENT_LogClose();
+            return 1;
+        }
+        memset(args, 0, sizeof(args));
+        for(i = 0; i < 2; i++)
+        {
+            args[i].ctx = ctx;
+            args[i].start = &start;
+#ifdef WIN32
+            threads[i] = CreateThread(NULL, 0, close_ctx_race_thread_proc, &args[i], 0, NULL);
+            if(threads[i] == NULL)
+#else
+            if(pthread_create(&threads[i], NULL, close_ctx_race_thread_proc, &args[i]) != 0)
+#endif
+            {
+                test_event_signal(&start);
+#ifdef WIN32
+                for(; i >= 0; i--) if(threads[i] != NULL) { WaitForSingleObject(threads[i], INFINITE); CloseHandle(threads[i]); }
+#else
+                for(; i > 0; i--) pthread_join(threads[i - 1], NULL);
+#endif
+                test_event_destroy(&start);
+                ENT_LogClose();
+                return 1;
+            }
+        }
+        test_event_signal(&start);
+#ifdef WIN32
+        for(i = 0; i < 2; i++) { WaitForSingleObject(threads[i], INFINITE); CloseHandle(threads[i]); }
+#else
+        for(i = 0; i < 2; i++) pthread_join(threads[i], NULL);
+#endif
+        test_event_destroy(&start);
+
+        for(i = 0; i < 2; i++)
+        {
+            if(args[i].closeRc == ENT_SYS_NORMAL) normalCount++;
+            if(args[i].closeRc == ENT_LOG_BAD_HANDLE || args[i].closeRc == ENT_LOG_IN_USE) retryCount++;
+        }
+        if(expect_true(normalCount == 1 && retryCount == 1,
+                       "concurrent context close should reclaim once and reject the other caller") != 0)
+        {
+            ENT_LogClose();
+            return 1;
+        }
+    }
+
+    return expect_true(ENT_LogClose() == ENT_SYS_NORMAL,
+                       "ENT_LogClose should succeed after context reclamation race testing");
+}
+
 static int test_log_close_rejects_invalid_handle(void)
 {
     TEST_BAD_LOG_CTX badLog;
@@ -2333,6 +2436,7 @@ int main(void)
     failures += test_log_service_close_rejects_live_handle();
     failures += test_log_close_handle_blocks_until_active_writer_released();
     failures += test_log_ctx_close_rejects_concurrent_second_close();
+    failures += test_log_ctx_close_race_after_reclamation();
     failures += test_log_close_rejects_invalid_handle();
     failures += test_log_set_option_validates_arguments();
     failures += test_log_path_option_trims_trailing_separator_and_writes_file();

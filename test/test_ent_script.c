@@ -4,6 +4,7 @@
 
 #ifndef WIN32
 #include <pthread.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -108,10 +109,18 @@ int main(void)
 {
     ENT_SCRIPT_RET_T out;
     MSG_ID_T sts = ENT_SYS_NORMAL;
+#ifdef WIN32
+    const char* scriptRoot = ".";
+#else
     const char* scriptRoot = "/tmp";
+#endif
 #if ENT_ENABLE_LUA
     const char* scriptFile = "ent_script_case.lua";
+#ifdef WIN32
+    const char* scriptPath = "ent_script_case.lua";
+#else
     const char* scriptPath = "/tmp/ent_script_case.lua";
+#endif
     FILE* fp = NULL;
     ENT_SCRIPT_KV_T kvs[4];
     ENT_SCRIPT_ARG_T in;
@@ -188,6 +197,52 @@ int main(void)
         unlink(symlinkPath);
         if(expect_true(sts == ENT_SCR_BAD_ARGUMENT,
                        "ENT_ScriptReload should reject symlink targets outside the configured root") != 0)
+        {
+            return EXIT_FAILURE;
+        }
+    }
+#endif
+
+#ifndef WIN32
+    {
+        const char* nestedRoot = "/tmp/ent_script_root";
+        const char* backslashTarget = "/tmp/ent_script_root\\outside.lua";
+        const char* backslashLink = "/tmp/ent_script_root/link.lua";
+        FILE* outsideFp;
+
+        ENT_ScriptClose();
+        mkdir(nestedRoot, 0700);
+        outsideFp = fopen(backslashTarget, "wb");
+        if(outsideFp == NULL)
+        {
+            return EXIT_FAILURE;
+        }
+        fprintf(outsideFp, "function calc_discount(args) return {code = 0} end\n");
+        fclose(outsideFp);
+        unlink(backslashLink);
+        if(expect_true(symlink(backslashTarget, backslashLink) == 0,
+                       "test should create a POSIX backslash-prefix symlink") != 0)
+        {
+            unlink(backslashTarget);
+            rmdir(nestedRoot);
+            return EXIT_FAILURE;
+        }
+        if(expect_true(ENT_ScriptInit(nestedRoot) == ENT_SYS_NORMAL,
+                       "ENT_ScriptInit should accept the nested script root") != 0 ||
+           expect_true(ENT_ScriptReload("link.lua") == ENT_SCR_BAD_ARGUMENT,
+                       "ENT_ScriptReload should reject a POSIX backslash-prefix escape") != 0)
+        {
+            unlink(backslashLink);
+            unlink(backslashTarget);
+            rmdir(nestedRoot);
+            return EXIT_FAILURE;
+        }
+        ENT_ScriptClose();
+        unlink(backslashLink);
+        unlink(backslashTarget);
+        rmdir(nestedRoot);
+        if(expect_true(ENT_ScriptInit(scriptRoot) == ENT_SYS_NORMAL,
+                       "ENT_ScriptInit should restore the original script root") != 0)
         {
             return EXIT_FAILURE;
         }

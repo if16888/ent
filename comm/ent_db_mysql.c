@@ -772,6 +772,7 @@ MSG_ID_T ENT_DbMySQLRead(MYSQL* dbHandle,const char* query,SqlResultCB userCb,vo
 
     MYSQL_ROW    row;
     MYSQL_FIELD* field;
+    unsigned long* lengths;
     long long    rowIdx = 0;
     size_t       payloadBytes = 0;
 
@@ -787,12 +788,20 @@ MSG_ID_T ENT_DbMySQLRead(MYSQL* dbHandle,const char* query,SqlResultCB userCb,vo
     while ((row = mysql_fetch_row(result)))
     {
         int i;
+        lengths = mysql_fetch_lengths(result);
+        if(lengths == NULL && num_fields > 0)
+        {
+            free(fields);
+            free(rows);
+            mysql_free_result(result);
+            return ENT_DBS_RESULT_FAILED;
+        }
         for(i = 0; i < num_fields; i++)
         {
             size_t cellBytes = 0;
             size_t newPayloadBytes = 0;
             if(row[i] != NULL &&
-               (!iENT_DbCheckedSizeAdd(strlen(row[i]), 1, &cellBytes) ||
+               (!iENT_DbCheckedSizeAdd((size_t)lengths[i], 1, &cellBytes) ||
                 !iENT_DbCheckedSizeAdd(payloadBytes, cellBytes, &newPayloadBytes) ||
                 newPayloadBytes > ENT_DB_MAX_RESULT_BYTES))
             {

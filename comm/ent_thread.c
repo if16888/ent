@@ -45,6 +45,7 @@ typedef struct THREAD_DB
     pthread_mutex_t doneMutex;
     pthread_cond_t  doneCv;
     bool            finished;
+    bool            registered;
 #endif
     unsigned int    tag;
 }THREAD_DB;
@@ -181,6 +182,13 @@ static void* iENT_ThreadProc(void* data)
         return NULL;
     }
 
+    pthread_mutex_lock(&thDb->doneMutex);
+    while(!thDb->registered)
+    {
+        pthread_cond_wait(&thDb->doneCv, &thDb->doneMutex);
+    }
+    pthread_mutex_unlock(&thDb->doneMutex);
+
     thDb->thRet = thDb->thProc(thDb->thData);
     pthread_mutex_lock(&thDb->doneMutex);
     thDb->finished = true;
@@ -292,7 +300,7 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
     }
     memset(tmp,0,sizeof(THREAD_DB));
     
-    tmpHandle = CreateThread(NULL,0,thProc,thData,0,&tmp->thId);
+     tmpHandle = CreateThread(NULL,0,thProc,thData,CREATE_SUSPENDED,&tmp->thId);
      if(tmpHandle == NULL)
      {
         IENT_LOG_ERROR("CreateThread failed,error code %u\n",GetLastError());
@@ -305,18 +313,20 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
      UTL_LockEnter(thCtx->dllLock);
      sts = UTL_DllInsHead(&thCtx->dllHeader,(DLL_D_HDR*)tmp);
      UTL_LockLeave(thCtx->dllLock);
-     if(sts < 0)
-     {
-        WaitForSingleObject(tmp->thHandle, INFINITE);
+      if(sts < 0)
+      {
+         ResumeThread(tmp->thHandle);
+         WaitForSingleObject(tmp->thHandle, INFINITE);
         CloseHandle(tmp->thHandle);
         tmp->thHandle = NULL;
         tmp->thId = 0;
         tmp->tag = 0x0;
         free(tmp);
         iENT_ThreadEndCall(thCtx);
-        return ENT_THRD_CREATE_FAILED;
-     }
-     if(tid!=NULL)
+         return ENT_THRD_CREATE_FAILED;
+      }
+      ResumeThread(tmp->thHandle);
+      if(tid!=NULL)
      {
          *tid = tmp;
      }
@@ -355,6 +365,12 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int 
         IENT_LOG_ERROR("break tid\n");
         iENT_ThreadEndCall(thCtx);
         return ENT_THRD_NOT_FOUND;
+    }
+    if(thDb->thId == GetCurrentThreadId())
+    {
+        UTL_LockLeave(thCtx->dllLock);
+        iENT_ThreadEndCall(thCtx);
+        return ENT_THRD_IN_USE;
     }
     sts = UTL_DllRemCurr(&thDb->dllLnk,&tmpHdr);
     if(sts < 0)
@@ -615,6 +631,10 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
     UTL_LockLeave(thCtx->dllLock);
     if(sts < 0)
     {
+        pthread_mutex_lock(&tmp->doneMutex);
+        tmp->registered = true;
+        pthread_cond_broadcast(&tmp->doneCv);
+        pthread_mutex_unlock(&tmp->doneMutex);
         pthread_join(tmp->thId,NULL);
         pthread_cond_destroy(&tmp->doneCv);
         pthread_mutex_destroy(&tmp->doneMutex);
@@ -624,6 +644,10 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
         iENT_ThreadEndCall(thCtx);
         return ENT_THRD_CREATE_FAILED;
     }
+    pthread_mutex_lock(&tmp->doneMutex);
+    tmp->registered = true;
+    pthread_cond_broadcast(&tmp->doneCv);
+    pthread_mutex_unlock(&tmp->doneMutex);
     if(tid!=NULL)
     {
        *tid = tmp;
@@ -661,6 +685,12 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int 
         IENT_LOG_ERROR("break tid\n");
         iENT_ThreadEndCall(thCtx);
         return ENT_THRD_NOT_FOUND;
+    }
+    if(pthread_equal(thDb->thId, pthread_self()) != 0)
+    {
+        UTL_LockLeave(thCtx->dllLock);
+        iENT_ThreadEndCall(thCtx);
+        return ENT_THRD_IN_USE;
     }
     sts = UTL_DllRemCurr(&thDb->dllLnk,&tmpHdr);
     if(sts < 0)

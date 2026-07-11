@@ -27,7 +27,9 @@
 #endif
 
 #ifndef WIN32
+#include <fcntl.h>
 #include <pthread.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -228,7 +230,11 @@ static bool iENT_ScriptPathHasRootPrefix(const char* root, const char* path)
         return false;
     }
 
+#ifdef WIN32
     return path[rootLength] == '\0' || path[rootLength] == '/' || path[rootLength] == '\\';
+#else
+    return path[rootLength] == '\0' || path[rootLength] == '/';
+#endif
 }
 
 static MSG_ID_T iENT_ScriptResolvePath(char* out,
@@ -337,6 +343,178 @@ static MSG_ID_T iENT_ScriptResolvePath(char* out,
 #endif
 }
 
+static MSG_ID_T iENT_ScriptLoadChunk(lua_State* state,
+                                     const char* root,
+                                     const char* name,
+                                     const char* displayPath,
+                                     int* luaStatus)
+{
+    if(state == NULL || root == NULL || name == NULL || displayPath == NULL || luaStatus == NULL)
+    {
+        return ENT_SCR_BAD_ARGUMENT;
+    }
+
+#ifdef WIN32
+    {
+        char candidate[ENT_SCRIPT_PATH_MAX * 4] = {0};
+        char fullRoot[ENT_SCRIPT_PATH_MAX * 4] = {0};
+        char rootFinal[ENT_SCRIPT_PATH_MAX * 4] = {0};
+        char candidateFinal[ENT_SCRIPT_PATH_MAX * 4] = {0};
+        DWORD fullRootLength;
+        DWORD rootFinalLength;
+        DWORD candidateFinalLength;
+        HANDLE rootHandle = INVALID_HANDLE_VALUE;
+        HANDLE fileHandle = INVALID_HANDLE_VALUE;
+        LARGE_INTEGER fileSize;
+        char* buffer = NULL;
+        DWORD bytesRead = 0;
+
+        if(iENT_ScriptJoinPath(candidate, sizeof(candidate), root, name) != ENT_SYS_NORMAL)
+        {
+            return ENT_SCR_BAD_ARGUMENT;
+        }
+        fullRootLength = GetFullPathNameA(root, (DWORD)sizeof(fullRoot), fullRoot, NULL);
+        if(fullRootLength == 0 || fullRootLength >= sizeof(fullRoot))
+        {
+            return ENT_SCR_LOAD_FAILED;
+        }
+        rootHandle = CreateFileA(fullRoot, 0,
+                                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                 NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+        fileHandle = CreateFileA(candidate, GENERIC_READ,
+                                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                 NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if(rootHandle == INVALID_HANDLE_VALUE || fileHandle == INVALID_HANDLE_VALUE)
+        {
+            if(rootHandle != INVALID_HANDLE_VALUE) CloseHandle(rootHandle);
+            if(fileHandle != INVALID_HANDLE_VALUE) CloseHandle(fileHandle);
+            return ENT_SCR_LOAD_FAILED;
+        }
+        rootFinalLength = GetFinalPathNameByHandleA(rootHandle, rootFinal, (DWORD)sizeof(rootFinal), FILE_NAME_NORMALIZED);
+        candidateFinalLength = GetFinalPathNameByHandleA(fileHandle, candidateFinal, (DWORD)sizeof(candidateFinal), FILE_NAME_NORMALIZED);
+        if(rootFinalLength == 0 || candidateFinalLength == 0 ||
+           rootFinalLength >= sizeof(rootFinal) || candidateFinalLength >= sizeof(candidateFinal) ||
+           !iENT_ScriptPathHasRootPrefix(rootFinal, candidateFinal) ||
+           !GetFileSizeEx(fileHandle, &fileSize) || fileSize.QuadPart < 0 ||
+           (unsigned long long)fileSize.QuadPart > (unsigned long long)((size_t)-1 - 1) ||
+           (unsigned long long)fileSize.QuadPart > 0xFFFFFFFFull)
+        {
+            CloseHandle(rootHandle);
+            CloseHandle(fileHandle);
+            return ENT_SCR_BAD_ARGUMENT;
+        }
+        buffer = (char*)malloc((size_t)fileSize.QuadPart + 1);
+        if(buffer == NULL)
+        {
+            CloseHandle(rootHandle);
+            CloseHandle(fileHandle);
+            return ENT_SCR_LOAD_FAILED;
+        }
+        if((size_t)fileSize.QuadPart > 0 &&
+           (!ReadFile(fileHandle, buffer, (DWORD)fileSize.QuadPart, &bytesRead, NULL) ||
+            bytesRead != (DWORD)fileSize.QuadPart))
+        {
+            free(buffer);
+            CloseHandle(rootHandle);
+            CloseHandle(fileHandle);
+            return ENT_SCR_LOAD_FAILED;
+        }
+        CloseHandle(rootHandle);
+        CloseHandle(fileHandle);
+        buffer[(size_t)fileSize.QuadPart] = '\0';
+        *luaStatus = luaL_loadbuffer(state, buffer, (size_t)fileSize.QuadPart, displayPath);
+        free(buffer);
+        return ENT_SYS_NORMAL;
+    }
+#else
+    {
+        char relative[ENT_SCRIPT_PATH_MAX * 4] = {0};
+        char* component;
+        char* next;
+        int dirFd;
+        int fileFd = -1;
+        struct stat fileStat;
+        char* buffer = NULL;
+        size_t totalRead = 0;
+
+        if(!iENT_ScriptNameIsSafe(name) || strlen(name) >= sizeof(relative))
+        {
+            return ENT_SCR_BAD_ARGUMENT;
+        }
+        snprintf(relative, sizeof(relative), "%s", name);
+        dirFd = open(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        if(dirFd < 0)
+        {
+            return ENT_SCR_LOAD_FAILED;
+        }
+        component = relative;
+        for(;;)
+        {
+            next = strchr(component, '/');
+            if(next != NULL)
+            {
+                int childFd;
+                *next = '\0';
+                if(component[0] == '\0')
+                {
+                    close(dirFd);
+                    return ENT_SCR_BAD_ARGUMENT;
+                }
+                childFd = openat(dirFd, component, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+                close(dirFd);
+                if(childFd < 0)
+                {
+                    return ENT_SCR_BAD_ARGUMENT;
+                }
+                dirFd = childFd;
+                component = next + 1;
+                continue;
+            }
+            break;
+        }
+        if(component[0] == '\0')
+        {
+            close(dirFd);
+            return ENT_SCR_BAD_ARGUMENT;
+        }
+        fileFd = openat(dirFd, component, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+        close(dirFd);
+        if(fileFd < 0 || fstat(fileFd, &fileStat) != 0 || !S_ISREG(fileStat.st_mode) || fileStat.st_size < 0)
+        {
+            if(fileFd >= 0) close(fileFd);
+            return ENT_SCR_BAD_ARGUMENT;
+        }
+        if((unsigned long long)fileStat.st_size > (unsigned long long)((size_t)-1 - 1))
+        {
+            close(fileFd);
+            return ENT_SCR_LOAD_FAILED;
+        }
+        buffer = (char*)malloc((size_t)fileStat.st_size + 1);
+        if(buffer == NULL)
+        {
+            close(fileFd);
+            return ENT_SCR_LOAD_FAILED;
+        }
+        while(totalRead < (size_t)fileStat.st_size)
+        {
+            ssize_t count = read(fileFd, buffer + totalRead, (size_t)fileStat.st_size - totalRead);
+            if(count <= 0)
+            {
+                free(buffer);
+                close(fileFd);
+                return ENT_SCR_LOAD_FAILED;
+            }
+            totalRead += (size_t)count;
+        }
+        close(fileFd);
+        buffer[totalRead] = '\0';
+        *luaStatus = luaL_loadbuffer(state, buffer, totalRead, displayPath);
+        free(buffer);
+        return ENT_SYS_NORMAL;
+    }
+#endif
+}
+
 static void iENT_ScriptDisableDangerousGlobals(lua_State* state)
 {
     lua_pushnil(state);
@@ -432,7 +610,16 @@ ENT_PUBLIC MSG_ID_T ENT_ScriptReload(const char* scriptName)
         goto END_OF_ROUTINE;
     }
 
-    rc = luaL_loadfile(gEntScriptCtx.state, scriptPath);
+    sts = iENT_ScriptLoadChunk(gEntScriptCtx.state,
+                               gEntScriptCtx.scriptRoot,
+                               scriptName,
+                               scriptPath,
+                               &rc);
+    if(sts != ENT_SYS_NORMAL)
+    {
+        ret = sts;
+        goto END_OF_ROUTINE;
+    }
     if(rc != LUA_OK)
     {
         fprintf(stderr, "ENT_ScriptReload compile failed,file[%s],reason[%s]\n",
