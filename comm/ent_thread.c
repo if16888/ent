@@ -599,6 +599,7 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
     tmp->thData = thData;
     tmp->thRet = NULL;
     tmp->finished = false;
+    tmp->registered = true;
     s = pthread_mutex_init(&tmp->doneMutex,NULL);
     if(s != 0)
     {
@@ -646,10 +647,6 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
         iENT_ThreadEndCall(thCtx);
         return ENT_THRD_CREATE_FAILED;
     }
-    pthread_mutex_lock(&tmp->doneMutex);
-    tmp->registered = true;
-    pthread_cond_broadcast(&tmp->doneCv);
-    pthread_mutex_unlock(&tmp->doneMutex);
     if(tid!=NULL)
     {
        *tid = tmp;
