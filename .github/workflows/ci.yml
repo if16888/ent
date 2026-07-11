@@ -45,6 +45,75 @@ jobs:
           path: ${{ env.CI_LOG_DIR }}
           if-no-files-found: ignore
 
+  sanitizer-asan-ubsan:
+    name: Linux ASan + UBSan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      BUILD_DIR: build-asan-ubsan
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libsqlite3-dev default-libmysqlclient-dev libpq-dev
+
+      - name: Configure sanitizer build
+        run: >-
+          cmake -S . -B "$BUILD_DIR" -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address,undefined"
+
+      - name: Build
+        run: cmake --build "$BUILD_DIR" --parallel
+
+      - name: Run lifecycle tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: >-
+          ctest --test-dir "$BUILD_DIR" --output-on-failure
+          -R "^(test_ent_init|test_ent_log|test_ent_db|test_ent_thread|test_security)$"
+
+  sanitizer-tsan:
+    name: Linux TSan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      BUILD_DIR: build-tsan
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libsqlite3-dev default-libmysqlclient-dev libpq-dev
+
+      - name: Configure sanitizer build
+        run: >-
+          cmake -S . -B "$BUILD_DIR" -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_C_FLAGS="-fsanitize=thread -fno-omit-frame-pointer -g"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
+          -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=thread"
+
+      - name: Build
+        run: cmake --build "$BUILD_DIR" --parallel
+
+      - name: Run concurrency tests
+        env:
+          TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+        run: >-
+          ctest --test-dir "$BUILD_DIR" --output-on-failure
+          -R "^(test_ent_init|test_ent_log|test_ent_db|test_ent_thread|test_utl_tpool_integration)$"
+
   build-windows:
     runs-on: windows-2022
     strategy:
