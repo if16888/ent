@@ -75,6 +75,26 @@ endif()
 
 add_test(NAME test_ent_init COMMAND test_ent_init)
 
+add_executable(
+  test_ent_init_concurrency
+  test_ent_init_concurrency.c
+)
+
+target_include_directories(
+  test_ent_init_concurrency
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../comm
+)
+
+target_link_libraries(test_ent_init_concurrency PRIVATE ent_s)
+
+if(APPLE OR UNIX)
+  target_link_libraries(test_ent_init_concurrency PRIVATE pthread)
+endif()
+
+add_test(NAME test_ent_init_concurrency COMMAND test_ent_init_concurrency)
+
 if(TARGET ent_s)
   add_executable(
     test_ent_msg
