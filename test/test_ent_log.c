@@ -607,6 +607,38 @@ static int test_explicit_context_isolated_from_default(void)
     return expect_true(ENT_LogClose() == 0, "ENT_LogClose should shut down the log subsystem");
 }
 
+static int test_log_service_close_rejects_live_empty_context(void)
+{
+    ENT_LOG_CTX ctx = NULL;
+
+    if(expect_true(ENT_LogInit() == ENT_SYS_NORMAL,
+                   "ENT_LogInit should initialize before empty-context close checks") != 0)
+    {
+        return 1;
+    }
+    if(expect_true(ENT_LogCtxInit(&ctx) == ENT_SYS_NORMAL,
+                   "ENT_LogCtxInit should create an empty context") != 0)
+    {
+        ENT_LogClose();
+        return 1;
+    }
+    if(expect_true(ENT_LogClose() == ENT_LOG_IN_USE,
+                   "ENT_LogClose should reject service close while an empty context is live") != 0)
+    {
+        ENT_LogCtxClose(ctx);
+        ENT_LogClose();
+        return 1;
+    }
+    if(expect_true(ENT_LogCtxClose(ctx) == ENT_SYS_NORMAL,
+                   "ENT_LogCtxClose should release the empty context") != 0)
+    {
+        ENT_LogClose();
+        return 1;
+    }
+    return expect_true(ENT_LogClose() == ENT_SYS_NORMAL,
+                       "ENT_LogClose should succeed after the empty context closes");
+}
+
 static int test_log_ctx_close_auto_closes_owned_handle(void)
 {
     ENT_LOG_CTX ctx = NULL;
@@ -2139,6 +2171,7 @@ int main(void)
     failures += test_log_rejects_uninitialized_calls();
     failures += test_log_close_service_boundaries();
     failures += test_explicit_context_isolated_from_default();
+    failures += test_log_service_close_rejects_live_empty_context();
     failures += test_log_ctx_close_auto_closes_owned_handle();
     failures += test_log_ctx_rejects_wrong_handle();
     failures += test_log_ctx_empty_ctx_rejects_foreign_handle_close();

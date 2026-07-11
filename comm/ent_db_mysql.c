@@ -395,6 +395,7 @@ static MSG_ID_T iENT_DbMySQLCollectRows(MYSQL_STMT* stmt,
     unsigned int fieldCount;
     unsigned long long rowCount;
     unsigned long long rowIdx = 0;
+    size_t cellCount = 0;
     int fetchRc;
     size_t i;
 
@@ -421,7 +422,14 @@ static MSG_ID_T iENT_DbMySQLCollectRows(MYSQL_STMT* stmt,
 
     if(fieldCount > 0)
     {
-        rows = (char**)calloc((size_t)((rowCount > 0 ? rowCount : 1) * fieldCount), sizeof(char*));
+        size_t allocationRows = (size_t)(rowCount > 0 ? rowCount : 1);
+        if((unsigned long long)allocationRows != (rowCount > 0 ? rowCount : 1) ||
+           !iENT_DbCheckedSizeMultiply(allocationRows, (size_t)fieldCount, &cellCount))
+        {
+            free(fields);
+            return ENT_DBS_ALLOC_FAILED;
+        }
+        rows = (char**)calloc(cellCount, sizeof(char*));
         if(rows == NULL)
         {
             free(fields);
@@ -484,7 +492,7 @@ static MSG_ID_T iENT_DbMySQLCollectRows(MYSQL_STMT* stmt,
 END_OF_ROUTINE:
     if(rows != NULL)
     {
-        for(i = 0; i < (size_t)rowCount * fieldCount; i++)
+        for(i = 0; i < cellCount; i++)
         {
             free(rows[i]);
         }
@@ -684,27 +692,49 @@ MSG_ID_T ENT_DbMySQLRead(MYSQL* dbHandle,const char* query,SqlResultCB userCb,vo
         return ENT_DBS_RESULT_FAILED;
     }
 
-    int       num_fields = mysql_num_fields(result);
-    long long num_rows   = mysql_num_rows(result);
+    unsigned int num_fields_raw = mysql_num_fields(result);
+    unsigned long long num_rows_raw = mysql_num_rows(result);
+    int       num_fields;
+    long long num_rows;
+    size_t    allocation_rows;
+    size_t    cell_count = 0;
 
-    char** fields = (char**)malloc(num_fields*sizeof(char*));
-    if (fields == NULL)
+    if(num_fields_raw > (unsigned int)INT_MAX || num_rows_raw > (unsigned long long)LLONG_MAX)
     {
-        IENT_LOG_ERROR("malloc size [%d] failed\n",num_fields*(int)sizeof(char*));
+        mysql_free_result(result);
+        return ENT_DBS_RESULT_FAILED;
+    }
+    num_fields = (int)num_fields_raw;
+    num_rows = (long long)num_rows_raw;
+    allocation_rows = (size_t)(num_rows_raw > 0 ? num_rows_raw : 1);
+    if((unsigned long long)allocation_rows != (num_rows_raw > 0 ? num_rows_raw : 1))
+    {
         mysql_free_result(result);
         return ENT_DBS_ALLOC_FAILED;
     }
-    memset(fields,0,num_fields*sizeof(char*));
-    char** rows = (char**)malloc(num_fields*(size_t)num_rows*sizeof(char*));
+
+    char** fields = (char**)calloc((size_t)(num_fields > 0 ? num_fields : 1), sizeof(char*));
+    if (fields == NULL)
+    {
+        mysql_free_result(result);
+        return ENT_DBS_ALLOC_FAILED;
+    }
+    if(!iENT_DbCheckedSizeMultiply(allocation_rows,
+                                   (size_t)(num_fields > 0 ? num_fields : 1),
+                                   &cell_count))
+    {
+        free(fields);
+        mysql_free_result(result);
+        return ENT_DBS_ALLOC_FAILED;
+    }
+    char** rows = (char**)calloc(cell_count, sizeof(char*));
     if (rows == NULL)
     {
         free(fields);
         fields = NULL;
         mysql_free_result(result);
-        IENT_LOG_ERROR("malloc size [%d] failed\n",num_fields*(int)num_rows*(int)sizeof(char*));
         return ENT_DBS_ALLOC_FAILED;
     }
-    memset(rows,0,num_fields*(size_t)num_rows*sizeof(char*));
 
     MYSQL_ROW    row;
     MYSQL_FIELD* field;
@@ -724,7 +754,7 @@ MSG_ID_T ENT_DbMySQLRead(MYSQL* dbHandle,const char* query,SqlResultCB userCb,vo
         int i;
         for(i = 0; i < num_fields; i++)
         {
-            rows[rowIdx*num_fields+i] = row[i];
+            rows[(size_t)rowIdx * (size_t)num_fields + (size_t)i] = row[i];
         }
         rowIdx++;
     }

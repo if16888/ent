@@ -10,6 +10,7 @@
 
 #include "ient_comm.h"
 #include "ient_runtime.h"
+#include "ient_db.h"
 #include "ent_db.h"
 #include "ent_msg.h"
 
@@ -514,6 +515,73 @@ static int test_db_close_rejects_live_handles(void)
     cleanup_temp_db_path(db_path);
     return expect_true(ENT_DbClose() == 0,
                        "ENT_DbClose should succeed after all live handles are closed");
+}
+
+static int test_sqlite_close_busy_preserves_handle_for_retry(void)
+{
+#if !ENT_ENABLE_SQLITE || !ENT_SQLITE_FOUND
+    return 0;
+#else
+    char db_path[512];
+    DB_HANDLE db_handle = NULL;
+    DB_CFG* db_cfg = NULL;
+    sqlite3_stmt* stmt = NULL;
+    MSG_ID_T sts;
+    int rc = 1;
+
+    memset(db_path, 0, sizeof(db_path));
+    if(prepare_temp_db_path(db_path, sizeof(db_path)) != 0)
+    {
+        return 1;
+    }
+    if(reset_db_service() != ENT_SYS_NORMAL ||
+       ENT_DbInitHandle(&db_handle, SQLITE_TYPE, NULL, db_path, NULL, NULL, 0) != ENT_SYS_NORMAL ||
+       ENT_DbOpen(db_handle) != ENT_SYS_NORMAL)
+    {
+        goto END_OF_ROUTINE;
+    }
+
+    db_cfg = (DB_CFG*)db_handle;
+    if(sqlite3_prepare_v2(db_cfg->dbInstance.sqlite, "SELECT 1;", -1, &stmt, NULL) != SQLITE_OK)
+    {
+        goto END_OF_ROUTINE;
+    }
+
+    sts = ENT_DbCloseHandle(&db_handle);
+    if(expect_true(sts == ENT_DBS_IN_USE,
+                   "ENT_DbCloseHandle should report busy when sqlite has an unfinalized statement") != 0 ||
+       expect_true(db_handle != NULL,
+                   "ENT_DbCloseHandle should preserve the handle after a retryable close failure") != 0 ||
+       expect_true(db_cfg->handleState == ENT_DB_HANDLE_ACTIVE_E && db_cfg->isInit,
+                   "ENT_DbCloseHandle should restore active state after a retryable close failure") != 0)
+    {
+        goto END_OF_ROUTINE;
+    }
+
+    sqlite3_finalize(stmt);
+    stmt = NULL;
+    if(expect_true(ENT_DbCloseHandle(&db_handle) == ENT_SYS_NORMAL,
+                   "ENT_DbCloseHandle should succeed after the sqlite statement is finalized") != 0 ||
+       expect_true(db_handle == NULL,
+                   "ENT_DbCloseHandle should clear the handle after retry succeeds") != 0)
+    {
+        goto END_OF_ROUTINE;
+    }
+    rc = 0;
+
+END_OF_ROUTINE:
+    if(stmt != NULL)
+    {
+        sqlite3_finalize(stmt);
+    }
+    if(db_handle != NULL)
+    {
+        ENT_DbCloseHandle(&db_handle);
+    }
+    ENT_DbClose();
+    cleanup_temp_db_path(db_path);
+    return rc;
+#endif
 }
 
 static int test_db_close_handle_waits_for_active_read(void)
@@ -1574,6 +1642,11 @@ int main(void)
     }
 
     if(test_db_close_rejects_live_handles() != 0)
+    {
+        return 1;
+    }
+
+    if(test_sqlite_close_busy_preserves_handle_for_retry() != 0)
     {
         return 1;
     }

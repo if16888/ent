@@ -511,6 +511,7 @@ static MSG_ID_T iENT_SharedMapOpenPosix(const ENT_SharedMapOptions* options, ENT
 static MSG_ID_T iENT_SharedMapFlushPosix(ENT_SharedMap* map, ENT_OFFSET offset, ENT_SIZE length)
 {
     ENT_OFFSET flush_offset = 0ULL;
+    ENT_SIZE flush_length = length;
     size_t native_length = 0;
     void* flush_ptr = NULL;
 
@@ -529,12 +530,26 @@ static MSG_ID_T iENT_SharedMapFlushPosix(ENT_SharedMap* map, ENT_OFFSET offset, 
     }
     else
     {
+        long page_size = 0;
+        ENT_OFFSET page_size_offset = 0ULL;
+        ENT_OFFSET aligned_offset = 0ULL;
+
         if(offset > map->size || length > (map->size - offset))
         {
             return ENT_SHM_RANGE_FAILED;
         }
-        flush_offset = offset;
-        if(iENT_SharedMapValidateNativeSize(length, &native_length) != ENT_SYS_NORMAL)
+
+        page_size = sysconf(_SC_PAGESIZE);
+        if(page_size <= 0)
+        {
+            return ENT_SHM_FLUSH_FAILED;
+        }
+
+        page_size_offset = (ENT_OFFSET)page_size;
+        aligned_offset = offset - (offset % page_size_offset);
+        flush_offset = aligned_offset;
+        flush_length = length + (ENT_SIZE)(offset - aligned_offset);
+        if(iENT_SharedMapValidateNativeSize(flush_length, &native_length) != ENT_SYS_NORMAL)
         {
             return ENT_SHM_BAD_SIZE;
         }

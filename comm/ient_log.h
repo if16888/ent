@@ -88,6 +88,7 @@ typedef struct ENT_LOG_CTX_INTERNAL_TAG
 #endif
     bool             bufferThreadStarted;
     bool             bufferThreadStop;
+    bool             closeAttemptActive;
     int              pendingFlushes;
     int              flushBatch;
     int              flushIntervalMs;
@@ -110,6 +111,13 @@ typedef struct ENT_LOG_CTX_TAG
     unsigned int tag;
     bool         isInit;
     ENT_LOG      logHandle;
+#ifdef WIN32
+    CONDITION_VARIABLE closeCv;
+#else
+    pthread_cond_t closeCv;
+#endif
+    ENT_LOG_HANDLE_STATE_E state;
+    unsigned int activeCalls;
 } ENT_LOG_CTX_TAG;
 
 ENT_LOG_PRIV* iENT_LogDefaultCtx(void);

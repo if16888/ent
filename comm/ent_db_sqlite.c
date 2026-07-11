@@ -89,7 +89,12 @@ MSG_ID_T ENT_DbSqliteClose(DB_HANDLE dbHandle)
 
     if(dbCfg->dbInstance.sqlite)
     {
-        sqlite3_close(dbCfg->dbInstance.sqlite);
+        int rc = sqlite3_close(dbCfg->dbInstance.sqlite);
+        if(rc != SQLITE_OK)
+        {
+            IENT_LOG_ERROR("sqlite close failed:[%d]->[%s]\n", rc, sqlite3_errstr(rc));
+            return ENT_DBS_IN_USE;
+        }
         dbCfg->dbInstance.sqlite = NULL;
     }
     dbCfg->isOpen = false;
@@ -163,8 +168,8 @@ static void iENT_DbSqliteFreeResult(SQLITE_RESULT* result)
 }
 
 static MSG_ID_T iENT_DbSqliteAppendCell(SQLITE_RESULT* result,
-                                        sqlite3_stmt* stmt,
-                                        int rowIdx,
+                                         sqlite3_stmt* stmt,
+                                         size_t rowIdx,
                                         int colIdx)
 {
     const unsigned char* textValue = sqlite3_column_text(stmt, colIdx);
@@ -173,7 +178,7 @@ static MSG_ID_T iENT_DbSqliteAppendCell(SQLITE_RESULT* result,
 
     if(sqlite3_column_type(stmt, colIdx) == SQLITE_NULL)
     {
-        result->rows[(size_t)rowIdx * (size_t)result->columnCount + (size_t)colIdx] = NULL;
+        result->rows[rowIdx * (size_t)result->columnCount + (size_t)colIdx] = NULL;
         return ENT_SYS_NORMAL;
     }
 
@@ -194,7 +199,7 @@ static MSG_ID_T iENT_DbSqliteAppendCell(SQLITE_RESULT* result,
         memcpy(copy, textValue, (size_t)byteCount);
     }
     copy[byteCount] = '\0';
-    result->rows[(size_t)rowIdx * (size_t)result->columnCount + (size_t)colIdx] = copy;
+    result->rows[rowIdx * (size_t)result->columnCount + (size_t)colIdx] = copy;
     return ENT_SYS_NORMAL;
 }
 
@@ -223,8 +228,22 @@ static MSG_ID_T iENT_DbSqliteCollectRows(sqlite3* dbHandle,
 
         if(result.rowCount == result.rowCapacity)
         {
+            size_t cellCount;
+            size_t allocationSize;
+
+            if(result.rowCapacity > ((size_t)-1) / 2)
+            {
+                sts = ENT_DBS_ALLOC_FAILED;
+                goto END_OF_ROUTINE;
+            }
             newCapacity = (result.rowCapacity == 0) ? 8 : result.rowCapacity * 2;
-            newRows = (char**)realloc(result.rows, newCapacity * (size_t)result.columnCount * sizeof(char*));
+            if(!iENT_DbCheckedSizeMultiply(newCapacity, (size_t)result.columnCount, &cellCount) ||
+               !iENT_DbCheckedSizeMultiply(cellCount, sizeof(char*), &allocationSize))
+            {
+                sts = ENT_DBS_ALLOC_FAILED;
+                goto END_OF_ROUTINE;
+            }
+            newRows = (char**)realloc(result.rows, allocationSize);
             if(newRows == NULL)
             {
                 IENT_LOG_ERROR("sqlite result allocation failed.\n");
@@ -240,14 +259,13 @@ static MSG_ID_T iENT_DbSqliteCollectRows(sqlite3* dbHandle,
 
         if(result.fields == NULL)
         {
-            result.fields = (char**)malloc((size_t)result.columnCount * sizeof(char*));
+            result.fields = (char**)calloc((size_t)result.columnCount, sizeof(char*));
             if(result.fields == NULL)
             {
                 IENT_LOG_ERROR("sqlite field allocation failed.\n");
                 sts = ENT_DBS_ALLOC_FAILED;
                 goto END_OF_ROUTINE;
             }
-            memset(result.fields, 0, (size_t)result.columnCount * sizeof(char*));
             for(colIdx = 0; colIdx < result.columnCount; colIdx++)
             {
                 result.fields[colIdx] = (char*)sqlite3_column_name(stmt, colIdx);
@@ -256,7 +274,7 @@ static MSG_ID_T iENT_DbSqliteCollectRows(sqlite3* dbHandle,
 
         for(colIdx = 0; colIdx < result.columnCount; colIdx++)
         {
-            sts = iENT_DbSqliteAppendCell(&result, stmt, (int)result.rowCount, colIdx);
+            sts = iENT_DbSqliteAppendCell(&result, stmt, result.rowCount, colIdx);
             if(sts < 0)
             {
                 goto END_OF_ROUTINE;

@@ -585,9 +585,19 @@ static MSG_ID_T iENT_DbPgSQLCollectRows(PGconn* pgConn, PGresult* res, SqlResult
     rows = PQntuples(res);
     cols = PQnfields(res);
     fieldsCount = (size_t)(cols > 0 ? cols : 1);
-    rowCount = (size_t)((rows > 0 && cols > 0) ? rows * cols : 1);
-    fields = (char**)malloc(fieldsCount * sizeof(char*));
-    rowRes = (char**)malloc(rowCount * sizeof(char*));
+    if(rows > 0 && cols > 0)
+    {
+        if(!iENT_DbCheckedSizeMultiply((size_t)rows, (size_t)cols, &rowCount))
+        {
+            return ENT_DBS_ALLOC_FAILED;
+        }
+    }
+    else
+    {
+        rowCount = 1;
+    }
+    fields = (char**)calloc(fieldsCount, sizeof(char*));
+    rowRes = (char**)calloc(rowCount, sizeof(char*));
 
     if(fields == NULL || rowRes == NULL)
     {
@@ -596,9 +606,6 @@ static MSG_ID_T iENT_DbPgSQLCollectRows(PGconn* pgConn, PGresult* res, SqlResult
         if(rowRes) free(rowRes);
         return ENT_DBS_ALLOC_FAILED;
     }
-
-    memset(fields, 0, fieldsCount * sizeof(char*));
-    memset(rowRes, 0, rowCount * sizeof(char*));
 
     {
         int i;
@@ -615,7 +622,7 @@ static MSG_ID_T iENT_DbPgSQLCollectRows(PGconn* pgConn, PGresult* res, SqlResult
             int c;
             for(c = 0; c < cols; c++)
             {
-                rowRes[r * cols + c] = (char*)PQgetvalue(res, r, c);
+                rowRes[(size_t)r * (size_t)cols + (size_t)c] = (char*)PQgetvalue(res, r, c);
             }
         }
     }

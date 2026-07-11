@@ -109,6 +109,16 @@ typedef struct USER_SQLITE_DATA
     void* userData;
 } USER_SQLITE_READ, USER_SQLITE_WRITE;
 
+static int iENT_DbCheckedSizeMultiply(size_t left, size_t right, size_t* result)
+{
+    if(result == NULL || (left != 0 && right > ((size_t)-1) / left))
+    {
+        return 0;
+    }
+    *result = left * right;
+    return 1;
+}
+
 MSG_ID_T ENT_DbSqliteInit(DB_HANDLE dbHandle);
 MSG_ID_T ENT_DbSqliteClose(DB_HANDLE dbHandle);
 #if ENT_ENABLE_SQLITE && ENT_SQLITE_FOUND
