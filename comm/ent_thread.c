@@ -36,6 +36,9 @@ typedef struct THREAD_DB
 #ifdef WIN32
     HANDLE         thHandle;
     DWORD          thId;
+    PTHREAD_START_ROUTINE thProc;
+    void*          thData;
+    volatile LONG  startState;
 #else
     void*          thHandle;
     pthread_t      thId;
@@ -56,6 +59,21 @@ enum
     ENT_THREAD_START_RUN_E,
     ENT_THREAD_START_ABORT_E
 };
+
+#ifdef WIN32
+static DWORD WINAPI iENT_ThreadProc(void* data)
+{
+    THREAD_DB* thDb = (THREAD_DB*)data;
+    LONG state = InterlockedCompareExchange(&thDb->startState,
+                                             ENT_THREAD_START_RUN_E,
+                                             ENT_THREAD_START_RUN_E);
+    if(state != ENT_THREAD_START_RUN_E)
+    {
+        return 0;
+    }
+    return thDb->thProc(thDb->thData);
+}
+#endif
 
 #define ENT_TH_TAG (0xEB90CA8F)
 
@@ -292,6 +310,7 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
     ENT_TH_CTX*  thCtx=NULL;
     THREAD_DB*   tmp=NULL;
     HANDLE       tmpHandle;
+    DLL_D_HDR*   removed = NULL;
     if(tid != NULL)
     {
         *tid = NULL;
@@ -316,7 +335,10 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
     }
     memset(tmp,0,sizeof(THREAD_DB));
     
-     tmpHandle = CreateThread(NULL,0,thProc,thData,CREATE_SUSPENDED,&tmp->thId);
+     tmp->thProc = thProc;
+     tmp->thData = thData;
+     tmp->startState = ENT_THREAD_START_PENDING_E;
+     tmpHandle = CreateThread(NULL,0,iENT_ThreadProc,tmp,CREATE_SUSPENDED,&tmp->thId);
      if(tmpHandle == NULL)
      {
         IENT_LOG_ERROR("CreateThread failed,error code %u\n",GetLastError());
@@ -331,7 +353,11 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
      UTL_LockLeave(thCtx->dllLock);
       if(sts < 0)
       {
-         ResumeThread(tmp->thHandle);
+         InterlockedExchange(&tmp->startState, ENT_THREAD_START_ABORT_E);
+         if(ResumeThread(tmp->thHandle) == (DWORD)-1)
+         {
+             TerminateThread(tmp->thHandle, ERROR_FUNCTION_FAILED);
+         }
          WaitForSingleObject(tmp->thHandle, INFINITE);
         CloseHandle(tmp->thHandle);
         tmp->thHandle = NULL;
@@ -345,7 +371,24 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
      {
          *tid = tmp;
      }
-      ResumeThread(tmp->thHandle);
+      InterlockedExchange(&tmp->startState, ENT_THREAD_START_RUN_E);
+      if(ResumeThread(tmp->thHandle) == (DWORD)-1)
+      {
+         InterlockedExchange(&tmp->startState, ENT_THREAD_START_ABORT_E);
+         TerminateThread(tmp->thHandle, ERROR_FUNCTION_FAILED);
+         WaitForSingleObject(tmp->thHandle, INFINITE);
+         UTL_LockEnter(thCtx->dllLock);
+         UTL_DllRemCurr(&tmp->dllLnk,&removed);
+         UTL_LockLeave(thCtx->dllLock);
+         if(tid != NULL)
+         {
+             *tid = NULL;
+         }
+         CloseHandle(tmp->thHandle);
+         free(tmp);
+         iENT_ThreadEndCall(thCtx);
+         return ENT_THRD_CREATE_FAILED;
+      }
     iENT_ThreadEndCall(thCtx);
     return ENT_SYS_NORMAL;
 }
