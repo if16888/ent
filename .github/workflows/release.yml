@@ -46,6 +46,17 @@ jobs:
           cmake --install build --prefix build/package-devel --component devel
           cp LICENSE NOTICE THIRD_PARTY_NOTICES build/package-runtime/
           cp LICENSE NOTICE THIRD_PARTY_NOTICES build/package-devel/
+
+          forbidden_runtime="$(find build/package-runtime build/package-devel -type f \
+            \( -name 'libmariadb.so*' \
+               -o -name 'libmysqlclient.so*' \
+               -o -name 'libpq.so*' \) -print)"
+          if [[ -n "${forbidden_runtime}" ]]; then
+            printf '%s\n' "${forbidden_runtime}"
+            echo "Non-redistributable database runtime detected in release package" >&2
+            exit 1
+          fi
+
           tar -C build/package-runtime -czf ent-${GITHUB_REF_NAME}-linux-x86_64-runtime.tar.gz .
           tar -C build/package-devel -czf ent-${GITHUB_REF_NAME}-linux-x86_64-devel.tar.gz .
 
@@ -144,11 +155,14 @@ jobs:
           Copy-Item LICENSE, NOTICE, THIRD_PARTY_NOTICES -Destination $RuntimePackage
           Copy-Item LICENSE, NOTICE, THIRD_PARTY_NOTICES -Destination $DevelPackage
 
-          $BundledMariaDb = Get-ChildItem -LiteralPath $RuntimePackage -Recurse -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -match '^(libmariadb|mariadb|libmysql|mysql)\.dll$' }
-          if ($BundledMariaDb) {
-            $BundledMariaDb | Select-Object -ExpandProperty FullName
-            throw "MariaDB/MySQL runtime DLLs must not be redistributed in ent release packages"
+          $PackageRoots = @($RuntimePackage, $DevelPackage)
+          $ForbiddenRuntime = foreach ($Root in $PackageRoots) {
+            Get-ChildItem -LiteralPath $Root -Recurse -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -match '^(libmariadb|mariadb|libmysql|mysql|libpq)\.dll$' }
+          }
+          if ($ForbiddenRuntime) {
+            $ForbiddenRuntime | Select-Object -ExpandProperty FullName
+            throw "Non-redistributable database runtime detected in release package"
           }
 
           Compress-Archive -Path "$RuntimePackage\*" -DestinationPath ent-${env:GITHUB_REF_NAME}-windows-${{ matrix.arch }}-runtime.zip -Force
