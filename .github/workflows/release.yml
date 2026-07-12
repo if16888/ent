@@ -42,11 +42,18 @@ jobs:
         run: |
           rm -rf build/package-runtime build/package-devel
           cmake --install build --prefix build/package-runtime --component runtime
+          cmake --install build --prefix build/package-devel --component runtime
           cmake --install build --prefix build/package-devel --component devel
           cp LICENSE NOTICE THIRD_PARTY_NOTICES build/package-runtime/
           cp LICENSE NOTICE THIRD_PARTY_NOTICES build/package-devel/
           tar -C build/package-runtime -czf ent-${GITHUB_REF_NAME}-linux-x86_64-runtime.tar.gz .
           tar -C build/package-devel -czf ent-${GITHUB_REF_NAME}-linux-x86_64-devel.tar.gz .
+
+      - name: Validate extracted devel SDK
+        run: |
+          ./scripts/validate-release-sdk.sh \
+            "ent-${GITHUB_REF_NAME}-linux-x86_64-devel.tar.gz" \
+            "${GITHUB_WORKSPACE}/test/downstream_consumer"
 
       - name: Upload runtime artifact
         uses: actions/upload-artifact@v4
@@ -132,6 +139,7 @@ jobs:
           if (Test-Path $RuntimePackage) { Remove-Item $RuntimePackage -Recurse -Force }
           if (Test-Path $DevelPackage) { Remove-Item $DevelPackage -Recurse -Force }
           cmake --install $env:BUILD_DIR --config Release --prefix $RuntimePackage --component runtime
+          cmake --install $env:BUILD_DIR --config Release --prefix $DevelPackage --component runtime
           cmake --install $env:BUILD_DIR --config Release --prefix $DevelPackage --component devel
           Copy-Item LICENSE, NOTICE, THIRD_PARTY_NOTICES -Destination $RuntimePackage
           Copy-Item LICENSE, NOTICE, THIRD_PARTY_NOTICES -Destination $DevelPackage
@@ -145,6 +153,16 @@ jobs:
 
           Compress-Archive -Path "$RuntimePackage\*" -DestinationPath ent-${env:GITHUB_REF_NAME}-windows-${{ matrix.arch }}-runtime.zip -Force
           Compress-Archive -Path "$DevelPackage\*" -DestinationPath ent-${env:GITHUB_REF_NAME}-windows-${{ matrix.arch }}-devel.zip -Force
+
+      - name: Validate extracted devel SDK
+        shell: pwsh
+        run: |
+          .\scripts\validate-release-sdk.ps1 `
+            -Archive "ent-${env:GITHUB_REF_NAME}-windows-${{ matrix.arch }}-devel.zip" `
+            -ConsumerSource "$env:GITHUB_WORKSPACE\test\downstream_consumer" `
+            -Platform "${{ matrix.platform }}" `
+            -Triplet "${{ matrix.triplet }}" `
+            -ToolchainFile "C:\vcpkg\scripts\buildsystems\vcpkg.cmake"
 
       - name: Upload runtime artifact
         uses: actions/upload-artifact@v4
@@ -177,3 +195,4 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
+          prerelease: ${{ contains(github.ref_name, '-rc') }}

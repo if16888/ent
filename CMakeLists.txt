@@ -122,6 +122,8 @@ install(
     FILES
         "${CMAKE_CURRENT_BINARY_DIR}/entConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/entConfigVersion.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindMariaDB.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindEntLua.cmake"
     DESTINATION ${INSTALL_CMAKEDIR}
     COMPONENT ${ENT_DEVEL_COMPONENT}
 )
