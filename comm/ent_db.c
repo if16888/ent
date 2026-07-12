@@ -32,10 +32,10 @@
 #include "ent_msg.h"
 
 #ifdef WIN32
-static CRITICAL_SECTION sDbMutex;
+static SRWLOCK sDbMutex = SRWLOCK_INIT;
 #pragma warning(disable : 4996)
 #else
-static pthread_mutex_t  sDbMutex;
+static pthread_mutex_t  sDbMutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
 long                    sDbNum = 0;
@@ -105,7 +105,7 @@ static const char* iENT_DbHandleStateName(DB_HANDLE_STATE_E state)
 static void iENT_DbGlobalLock(void)
 {
 #ifdef WIN32
-    EnterCriticalSection(&sDbMutex);
+    AcquireSRWLockExclusive(&sDbMutex);
 #else
     pthread_mutex_lock(&sDbMutex);
 #endif
@@ -114,7 +114,7 @@ static void iENT_DbGlobalLock(void)
 static void iENT_DbGlobalUnlock(void)
 {
 #ifdef WIN32
-    LeaveCriticalSection(&sDbMutex);
+    ReleaseSRWLockExclusive(&sDbMutex);
 #else
     pthread_mutex_unlock(&sDbMutex);
 #endif
@@ -329,18 +329,25 @@ static MSG_ID_T iENT_DbEnterHandleOp(DB_HANDLE dbHandle, DB_CFG** dbCfgOut)
         *dbCfgOut = NULL;
     }
 
+    iENT_DbGlobalLock();
     if(sDbMutexInit == false)
     {
+        iENT_DbGlobalUnlock();
         IENT_LOG_ERROR("Uninitialized,please call ENT_DbInit.\n");
         return ENT_DBS_NOT_INITIALIZED;
     }
-
-    iENT_DbGlobalLock();
     sts = iENT_DbValidateHandle(dbHandle, &dbCfg, true);
     if(sts < 0)
     {
         iENT_DbGlobalUnlock();
         return sts;
+    }
+
+    if(dbCfg->handleState != ENT_DB_HANDLE_ACTIVE_E)
+    {
+        DB_HANDLE_STATE_E state = dbCfg->handleState;
+        iENT_DbGlobalUnlock();
+        return (state == ENT_DB_HANDLE_CLOSING_E) ? ENT_DBS_IN_USE : ENT_DBS_BAD_HANDLE;
     }
 
     iENT_DbLifecycleLock(dbCfg);
@@ -406,18 +413,25 @@ MSG_ID_T  iENT_DbReInit(DB_HANDLE dbHandle,
     char* newUser = NULL;
     char* newPasswd = NULL;
 
+    iENT_DbGlobalLock();
     if(sDbMutexInit == false)
     {
+        iENT_DbGlobalUnlock();
         IENT_LOG_ERROR("Uninitialized,please call ENT_DbInit.\n");
         return ENT_DBS_NOT_INITIALIZED;
     }
-
-    iENT_DbGlobalLock();
     sts = iENT_DbValidateHandle(dbHandle, &dbCfg, true);
     if(sts < 0)
     {
         iENT_DbGlobalUnlock();
         return sts;
+    }
+
+    if(dbCfg->handleState != ENT_DB_HANDLE_ACTIVE_E)
+    {
+        DB_HANDLE_STATE_E state = dbCfg->handleState;
+        iENT_DbGlobalUnlock();
+        return (state == ENT_DB_HANDLE_CLOSING_E) ? ENT_DBS_IN_USE : ENT_DBS_BAD_HANDLE;
     }
 
     if(dbType != dbCfg->dbType)
@@ -569,17 +583,15 @@ END_OF_ROUTINE:
  */
 ENT_PUBLIC MSG_ID_T  ENT_DbInit()
 {
+    iENT_DbGlobalLock();
     if(sDbMutexInit)
     {
+        iENT_DbGlobalUnlock();
         return ENT_SYS_ALREADY_INITIALIZED;
     }
-#ifdef WIN32
-    InitializeCriticalSection(&sDbMutex);
-#else
-    pthread_mutex_init(&sDbMutex,NULL);
-#endif
     IENT_LOG_PRINT("InitializeCriticalSection.\n");
     sDbMutexInit = true;
+    iENT_DbGlobalUnlock();
     return ENT_SYS_NORMAL;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
@@ -592,12 +604,12 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInit()
  */
 ENT_PUBLIC MSG_ID_T  ENT_DbClose()
 {
+    iENT_DbGlobalLock();
     if(sDbMutexInit == false)
     {
+        iENT_DbGlobalUnlock();
         return ENT_SYS_CLOSE_UNINITIALIZED;
     }
-
-    iENT_DbGlobalLock();
     if(sDbNum > 0)
     {
         iENT_DbGlobalUnlock();
@@ -606,11 +618,6 @@ ENT_PUBLIC MSG_ID_T  ENT_DbClose()
     }
     sDbMutexInit = false;
     iENT_DbGlobalUnlock();
-#ifdef WIN32
-    DeleteCriticalSection(&sDbMutex);
-#else
-    pthread_mutex_destroy(&sDbMutex);
-#endif
     IENT_LOG_PRINT("DeleteCriticalSection.\n");
     return ENT_SYS_NORMAL;
 }
@@ -632,12 +639,6 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
 {
     MSG_ID_T sts=ENT_SYS_NORMAL;
     DB_CFG*  dbCfg=NULL;
-    if(sDbMutexInit==false)
-    {
-        IENT_LOG_ERROR("Uninitialized,please call ENT_DbInit.\n");
-        return ENT_DBS_NOT_INITIALIZED;
-    }
-
     if(pdbHandle==NULL)
     {
         IENT_LOG_ERROR("Database handle is null\n");
@@ -656,6 +657,12 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
     }
 
     iENT_DbGlobalLock();
+    if(sDbMutexInit == false)
+    {
+        iENT_DbGlobalUnlock();
+        IENT_LOG_ERROR("Uninitialized,please call ENT_DbInit.\n");
+        return ENT_DBS_NOT_INITIALIZED;
+    }
 
     switch(dbType)
     {
@@ -796,12 +803,6 @@ ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE* dbHandle)
 {
     MSG_ID_T sts=ENT_SYS_NORMAL;
     DB_CFG*  dbCfg=NULL;
-    if(sDbMutexInit==false)
-    {
-        IENT_LOG_ERROR("Uninitialized,please call ENT_DbInit.\n");
-        return ENT_DBS_NOT_INITIALIZED;
-    }
-
     if(dbHandle == NULL)
     {
         IENT_LOG_ERROR("Database handle is null.\n");
@@ -809,11 +810,28 @@ ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE* dbHandle)
     }
 
     iENT_DbGlobalLock();
+    if(sDbMutexInit == false)
+    {
+        iENT_DbGlobalUnlock();
+        IENT_LOG_ERROR("Uninitialized,please call ENT_DbInit.\n");
+        return ENT_DBS_NOT_INITIALIZED;
+    }
     sts = iENT_DbValidateHandle(*dbHandle, &dbCfg, false);
     if(sts < 0)
     {
         iENT_DbGlobalUnlock();
         return sts;
+    }
+
+    if(dbCfg->handleState == ENT_DB_HANDLE_CLOSING_E)
+    {
+        iENT_DbGlobalUnlock();
+        return ENT_DBS_IN_USE;
+    }
+    if(dbCfg->handleState != ENT_DB_HANDLE_ACTIVE_E)
+    {
+        iENT_DbGlobalUnlock();
+        return ENT_DBS_BAD_HANDLE;
     }
 
     iENT_DbLifecycleLock(dbCfg);

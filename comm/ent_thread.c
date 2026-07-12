@@ -45,10 +45,17 @@ typedef struct THREAD_DB
     pthread_mutex_t doneMutex;
     pthread_cond_t  doneCv;
     bool            finished;
-    bool            registered;
+    int             startState;
 #endif
     unsigned int    tag;
 }THREAD_DB;
+
+enum
+{
+    ENT_THREAD_START_PENDING_E = 0,
+    ENT_THREAD_START_RUN_E,
+    ENT_THREAD_START_ABORT_E
+};
 
 #define ENT_TH_TAG (0xEB90CA8F)
 
@@ -177,24 +184,33 @@ static int iENT_ThreadCondInit(pthread_cond_t* cond)
 static void* iENT_ThreadProc(void* data)
 {
     THREAD_DB* thDb = (THREAD_DB*)data;
+    void* retVal = NULL;
     if(thDb == NULL || thDb->thProc == NULL)
     {
         return NULL;
     }
 
     pthread_mutex_lock(&thDb->doneMutex);
-    while(!thDb->registered)
+    while(thDb->startState == ENT_THREAD_START_PENDING_E)
     {
         pthread_cond_wait(&thDb->doneCv, &thDb->doneMutex);
     }
+    if(thDb->startState == ENT_THREAD_START_ABORT_E)
+    {
+        thDb->finished = true;
+        pthread_cond_broadcast(&thDb->doneCv);
+        pthread_mutex_unlock(&thDb->doneMutex);
+        return NULL;
+    }
     pthread_mutex_unlock(&thDb->doneMutex);
 
-    thDb->thRet = thDb->thProc(thDb->thData);
+    retVal = thDb->thProc(thDb->thData);
     pthread_mutex_lock(&thDb->doneMutex);
+    thDb->thRet = retVal;
     thDb->finished = true;
     pthread_cond_broadcast(&thDb->doneCv);
     pthread_mutex_unlock(&thDb->doneMutex);
-    return thDb->thRet;
+    return retVal;
 }
 #endif
 
@@ -597,6 +613,7 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
     tmp->thData = thData;
     tmp->thRet = NULL;
     tmp->finished = false;
+    tmp->startState = ENT_THREAD_START_PENDING_E;
     s = pthread_mutex_init(&tmp->doneMutex,NULL);
     if(s != 0)
     {
@@ -632,7 +649,7 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
     if(sts < 0)
     {
         pthread_mutex_lock(&tmp->doneMutex);
-        tmp->registered = true;
+        tmp->startState = ENT_THREAD_START_ABORT_E;
         pthread_cond_broadcast(&tmp->doneCv);
         pthread_mutex_unlock(&tmp->doneMutex);
         pthread_join(tmp->thId,NULL);
@@ -644,14 +661,14 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
         iENT_ThreadEndCall(thCtx);
         return ENT_THRD_CREATE_FAILED;
     }
-    pthread_mutex_lock(&tmp->doneMutex);
-    tmp->registered = true;
-    pthread_cond_broadcast(&tmp->doneCv);
-    pthread_mutex_unlock(&tmp->doneMutex);
     if(tid!=NULL)
     {
        *tid = tmp;
     }
+    pthread_mutex_lock(&tmp->doneMutex);
+    tmp->startState = ENT_THREAD_START_RUN_E;
+    pthread_cond_broadcast(&tmp->doneCv);
+    pthread_mutex_unlock(&tmp->doneMutex);
     iENT_ThreadEndCall(thCtx);
     return ENT_SYS_NORMAL;
 }
@@ -839,22 +856,27 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
             break;
         }
         thDb = (THREAD_DB*)tmp;
-        if(thDb->thId)
+        pthread_mutex_lock(&thDb->doneMutex);
+        thDb->startState = ENT_THREAD_START_ABORT_E;
+        pthread_cond_broadcast(&thDb->doneCv);
+        while(!thDb->finished)
         {
-            sts = pthread_join(thDb->thId,&retVal);
-            if(sts != 0)
-            {
-                IENT_LOG_ERROR("pthread_join failed,error [%d]->[%s]\n",sts,strerror(sts));
-                UTL_LockEnter(thCtx->dllLock);
-                UTL_DllInsHead(&thCtx->dllHeader,(DLL_D_HDR*)thDb);
-                thCtx->state = ENT_TH_STATE_ACTIVE_E;
-                UTL_LockLeave(thCtx->dllLock);
-                return ENT_THRD_WAIT_FAILED;
-            }
-            thDb->thHandle = NULL;
-            thDb->thId = 0;
-            thDb->tag = 0x0;
+            pthread_cond_wait(&thDb->doneCv, &thDb->doneMutex);
         }
+        pthread_mutex_unlock(&thDb->doneMutex);
+        sts = pthread_join(thDb->thId,&retVal);
+        if(sts != 0)
+        {
+            IENT_LOG_ERROR("pthread_join failed,error [%d]->[%s]\n",sts,strerror(sts));
+            UTL_LockEnter(thCtx->dllLock);
+            UTL_DllInsHead(&thCtx->dllHeader,(DLL_D_HDR*)thDb);
+            thCtx->state = ENT_TH_STATE_ACTIVE_E;
+            UTL_LockLeave(thCtx->dllLock);
+            return ENT_THRD_WAIT_FAILED;
+        }
+        thDb->thHandle = NULL;
+        thDb->thId = 0;
+        thDb->tag = 0x0;
         pthread_cond_destroy(&thDb->doneCv);
         pthread_mutex_destroy(&thDb->doneMutex);
         free(thDb);

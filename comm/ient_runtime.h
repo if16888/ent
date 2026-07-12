@@ -38,6 +38,7 @@ typedef struct ENT_CTX
     bool           rtEnabled;
     bool           running;
     bool           stopRequested;
+    bool           closeInProgress;
     ENT_HANDLE_STATE_E handleState;
     unsigned int   activeCalls;
     char*          entName;
@@ -48,6 +49,7 @@ typedef struct ENT_CTX
     int            rtPolicy;
     int            rtPriority;
     int            rtLastError;
+    bool           rtMemoryOwner;
     ENT_LOG_LEV_E  logLevel;
     ENT_LOG        entLog;
     UTL_LOCK       entLock;

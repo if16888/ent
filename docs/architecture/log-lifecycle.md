@@ -26,6 +26,16 @@
 
 ## Service-level / Handle-level
 
+The log service mutex has process lifetime and is never destroyed by
+`ENT_LogClose()`. Service state is changed while that mutex is held, so an
+entry racing with service close cannot lock a destroyed synchronization
+object. `ENT_LogClose()` still rejects live handles and contexts; callers must
+not treat service close as a forceful reclamation operation.
+
+The service lock lifetime guarantee protects the global entry point. It does
+not make a raw log handle safe after `ENT_LogCloseHandle()` or a raw context
+safe after `ENT_LogCtxClose()`.
+
 ### `ENT_LogInit()` / `ENT_LogClose()`
 
 - 这一组操作管理的是日志 service 本身。
@@ -73,4 +83,3 @@ flush 语义由内部 writer 线程、flush batch / interval 配置和 close 路
 - [README.md](../../README.md)
 - [docs/log-return-codes.md](../log-return-codes.md)
 - [docs/architecture/handle-lifecycle.md](handle-lifecycle.md)
-

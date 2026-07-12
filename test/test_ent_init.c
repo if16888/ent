@@ -23,6 +23,24 @@ static int s_block_wait_mode = 0;
 static UTL_CV s_block_wait_cv = NULL;
 static volatile int s_block_wait_entered = 0;
 static volatile int s_block_wait_released = 0;
+
+static int test_flag_load(volatile int* value)
+{
+#ifdef WIN32
+    return *value;
+#else
+    return __sync_fetch_and_add(value, 0);
+#endif
+}
+
+static void test_flag_store(volatile int* value, int state)
+{
+#ifdef WIN32
+    *value = state;
+#else
+    __sync_lock_test_and_set(value, state);
+#endif
+}
 static volatile int s_close_thread_started = 0;
 static volatile int s_close_wait_entered = 0;
 static int s_log_init_calls = 0;
@@ -96,8 +114,8 @@ static void reset_wait_capture(void)
     s_auto_stop_after_wait = 0;
     s_block_wait_mode = 0;
     s_block_wait_cv = NULL;
-    s_block_wait_entered = 0;
-    s_block_wait_released = 0;
+    test_flag_store(&s_block_wait_entered, 0);
+    test_flag_store(&s_block_wait_released, 0);
     s_close_thread_started = 0;
     s_close_wait_entered = 0;
 }
@@ -111,8 +129,8 @@ static void enable_blocking_wait(UTL_CV cv)
 {
     s_block_wait_mode = 1;
     s_block_wait_cv = cv;
-    s_block_wait_entered = 0;
-    s_block_wait_released = 0;
+    test_flag_store(&s_block_wait_entered, 0);
+    test_flag_store(&s_block_wait_released, 0);
 }
 
 static void iENT_TestSleepMs(unsigned int ms)
@@ -130,7 +148,7 @@ static void iENT_TestSleepMs(unsigned int ms)
 
 static void wait_until_blocking_wait_entered(void)
 {
-    while(!s_block_wait_entered)
+    while(!test_flag_load(&s_block_wait_entered))
     {
         iENT_TestSleepMs(1);
     }
@@ -154,7 +172,7 @@ static void wait_until_close_wait_entered(void)
 
 static void release_blocking_wait(void)
 {
-    s_block_wait_released = 1;
+    test_flag_store(&s_block_wait_released, 1);
 }
 
 static void reset_close_counters(void)
@@ -586,12 +604,12 @@ MSG_ID_T UTL_CVWait(UTL_CV cv, UTL_LOCK lock, int ms, UTL_LOCK_RW_TYPE_T rwType)
     {
         ENT_CTX* ctx = iENT_RuntimeActiveCtx();
 
-        s_block_wait_entered = 1;
+        test_flag_store(&s_block_wait_entered, 1);
         if(ctx != NULL && ctx->handleState == ENT_HANDLE_STATE_CLOSING_E)
         {
             s_close_wait_entered = 1;
         }
-        while(!s_block_wait_released)
+        while(!test_flag_load(&s_block_wait_released))
         {
             iENT_TestSleepMs(1);
         }
@@ -1568,6 +1586,53 @@ static int test_ent_set_rt_attributes_rejects_uninitialized_context(void)
                        "ENT_SetRtAttributes should reject an uninitialized context");
 }
 
+static int test_ent_rt_memory_lock_is_process_owned(void)
+{
+#ifdef WIN32
+    return 0;
+#else
+    ENT_HANDLE first = NULL;
+    ENT_HANDLE second = NULL;
+
+    reset_close_counters();
+    reset_log_failures();
+    s_mlockall_result = 0;
+    s_munlockall_result = 0;
+
+    if(expect_true(ENT_Init(&first, "rt-first", "/tmp/rt-first", LOG_LEV_WARN_E, ENT_MODE_REALTIME_E) == ENT_SYS_NORMAL,
+                   "first realtime handle should initialize") != 0 ||
+       expect_true(ENT_Init(&second, "rt-second", "/tmp/rt-second", LOG_LEV_WARN_E, ENT_MODE_REALTIME_E) == ENT_SYS_NORMAL,
+                   "second realtime handle should initialize") != 0)
+    {
+        close_handle_if_needed(&first);
+        close_handle_if_needed(&second);
+        return 1;
+    }
+
+    if(expect_true(s_mlockall_calls == 1,
+                   "process memory lock should be acquired only once for two realtime handles") != 0)
+    {
+        close_handle_if_needed(&first);
+        close_handle_if_needed(&second);
+        return 1;
+    }
+
+    if(expect_true(ENT_Close(&first) == ENT_SYS_NORMAL && s_munlockall_calls == 0,
+                   "closing a non-last realtime owner must not unlock process memory") != 0)
+    {
+        close_handle_if_needed(&second);
+        return 1;
+    }
+
+    if(expect_true(ENT_Close(&second) == ENT_SYS_NORMAL && s_munlockall_calls == 1,
+                   "closing the last realtime owner must unlock process memory") != 0)
+    {
+        return 1;
+    }
+    return 0;
+#endif
+}
+
 static int test_ent_set_rt_attributes_allows_noop_after_init(void)
 {
     ENT_HANDLE handle = NULL;
@@ -2037,6 +2102,7 @@ int main(void)
     failures += test_ent_init_rejects_double_init_same_handle();
     failures += test_ent_init_realtime_mode_can_degrade_to_normal();
     failures += test_ent_set_rt_attributes_rejects_uninitialized_context();
+    failures += test_ent_rt_memory_lock_is_process_owned();
     failures += test_ent_set_rt_attributes_allows_noop_after_init();
     failures += test_ent_set_rt_attributes_rejects_normal_mode();
     failures += test_ent_stop_rejects_bad_magic_handle();
