@@ -183,6 +183,52 @@ jobs:
         run: |
           $logDir = $env:CI_LOG_DIR
           New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path -LiteralPath $vswhere)) {
+            throw "vswhere.exe was not found at $vswhere"
+          }
+          $vsInstall = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ([string]::IsNullOrWhiteSpace($vsInstall)) {
+            & $vswhere -all -products * -format json
+            throw "No Visual Studio installation with the VC x86/x64 tools was found"
+          }
+          Write-Host "Visual Studio installation: $vsInstall"
+
+          $msvcRoot = Join-Path $vsInstall "VC\Tools\MSVC"
+          if (-not (Test-Path -LiteralPath $msvcRoot)) {
+            & $vswhere -all -products * -format json
+            throw "MSVC tools directory was not found at $msvcRoot"
+          }
+          Write-Host "Installed MSVC toolsets:"
+          Get-ChildItem -LiteralPath $msvcRoot -Directory | Select-Object -ExpandProperty FullName
+
+          $asanDll = Get-ChildItem -LiteralPath $msvcRoot -Filter "clang_rt.asan_dynamic-x86_64.dll" -File -Recurse |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if ($null -eq $asanDll) {
+            & $vswhere -all -products * -format json
+            Get-ChildItem -LiteralPath $msvcRoot -Directory -Recurse | Select-Object -ExpandProperty FullName
+            throw "clang_rt.asan_dynamic-x86_64.dll was not found below $msvcRoot"
+          }
+          Write-Host "Using Windows ASan runtime: $($asanDll.FullName)"
+          $env:PATH = "$($asanDll.DirectoryName);$env:PATH"
+
+          $dumpbin = Get-ChildItem -LiteralPath $msvcRoot -Filter "dumpbin.exe" -File -Recurse |
+            Where-Object { $_.FullName -match "Hostx64\\x64" } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if ($null -eq $dumpbin) {
+            throw "x64 dumpbin.exe was not found below $msvcRoot"
+          }
+          $threadTest = Resolve-Path (Join-Path $env:BUILD_DIR "bin\Release\test_ent_thread.exe")
+          Write-Host "Inspecting dependencies with: $($dumpbin.FullName)"
+          & $dumpbin.FullName /DEPENDENTS $threadTest.Path *>&1 |
+            Tee-Object -FilePath (Join-Path $logDir "test_ent_thread-dependents.log")
+          if ($LASTEXITCODE -ne 0) {
+            throw "dumpbin /DEPENDENTS failed with exit code $LASTEXITCODE"
+          }
+
           Push-Location $env:BUILD_DIR
           try {
             ctest -C Release --output-on-failure -V `
