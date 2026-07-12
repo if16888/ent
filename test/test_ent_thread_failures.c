@@ -26,7 +26,6 @@ static int s_cv_init_fail = 0;
 static int s_callback_calls = 0;
 static int s_wrapper_calls = 0;
 #ifdef WIN32
-static int s_resume_fail = 0;
 static LPTHREAD_START_ROUTINE s_saved_start_routine = NULL;
 static LPVOID s_saved_param = NULL;
 #endif
@@ -67,8 +66,7 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle, const char* format, ...){(void)logHandl
 #define UTL_DllRemCurr mock_UTL_DllRemCurr
 #ifdef WIN32
 #define CreateThread mock_CreateThread
-#define ResumeThread mock_ResumeThread
-#define TerminateThread mock_TerminateThread
+#define WakeConditionVariable mock_WakeConditionVariable
 #define WaitForSingleObject mock_WaitForSingleObject
 #define CloseHandle mock_CloseHandle
 #else
@@ -268,25 +266,14 @@ static HANDLE mock_CreateThread(LPSECURITY_ATTRIBUTES attrs, SIZE_T stackSize, L
     return (HANDLE)0x1234;
 }
 
-static DWORD mock_ResumeThread(HANDLE handle)
+static BOOL mock_WakeConditionVariable(PCONDITION_VARIABLE cv)
 {
-    (void)handle;
-    if(s_resume_fail)
-    {
-        return (DWORD)-1;
-    }
+    (void)cv;
     s_wrapper_calls++;
     if(s_saved_start_routine != NULL)
     {
         s_saved_start_routine(s_saved_param);
     }
-    return 1;
-}
-
-static BOOL mock_TerminateThread(HANDLE handle, DWORD exitCode)
-{
-    (void)handle;
-    (void)exitCode;
     return TRUE;
 }
 
@@ -355,7 +342,6 @@ static int test_thread_create_reclaims_created_thread_if_registration_fails(void
     s_callback_calls = 0;
     s_wrapper_calls = 0;
 #ifdef WIN32
-    s_resume_fail = 0;
     s_saved_start_routine = NULL;
     s_saved_param = NULL;
 #endif
@@ -425,54 +411,11 @@ static int test_thread_create_reclaims_created_thread_if_registration_fails(void
                        "ENT_ThreadClose should still release the thread context after create failure cleanup");
 }
 
-#ifdef WIN32
-static int test_thread_create_reclaims_thread_if_resume_fails(void)
-{
-    ENT_THREAD handle = NULL;
-    ENT_THREAD_ID tid = (ENT_THREAD_ID)0x1;
-    int value = 9;
-
-    s_dll_ins_fail = 0;
-    s_resume_fail = 1;
-    s_wrapper_calls = 0;
-    s_callback_calls = 0;
-    s_wait_calls = 0;
-    s_close_calls = 0;
-    if(expect_true(ENT_ThreadInit(&handle) == ENT_SYS_NORMAL,
-                   "ENT_ThreadInit should create a context for ResumeThread failure checks") != 0)
-    {
-        s_resume_fail = 0;
-        return 1;
-    }
-    if(expect_true(ENT_ThreadCreate(&tid, handle, dummy_thread, &value) == ENT_THRD_CREATE_FAILED,
-                   "ENT_ThreadCreate should fail when ResumeThread fails") != 0)
-    {
-        ENT_ThreadClose(handle);
-        s_resume_fail = 0;
-        return 1;
-    }
-    s_resume_fail = 0;
-    if(expect_true(tid == NULL, "ResumeThread failure should clear tid") != 0 ||
-       expect_true(s_callback_calls == 0, "ResumeThread failure should not call the user callback") != 0 ||
-       expect_true(s_wait_calls == 1, "ResumeThread failure should wait for cleanup") != 0 ||
-       expect_true(s_close_calls == 1, "ResumeThread failure should close the thread handle") != 0)
-    {
-        ENT_ThreadClose(handle);
-        return 1;
-    }
-    return expect_true(ENT_ThreadClose(handle) == ENT_SYS_NORMAL,
-                       "thread context should remain closable after ResumeThread failure");
-}
-#endif
-
 int main(void)
 {
     int failures = 0;
     failures += test_thread_init_releases_lock_when_cv_init_fails();
     failures += test_thread_create_reclaims_created_thread_if_registration_fails();
-#ifdef WIN32
-    failures += test_thread_create_reclaims_thread_if_resume_fails();
-#endif
     if(failures != 0)
     {
         return EXIT_FAILURE;
