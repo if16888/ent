@@ -5,17 +5,18 @@
 - handle-based 初始化与多实例管理
 - 日志系统
 - 线程 / 锁 / 条件变量 / 线程池 / 定时器 / socket 等基础设施
-- 数据库访问封装（SQLite / MySQL / PostgreSQL，按构建配置启用）
+- 数据库访问封装（SQLite / MySQL / PostgreSQL，可通过构建配置选择启用，默认全开）
 - Lua 脚本后端（可选）
 - 基于 `msg/ent.msg` 的统一消息码生成
 
 当前仓库已经接入：
 
-- Linux (`ubuntu-24.04`) + Windows (`windows-2022`) 双平台 CI
+- Linux (`ubuntu-24.04`) + Windows (`windows-2022`) 双平台 CI（x86、x64、x64-ASan）
 - `ctest` 功能测试
+- Linux ASan + UBSan、Linux TSan、Windows x64 ASan 动态检测
 - 性能冒烟测试
 - 安装后下游 `find_package(ent CONFIG REQUIRED)` 消费验证
-- Release 阶段按平台 / 架构打包 runtime / devel 产物
+- Release 阶段按平台 / 架构打包 runtime / devel 产物（含 LICENSE 和 THIRD_PARTY_NOTICES）
 
 ---
 
@@ -51,18 +52,15 @@ Windows 下**不能在同一个最终目标里混用 32 位和 64 位库**。
 - 如果最终目标是 **x64**，那么所有参与链接的库也必须全部是 **x64**。
 - **Win32 库不能直接链接到 x64 目标**，反过来也不行。
 
-当前仓库的 Windows CI 默认使用：
+当前仓库的 CI 同时验证 Windows **Win32（x86）**、**x64** 和 **x64 ASan** 三个配置：
 
-```text
-WINDOWS_CMAKE_PLATFORM=Win32
-```
+| CI Job | 架构 | 说明 |
+|---|---|---|
+| build-windows (Win32) | x86 | 与 32 位第三方库链接场景 |
+| build-windows (x64) | x64 | 标准 64 位构建 |
+| Windows x64 ASan | x64 | AddressSanitizer 动态内存检测 |
 
-因此仓库当前默认验证的是 **32 位 Windows 构建链路**。如果你后面想切到 x64，需要保证：
-
-- SQLite / MySQL / PostgreSQL / Lua / 你的私有第三方库
-- 以及运行时 DLL
-
-全部都有对应的 **x64 版本**。
+如果你自己构建时需要指定架构，选择 `-A Win32` 或 `-A x64` 并保证所有依赖库（SQLite / MySQL / PostgreSQL 等）使用相同架构的版本。
 
 ---
 
@@ -70,8 +68,12 @@ WINDOWS_CMAKE_PLATFORM=Win32
 
 ### 顶层开关
 
+- `-DENT_ENABLE_SQLITE=ON|OFF`
+  - 是否启用 SQLite 后端探测与编译（默认 ON）。
+- `-DENT_ENABLE_MYSQL=ON|OFF`
+  - 是否启用 MySQL 后端探测与编译（默认 ON）。
 - `-DENT_ENABLE_PGSQL=ON|OFF`
-  - 是否启用 PostgreSQL 后端探测与编译。
+  - 是否启用 PostgreSQL 后端探测与编译（默认 ON）。
 - `-DENT_BUILD_EXAMPLES=ON|OFF`
   - 是否构建仓库内示例程序。
 - `-DBUILD_TESTING=ON|OFF`
@@ -79,12 +81,12 @@ WINDOWS_CMAKE_PLATFORM=Win32
 
 ### comm 子目录相关开关
 
-- `-DENT_ENABLE_SQLITE=ON|OFF`
-- `-DENT_ENABLE_MYSQL=ON|OFF`
 - `-DENT_ENABLE_LUA=ON|OFF`
+  - 是否启用 Lua 脚本后端（默认 OFF）。
 - `-DENT_LUA_LINK_MODE=static|shared`
+  - Lua 链接方式。
 
-示例：只构建库本体，不构建 example / test，且关闭 PostgreSQL：
+示例：只构建库本体，不构建 example / test，且关闭 PostgreSQL 后端：
 
 ```bash
 cmake -S . -B build \

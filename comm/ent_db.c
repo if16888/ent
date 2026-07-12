@@ -667,55 +667,27 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
     switch(dbType)
     {
         case SQLITE_TYPE:
+#if !(ENT_ENABLE_SQLITE && ENT_SQLITE_FOUND)
+            *pdbHandle = NULL;
+            sts = iENT_DbBackendUnsupported(SQLITE_TYPE);
+            goto END_OF_ROUTINE;
+#endif
+            break;
+
         case MYSQL_TYPE:
+#if !(ENT_ENABLE_MYSQL && ENT_MYSQL_FOUND)
+            *pdbHandle = NULL;
+            sts = iENT_DbBackendUnsupported(MYSQL_TYPE);
+            goto END_OF_ROUTINE;
+#endif
+            break;
+
         case PGSQL_TYPE:
-            dbCfg = (DB_CFG*)malloc(sizeof(DB_CFG));
-            if(dbCfg==NULL)
-            {
-                IENT_LOG_ERROR("Database malloc db config failed\n");
-                sts = ENT_DBS_ALLOC_FAILED;
-                goto END_OF_ROUTINE;
-            }
-            memset(dbCfg,0,sizeof(DB_CFG));
-            dbCfg->dbType = dbType;
-            dbCfg->handleState = ENT_DB_HANDLE_CREATED_E;
-            if(host)
-            {
-                dbCfg->host = ENT_StrDup(host);
-                if(dbCfg->host == NULL)
-                {
-                    sts = ENT_DBS_ALLOC_FAILED;
-                    goto END_OF_ROUTINE;
-                }
-            }
-            if(database)
-            {
-                dbCfg->database = ENT_StrDup(database);
-                if(dbCfg->database == NULL)
-                {
-                    sts = ENT_DBS_ALLOC_FAILED;
-                    goto END_OF_ROUTINE;
-                }
-            }
-            if(user)
-            {
-                dbCfg->userName = ENT_StrDup(user);
-                if(dbCfg->userName == NULL)
-                {
-                    sts = ENT_DBS_ALLOC_FAILED;
-                    goto END_OF_ROUTINE;
-                }
-            }
-            if(passwd)
-            {
-                dbCfg->passwd = ENT_StrDup(passwd);
-                if(dbCfg->passwd == NULL)
-                {
-                    sts = ENT_DBS_ALLOC_FAILED;
-                    goto END_OF_ROUTINE;
-                }
-            }
-            dbCfg->portNo = port;
+#if !(ENT_ENABLE_PGSQL && ENT_PGSQL_FOUND)
+            *pdbHandle = NULL;
+            sts = iENT_DbBackendUnsupported(PGSQL_TYPE);
+            goto END_OF_ROUTINE;
+#endif
             break;
 
         default:
@@ -724,6 +696,54 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
             sts = ENT_DBS_UNSUPPORTED;
             goto END_OF_ROUTINE;
     }
+
+    dbCfg = (DB_CFG*)malloc(sizeof(DB_CFG));
+    if(dbCfg==NULL)
+    {
+        IENT_LOG_ERROR("Database malloc db config failed\n");
+        sts = ENT_DBS_ALLOC_FAILED;
+        goto END_OF_ROUTINE;
+    }
+    memset(dbCfg,0,sizeof(DB_CFG));
+    dbCfg->dbType = dbType;
+    dbCfg->handleState = ENT_DB_HANDLE_CREATED_E;
+    if(host)
+    {
+        dbCfg->host = ENT_StrDup(host);
+        if(dbCfg->host == NULL)
+        {
+            sts = ENT_DBS_ALLOC_FAILED;
+            goto END_OF_ROUTINE;
+        }
+    }
+    if(database)
+    {
+        dbCfg->database = ENT_StrDup(database);
+        if(dbCfg->database == NULL)
+        {
+            sts = ENT_DBS_ALLOC_FAILED;
+            goto END_OF_ROUTINE;
+        }
+    }
+    if(user)
+    {
+        dbCfg->userName = ENT_StrDup(user);
+        if(dbCfg->userName == NULL)
+        {
+            sts = ENT_DBS_ALLOC_FAILED;
+            goto END_OF_ROUTINE;
+        }
+    }
+    if(passwd)
+    {
+        dbCfg->passwd = ENT_StrDup(passwd);
+        if(dbCfg->passwd == NULL)
+        {
+            sts = ENT_DBS_ALLOC_FAILED;
+            goto END_OF_ROUTINE;
+        }
+    }
+    dbCfg->portNo = port;
 #ifdef WIN32
     InitializeCriticalSection(&dbCfg->cs);
 #else

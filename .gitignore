@@ -7,8 +7,9 @@
 /vcpkg*/
 .local-install/
 .vscode/
+.ci-review/
 
-#cmake
+# CMake
 CMakeLists.txt.user
 CMakeCache.txt
 CMakeFiles
@@ -21,7 +22,7 @@ compile_commands.json
 CTestTestfile.cmake
 _deps
 
-#python
+# Python
 *.manifest
 *.spec
 

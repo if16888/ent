@@ -7,6 +7,9 @@ install_dir="${INSTALL_DIR:-${build_dir}/install}"
 downstream_build_dir="${DOWNSTREAM_BUILD_DIR:-${build_dir}/downstream-consumer}"
 downstream_source_dir="${DOWNSTREAM_SOURCE_DIR:-test/downstream_consumer}"
 ci_log_dir="${CI_LOG_DIR:-}"
+ent_enable_sqlite="${ENT_ENABLE_SQLITE:-ON}"
+ent_enable_mysql="${ENT_ENABLE_MYSQL:-ON}"
+ent_enable_pgsql="${ENT_ENABLE_PGSQL:-ON}"
 
 log_file() {
   local name="$1"
@@ -50,9 +53,9 @@ run_configure() {
     -S .
     -B "${build_dir}"
     -DCMAKE_BUILD_TYPE=Release
-    -DENT_ENABLE_SQLITE=ON
-    -DENT_ENABLE_MYSQL=ON
-    -DENT_ENABLE_PGSQL=ON
+    -DENT_ENABLE_SQLITE="${ent_enable_sqlite}"
+    -DENT_ENABLE_MYSQL="${ent_enable_mysql}"
+    -DENT_ENABLE_PGSQL="${ent_enable_pgsql}"
   )
 
   if command -v ninja >/dev/null 2>&1; then
@@ -61,6 +64,8 @@ run_configure() {
     cmake_args+=(-G "Unix Makefiles")
   fi
 
+  printf 'Database backends: SQLite=%s MySQL=%s PostgreSQL=%s\n' \
+    "${ent_enable_sqlite}" "${ent_enable_mysql}" "${ent_enable_pgsql}"
   run_with_log configure cmake "${cmake_args[@]}"
 }
 

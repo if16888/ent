@@ -1,0 +1,137 @@
+name: Optional database backends
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: optional-backends-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux-optional-backends:
+    name: Linux optional DB (${{ matrix.config }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - config: no-db
+            sqlite: "OFF"
+            mysql: "OFF"
+            pgsql: "OFF"
+            packages: "ninja-build"
+          - config: sqlite-only
+            sqlite: "ON"
+            mysql: "OFF"
+            pgsql: "OFF"
+            packages: "ninja-build libsqlite3-dev"
+    env:
+      BUILD_DIR: build-optional-${{ matrix.config }}
+      INSTALL_DIR: build-optional-${{ matrix.config }}/install
+      DOWNSTREAM_BUILD_DIR: build-optional-${{ matrix.config }}/downstream-consumer
+      ENT_ENABLE_SQLITE: ${{ matrix.sqlite }}
+      ENT_ENABLE_MYSQL: ${{ matrix.mysql }}
+      ENT_ENABLE_PGSQL: ${{ matrix.pgsql }}
+      CI_LOG_DIR: ${{ github.workspace }}/ci-logs/optional-linux-${{ matrix.config }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install enabled dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.packages }}
+
+      - name: Configure
+        run: ./scripts/run-ci-linux.sh configure
+
+      - name: Build
+        run: ./scripts/run-ci-linux.sh build
+
+      - name: Test
+        run: ./scripts/run-ci-linux.sh test
+
+      - name: Install and downstream consumer check
+        run: ./scripts/run-ci-linux.sh install-consumer
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: optional-linux-${{ matrix.config }}-logs
+          path: ${{ env.CI_LOG_DIR }}
+          if-no-files-found: ignore
+
+  windows-optional-backends:
+    name: Windows x64 optional DB (${{ matrix.config }})
+    runs-on: windows-2022
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - config: no-db
+            sqlite: "OFF"
+            mysql: "OFF"
+            pgsql: "OFF"
+          - config: sqlite-only
+            sqlite: "ON"
+            mysql: "OFF"
+            pgsql: "OFF"
+    env:
+      BUILD_DIR: build-optional-${{ matrix.config }}
+      INSTALL_DIR: build-optional-${{ matrix.config }}\install
+      DOWNSTREAM_BUILD_DIR: build-optional-${{ matrix.config }}\downstream-consumer
+      WINDOWS_CMAKE_PLATFORM: x64
+      VCPKG_TARGET_TRIPLET: x64-windows
+      ENT_ENABLE_SQLITE: ${{ matrix.sqlite }}
+      ENT_ENABLE_MYSQL: ${{ matrix.mysql }}
+      ENT_ENABLE_PGSQL: ${{ matrix.pgsql }}
+      CI_LOG_DIR: ${{ github.workspace }}\ci-logs\optional-windows-${{ matrix.config }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache vcpkg downloads and binary packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            C:\vcpkg\downloads
+            C:\Users\runneradmin\AppData\Local\vcpkg\archives
+          key: ${{ runner.os }}-vcpkg-optional-${{ matrix.config }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-optional-${{ matrix.config }}-
+
+      - name: Configure
+        shell: pwsh
+        run: .\scripts\run-ci-windows.ps1 configure
+
+      - name: Build
+        shell: pwsh
+        run: .\scripts\run-ci-windows.ps1 build
+
+      - name: Test
+        shell: pwsh
+        run: .\scripts\run-ci-windows.ps1 test
+
+      - name: Install and downstream consumer check
+        shell: pwsh
+        run: .\scripts\run-ci-windows.ps1 install-consumer
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: optional-windows-${{ matrix.config }}-logs
+          path: ${{ env.CI_LOG_DIR }}
+          if-no-files-found: ignore

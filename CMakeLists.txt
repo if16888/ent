@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
-project(ent LANGUAGES C VERSION 0.1)
+project(ent LANGUAGES C VERSION 0.1.0)
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON)
@@ -74,27 +74,19 @@ get_property(ENT_ENABLE_MYSQL CACHE ENT_ENABLE_MYSQL PROPERTY VALUE)
 get_property(ENT_ENABLE_PGSQL CACHE ENT_ENABLE_PGSQL PROPERTY VALUE)
 get_property(ENT_ENABLE_LUA CACHE ENT_ENABLE_LUA PROPERTY VALUE)
 
-if(NOT ENT_ENABLE_SQLITE OR NOT ENT_ENABLE_MYSQL OR NOT ENT_ENABLE_PGSQL)
-    message(FATAL_ERROR "All database backends must stay enabled; missing DB dependency or explicit OFF is not allowed.")
-endif()
-
 if(ENT_BUILD_EXAMPLES)
     add_subdirectory(example)
 endif()
 if(BUILD_TESTING)
     add_subdirectory(test)
+    add_subdirectory(test_optional)
 endif()
 
 if(WIN32)
-if(ENT_MYSQL_RUNTIME)
-install(FILES
-          ${ENT_MYSQL_RUNTIME}
-        DESTINATION
-          ${CMAKE_INSTALL_BINDIR}
-        COMPONENT
-          ${ENT_RUNTIME_COMPONENT}
-          )
-endif()
+# SQLite is public-domain software and may be bundled in the runtime package.
+# MySQL/MariaDB client runtime libraries are deliberately not redistributed by
+# ent releases; applications enabling that backend must deploy a compatible
+# connector runtime themselves.
 if(ENT_SQLITE_RUNTIME)
 install(FILES
           ${ENT_SQLITE_RUNTIME}

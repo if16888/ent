@@ -9,6 +9,9 @@ $InstallDir = if ($env:INSTALL_DIR) { $env:INSTALL_DIR } else { Join-Path $Build
 $DownstreamBuildDir = if ($env:DOWNSTREAM_BUILD_DIR) { $env:DOWNSTREAM_BUILD_DIR } else { Join-Path $BuildDir "downstream-consumer" }
 $DownstreamSourceDir = if ($env:DOWNSTREAM_SOURCE_DIR) { $env:DOWNSTREAM_SOURCE_DIR } else { "test/downstream_consumer" }
 $LogDir = if ($env:CI_LOG_DIR) { [System.IO.Path]::GetFullPath($env:CI_LOG_DIR) } else { "" }
+$EnableSqlite = if ($env:ENT_ENABLE_SQLITE) { $env:ENT_ENABLE_SQLITE } else { "ON" }
+$EnableMysql = if ($env:ENT_ENABLE_MYSQL) { $env:ENT_ENABLE_MYSQL } else { "ON" }
+$EnablePgsql = if ($env:ENT_ENABLE_PGSQL) { $env:ENT_ENABLE_PGSQL } else { "ON" }
 $ToolchainFile = if ($env:CMAKE_TOOLCHAIN_FILE) {
     $env:CMAKE_TOOLCHAIN_FILE
 } elseif ($env:VCPKG_ROOT) {
@@ -17,6 +20,11 @@ $ToolchainFile = if ($env:CMAKE_TOOLCHAIN_FILE) {
     "C:\vcpkg\scripts\buildsystems\vcpkg.cmake"
 } else {
     ""
+}
+
+function Test-Enabled {
+    param([string]$Value)
+    return $Value -match "^(1|ON|TRUE|YES|Y)$"
 }
 
 function Invoke-Logged {
@@ -48,16 +56,30 @@ function Run-Configure {
         "-A", $Platform,
         "-DCMAKE_BUILD_TYPE=Release",
         "-DVCPKG_TARGET_TRIPLET=$Triplet",
-        "-DENT_ENABLE_SQLITE=ON",
-        "-DENT_ENABLE_MYSQL=ON",
-        "-DENT_ENABLE_PGSQL=ON"
+        "-DENT_ENABLE_SQLITE=$EnableSqlite",
+        "-DENT_ENABLE_MYSQL=$EnableMysql",
+        "-DENT_ENABLE_PGSQL=$EnablePgsql"
     )
+
     if ($env:ENT_ENABLE_ASAN -eq "ON") {
         $CmakeArgs += "-DENT_ENABLE_ASAN=ON"
     }
+
     if ($ToolchainFile) {
+        $ManifestFeatures = @()
+        if (Test-Enabled $EnableSqlite) { $ManifestFeatures += "sqlite" }
+        if (Test-Enabled $EnableMysql) { $ManifestFeatures += "mysql" }
+        if (Test-Enabled $EnablePgsql) { $ManifestFeatures += "pgsql" }
+
         $CmakeArgs += "-DCMAKE_TOOLCHAIN_FILE=$ToolchainFile"
+        $CmakeArgs += "-DVCPKG_MANIFEST_NO_DEFAULT_FEATURES=ON"
+        if ($ManifestFeatures.Count -gt 0) {
+            $CmakeArgs += "-DVCPKG_MANIFEST_FEATURES=$($ManifestFeatures -join ';')"
+        }
+        Write-Host "vcpkg manifest features: $($ManifestFeatures -join ', ')"
     }
+
+    Write-Host "Database backends: SQLite=$EnableSqlite MySQL=$EnableMysql PostgreSQL=$EnablePgsql"
     Invoke-Logged "configure" { cmake @CmakeArgs }
 }
 
@@ -70,7 +92,7 @@ function Run-Test {
         Push-Location $BuildDir
         try {
             ctest -C Release --output-on-failure `
-                -R "test_ent_init|test_ent_msg|test_utl_dll|test_utl_thread|test_utl_lock_cv|test_ent_thread|test_ent_thread_failures|test_utl_tpool|test_utl_tpool_lifecycle|test_utl_tpool_integration|test_utl_timer|test_utl_socket|test_ent_db|test_ent_log|test_ent_shm|test_security"
+                -R "test_ent_init|test_ent_msg|test_utl_dll|test_utl_thread|test_utl_lock_cv|test_ent_thread|test_ent_thread_failures|test_utl_tpool|test_utl_tpool_lifecycle|test_utl_tpool_integration|test_utl_timer|test_utl_socket|test_ent_db|test_ent_log|test_ent_shm|test_security|test_ent_optional_backends"
         }
         finally {
             Pop-Location

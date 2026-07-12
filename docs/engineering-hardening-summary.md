@@ -374,3 +374,34 @@ Linux 侧直接跑 `ctest`，也会覆盖到这些新增测试。
 - 继续保持 README、测试、CI 同步推进，而不是只改代码本体
 
 这样可以让 `ent` 更稳定地朝 SDK / 平台组件方向演进。
+
+---
+
+## 12. 当前状态（截至 v0.1.0）
+
+### 已关闭的历史任务
+
+| 任务 | 关闭状态 | 相关 PR / commit |
+|---|---|---|
+| Thread startup race（Windows 端 callback 早于 tid 发布） | ✅ 已修复 | PR #36，`9557018` |
+| Linux TSan 数据竞争（volatile + sleep 伪同步） | ✅ 已修复 | `5bf572c` |
+| Windows x64 ASan `0xC0000135` DLL 缺失 | ✅ 已修复 | `9a97bd9` |
+| CI 仅支持 `workflow_dispatch` | ✅ 已修复 | `883a46a` |
+| Log ctx 生命周期注册表与并发关闭加固 | ✅ 已合并 | PR #34 |
+| Log / worker buffer thread 并发加固 | ✅ 已合并 | PR #34 |
+| DB handle active-operation 计数与关闭边界 | ✅ 已合并 | 历史 PR |
+| Release artifact 打包 LICENSE + THIRD_PARTY_NOTICES | ✅ 已完成 | 开源准备 PR |
+| DB 后端真正可选 | ✅ 已实现 | 开源准备 PR |
+
+### 仍开放的后续项（可开源后继续）
+
+| 优先级 | 任务 | 说明 |
+|---|---|---|
+| P1 | `-Wall -Wextra` / `/W4` 门禁 | 清理存量告警后转为 CI 阻断 |
+| P2 | ABI compatibility checker | 防止跨 minor version 无意破坏 ABI |
+| P2 | 覆盖率报告 | 量化测试盲区 |
+| P2 | CMake target-based 重构 | 消除全局 `include_directories` / `CMAKE_C_FLAGS` 污染 |
+| P3 | CodeQL / clang-tidy | 静态分析门禁 |
+| P3 | Fuzz testing | 针对消息解析和 script loader |
+| P3 | `SleepConditionVariableCS` 返回值检查 | Windows condvar 极端失败路径 |
+| P3 | Nightly 重复并发压力测试 | TSan repeat 20+ 的 CI 化 |

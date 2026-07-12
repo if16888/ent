@@ -43,6 +43,8 @@ jobs:
           rm -rf build/package-runtime build/package-devel
           cmake --install build --prefix build/package-runtime --component runtime
           cmake --install build --prefix build/package-devel --component devel
+          cp LICENSE NOTICE THIRD_PARTY_NOTICES build/package-runtime/
+          cp LICENSE NOTICE THIRD_PARTY_NOTICES build/package-devel/
           tar -C build/package-runtime -czf ent-${GITHUB_REF_NAME}-linux-x86_64-runtime.tar.gz .
           tar -C build/package-devel -czf ent-${GITHUB_REF_NAME}-linux-x86_64-devel.tar.gz .
 
@@ -131,6 +133,16 @@ jobs:
           if (Test-Path $DevelPackage) { Remove-Item $DevelPackage -Recurse -Force }
           cmake --install $env:BUILD_DIR --config Release --prefix $RuntimePackage --component runtime
           cmake --install $env:BUILD_DIR --config Release --prefix $DevelPackage --component devel
+          Copy-Item LICENSE, NOTICE, THIRD_PARTY_NOTICES -Destination $RuntimePackage
+          Copy-Item LICENSE, NOTICE, THIRD_PARTY_NOTICES -Destination $DevelPackage
+
+          $BundledMariaDb = Get-ChildItem -LiteralPath $RuntimePackage -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^(libmariadb|mariadb|libmysql|mysql)\.dll$' }
+          if ($BundledMariaDb) {
+            $BundledMariaDb | Select-Object -ExpandProperty FullName
+            throw "MariaDB/MySQL runtime DLLs must not be redistributed in ent release packages"
+          }
+
           Compress-Archive -Path "$RuntimePackage\*" -DestinationPath ent-${env:GITHUB_REF_NAME}-windows-${{ matrix.arch }}-runtime.zip -Force
           Compress-Archive -Path "$DevelPackage\*" -DestinationPath ent-${env:GITHUB_REF_NAME}-windows-${{ matrix.arch }}-devel.zip -Force
 

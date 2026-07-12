@@ -33,7 +33,7 @@ typedef enum DB_TYPE
 
 typedef struct DB_READ_HEADER
 {
-    BOOL isFetchMore;// whether more rows are available
+    ENT_BOOL isFetchMore;// whether more rows are available
 }DB_READ_HEADER;
 
 typedef void(* SqlResultCB)(char** fields,char** rowRes,long long rowNum,int columnNum,void* userData);
@@ -74,12 +74,12 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInit();
 ENT_PUBLIC MSG_ID_T  ENT_DbClose();
 
 ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
-                     DB_TYPE dbType,
-                     const char* host,
-                     const char* database,
-                     const char* user,
-                     const char* passwd,
-                     int  port);
+                      DB_TYPE dbType,
+                      const char* host,
+                      const char* database,
+                      const char* user,
+                      const char* passwd,
+                      int  port);
 
 ENT_PUBLIC MSG_ID_T  ENT_DbOpen(DB_HANDLE dbHandle);
 

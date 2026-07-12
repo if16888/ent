@@ -1,10 +1,30 @@
 {
   "name": "ent",
   "version-string": "0.1.0",
-  "description": "ent C library",
-  "dependencies": [
-    "sqlite3",
-    "libmariadb",
-    "libpq"
-  ]
+  "description": "Cross-platform C infrastructure library",
+  "default-features": [
+    "sqlite",
+    "mysql",
+    "pgsql"
+  ],
+  "features": {
+    "sqlite": {
+      "description": "Enable the SQLite backend",
+      "dependencies": [
+        "sqlite3"
+      ]
+    },
+    "mysql": {
+      "description": "Enable the MySQL/MariaDB backend",
+      "dependencies": [
+        "libmariadb"
+      ]
+    },
+    "pgsql": {
+      "description": "Enable the PostgreSQL backend",
+      "dependencies": [
+        "libpq"
+      ]
+    }
+  }
 }

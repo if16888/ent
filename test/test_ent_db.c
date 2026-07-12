@@ -1482,25 +1482,32 @@ static int test_pgsql_handle_lifecycle(void)
     }
 
     sts = ENT_DbInitHandle(&db_handle, PGSQL_TYPE, "127.0.0.1", "test", "root", "123456", 5432);
-    if(expect_true(sts == 0 && db_handle != NULL,
-                   "ENT_DbInitHandle should create a PgSQL handle structure") != 0)
+#if ENT_ENABLE_PGSQL && ENT_PGSQL_FOUND
+    if(expect_true(sts == ENT_SYS_NORMAL && db_handle != NULL,
+                   "ENT_DbInitHandle should create a PgSQL handle when the backend is enabled") != 0)
     {
         ENT_DbClose();
         return 1;
     }
 
-    sts = ENT_DbCloseHandle(&db_handle);
-#if ENT_ENABLE_PGSQL
-    if(expect_true(sts == ENT_SYS_NORMAL,
-                   "ENT_DbCloseHandle should clean up the PgSQL handle") != 0)
-#else
-    if(expect_true(sts == ENT_DBS_UNSUPPORTED,
-                   "ENT_DbCloseHandle should report PgSQL as unsupported when it is disabled") != 0)
-#endif
+    if(expect_true(ENT_DbCloseHandle(&db_handle) == ENT_SYS_NORMAL,
+                   "ENT_DbCloseHandle should clean up the PgSQL handle") != 0 ||
+       expect_true(db_handle == NULL,
+                   "ENT_DbCloseHandle should clear a successfully closed PgSQL handle") != 0)
     {
         ENT_DbClose();
         return 1;
     }
+#else
+    if(expect_true(sts == ENT_DBS_UNSUPPORTED,
+                   "ENT_DbInitHandle should reject PgSQL when the backend is disabled") != 0 ||
+       expect_true(db_handle == NULL,
+                   "A disabled PgSQL backend must not return a live handle") != 0)
+    {
+        ENT_DbClose();
+        return 1;
+    }
+#endif
 
     return expect_true(ENT_DbClose() == 0,
                        "ENT_DbClose should close the DB service after the PgSQL lifecycle test");
