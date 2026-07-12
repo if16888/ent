@@ -23,6 +23,7 @@ static int s_wait_calls = 0;
 static int s_close_calls = 0;
 static int s_lock_close_calls = 0;
 static int s_cv_init_fail = 0;
+static int s_callback_calls = 0;
 
 static int expect_true(int condition, const char* message)
 {
@@ -281,6 +282,7 @@ static DWORD WINAPI dummy_thread(void* data)
 static void* dummy_thread(void* data)
 #endif
 {
+    s_callback_calls++;
 #ifdef WIN32
     return (DWORD)(ULONG_PTR)data;
 #else
@@ -320,6 +322,7 @@ static int test_thread_create_reclaims_created_thread_if_registration_fails(void
     s_join_calls = 0;
     s_wait_calls = 0;
     s_close_calls = 0;
+    s_callback_calls = 0;
 
     if(expect_true(ENT_ThreadInit(&handle) == ENT_SYS_NORMAL,
                    "ENT_ThreadInit should create a thread context for registration failure checks") != 0)
@@ -337,6 +340,13 @@ static int test_thread_create_reclaims_created_thread_if_registration_fails(void
 
     if(expect_true(tid == NULL,
                    "ENT_ThreadCreate should clear tid when registration fails after thread creation") != 0)
+    {
+        ENT_ThreadClose(handle);
+        return 1;
+    }
+
+    if(expect_true(s_callback_calls == 0,
+                   "registration failure must not invoke the user callback") != 0)
     {
         ENT_ThreadClose(handle);
         return 1;

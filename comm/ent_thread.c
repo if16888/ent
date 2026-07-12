@@ -341,11 +341,11 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
         iENT_ThreadEndCall(thCtx);
          return ENT_THRD_CREATE_FAILED;
       }
-      ResumeThread(tmp->thHandle);
       if(tid!=NULL)
      {
          *tid = tmp;
      }
+      ResumeThread(tmp->thHandle);
     iENT_ThreadEndCall(thCtx);
     return ENT_SYS_NORMAL;
 }
