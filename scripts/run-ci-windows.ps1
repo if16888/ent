@@ -118,6 +118,7 @@ function Run-InstallConsumer {
         )
         if ($ToolchainFile) {
             $ConsumerArgs += "-DCMAKE_TOOLCHAIN_FILE=$ToolchainFile"
+            $ConsumerArgs += "-DVCPKG_INSTALLED_DIR=$([System.IO.Path]::GetFullPath((Join-Path $BuildDir 'vcpkg_installed')))"
         }
         cmake @ConsumerArgs
         cmake --build $DownstreamBuildPath --config Release
