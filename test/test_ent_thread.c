@@ -144,6 +144,30 @@ typedef struct TEST_SELF_WAIT_CTX
     TEST_RESULT_EVENT completed;
 } TEST_SELF_WAIT_CTX;
 
+typedef struct TEST_TID_PUBLICATION_CTX
+{
+    ENT_THREAD_ID* tid;
+    int            sawPublishedTid;
+    TEST_RESULT_EVENT completed;
+} TEST_TID_PUBLICATION_CTX;
+
+#ifdef WIN32
+static DWORD WINAPI tid_publication_thread(void* data)
+#else
+static void* tid_publication_thread(void* data)
+#endif
+{
+    TEST_TID_PUBLICATION_CTX* ctx = (TEST_TID_PUBLICATION_CTX*)data;
+
+    ctx->sawPublishedTid = (ctx->tid != NULL && *ctx->tid != NULL);
+    test_result_event_publish(&ctx->completed, ctx->sawPublishedTid);
+#ifdef WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
 #ifdef WIN32
 static DWORD WINAPI self_close_thread(void* data)
 #else
@@ -372,6 +396,57 @@ static int test_thread_create_wait_and_close_roundtrip(void)
     }
 
     return expect_true(ENT_ThreadClose(handle) == 0, "ENT_ThreadClose should release the thread context");
+}
+
+static int test_thread_publishes_tid_before_callback(void)
+{
+    ENT_THREAD handle = NULL;
+    ENT_THREAD_ID tid = NULL;
+    TEST_TID_PUBLICATION_CTX ctx;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.tid = &tid;
+    if(expect_true(test_result_event_init(&ctx.completed) == 0,
+                   "publication event should initialize") != 0)
+    {
+        return 1;
+    }
+    if(expect_true(ENT_ThreadInit(&handle) == ENT_SYS_NORMAL,
+                   "ENT_ThreadInit should create a context for tid publication checks") != 0)
+    {
+        test_result_event_destroy(&ctx.completed);
+        return 1;
+    }
+    if(expect_true(ENT_ThreadCreate(&tid, handle, tid_publication_thread, &ctx) == ENT_SYS_NORMAL,
+                   "ENT_ThreadCreate should publish a tid before starting the callback") != 0)
+    {
+        ENT_ThreadClose(handle);
+        test_result_event_destroy(&ctx.completed);
+        return 1;
+    }
+    test_result_event_wait(&ctx.completed);
+    if(expect_true(ENT_ThreadWaitById(&tid, handle, 0) == ENT_SYS_NORMAL,
+                   "ENT_ThreadWaitById should join the publication worker") != 0)
+    {
+        ENT_ThreadClose(handle);
+        test_result_event_destroy(&ctx.completed);
+        return 1;
+    }
+    if(expect_true(ctx.sawPublishedTid != 0,
+                   "thread callback should observe the published tid") != 0)
+    {
+        ENT_ThreadClose(handle);
+        test_result_event_destroy(&ctx.completed);
+        return 1;
+    }
+    if(expect_true(ENT_ThreadClose(handle) == ENT_SYS_NORMAL,
+                   "ENT_ThreadClose should release the publication context") != 0)
+    {
+        test_result_event_destroy(&ctx.completed);
+        return 1;
+    }
+    test_result_event_destroy(&ctx.completed);
+    return 0;
 }
 
 static int test_thread_wait_timeout_returns_retry_signal(void)
@@ -605,6 +680,7 @@ int main(void)
     failures += test_thread_init_rejects_null_pointer();
     failures += test_thread_detach_create_rejects_invalid_handle();
     failures += test_thread_create_wait_and_close_roundtrip();
+    failures += test_thread_publishes_tid_before_callback();
     failures += test_thread_wait_timeout_returns_retry_signal();
     failures += test_thread_wait_returns_success_when_thread_finishes_before_timeout();
     failures += test_thread_close_releases_thread_context();

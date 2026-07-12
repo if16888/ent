@@ -23,6 +23,12 @@ static int s_wait_calls = 0;
 static int s_close_calls = 0;
 static int s_lock_close_calls = 0;
 static int s_cv_init_fail = 0;
+static int s_callback_calls = 0;
+static int s_wrapper_calls = 0;
+#ifdef WIN32
+static LPTHREAD_START_ROUTINE s_saved_start_routine = NULL;
+static LPVOID s_saved_param = NULL;
+#endif
 
 static int expect_true(int condition, const char* message)
 {
@@ -60,6 +66,7 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle, const char* format, ...){(void)logHandl
 #define UTL_DllRemCurr mock_UTL_DllRemCurr
 #ifdef WIN32
 #define CreateThread mock_CreateThread
+#define WakeConditionVariable mock_WakeConditionVariable
 #define WaitForSingleObject mock_WaitForSingleObject
 #define CloseHandle mock_CloseHandle
 #else
@@ -249,14 +256,25 @@ static HANDLE mock_CreateThread(LPSECURITY_ATTRIBUTES attrs, SIZE_T stackSize, L
 {
     (void)attrs;
     (void)stackSize;
-    (void)startRoutine;
-    (void)param;
     (void)flags;
+    s_saved_start_routine = startRoutine;
+    s_saved_param = param;
     if(threadId != NULL)
     {
         *threadId = 77;
     }
     return (HANDLE)0x1234;
+}
+
+static BOOL mock_WakeConditionVariable(PCONDITION_VARIABLE cv)
+{
+    (void)cv;
+    s_wrapper_calls++;
+    if(s_saved_start_routine != NULL)
+    {
+        s_saved_start_routine(s_saved_param);
+    }
+    return TRUE;
 }
 
 static DWORD mock_WaitForSingleObject(HANDLE handle, DWORD milliseconds)
@@ -281,6 +299,7 @@ static DWORD WINAPI dummy_thread(void* data)
 static void* dummy_thread(void* data)
 #endif
 {
+    s_callback_calls++;
 #ifdef WIN32
     return (DWORD)(ULONG_PTR)data;
 #else
@@ -320,6 +339,12 @@ static int test_thread_create_reclaims_created_thread_if_registration_fails(void
     s_join_calls = 0;
     s_wait_calls = 0;
     s_close_calls = 0;
+    s_callback_calls = 0;
+    s_wrapper_calls = 0;
+#ifdef WIN32
+    s_saved_start_routine = NULL;
+    s_saved_param = NULL;
+#endif
 
     if(expect_true(ENT_ThreadInit(&handle) == ENT_SYS_NORMAL,
                    "ENT_ThreadInit should create a thread context for registration failure checks") != 0)
@@ -341,6 +366,22 @@ static int test_thread_create_reclaims_created_thread_if_registration_fails(void
         ENT_ThreadClose(handle);
         return 1;
     }
+
+    if(expect_true(s_callback_calls == 0,
+                   "registration failure must not invoke the user callback") != 0)
+    {
+        ENT_ThreadClose(handle);
+        return 1;
+    }
+
+#ifdef WIN32
+    if(expect_true(s_wrapper_calls == 1,
+                   "registration failure should execute the internal wrapper") != 0)
+    {
+        ENT_ThreadClose(handle);
+        return 1;
+    }
+#endif
 
 #ifdef WIN32
     if(expect_true(s_wait_calls == 1,

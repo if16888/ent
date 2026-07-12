@@ -143,6 +143,115 @@ jobs:
             ${{ env.BUILD_DIR }}/Testing/Temporary
           if-no-files-found: ignore
 
+  sanitizer-windows-asan:
+    name: Windows x64 ASan
+    runs-on: windows-2022
+    timeout-minutes: 30
+    env:
+      BUILD_DIR: build-windows-asan
+      WINDOWS_CMAKE_PLATFORM: x64
+      VCPKG_TARGET_TRIPLET: x64-windows
+      ENT_ENABLE_ASAN: ON
+      CI_LOG_DIR: ${{ github.workspace }}/ci-logs/windows-asan
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache vcpkg downloads and binary packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            C:\vcpkg\downloads
+            C:\Users\runneradmin\AppData\Local\vcpkg\archives
+          key: ${{ runner.os }}-vcpkg-asan-x64-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-asan-x64-
+
+      - name: Configure
+        shell: pwsh
+        run: .\scripts\run-ci-windows.ps1 configure
+
+      - name: Build
+        shell: pwsh
+        run: .\scripts\run-ci-windows.ps1 build
+
+      - name: Test Windows lifecycle targets under ASan
+        shell: pwsh
+        env:
+          ASAN_SAVE_DUMPS: ${{ github.workspace }}\ci-logs\windows-asan\asan.dmp
+        run: |
+          $logDir = $env:CI_LOG_DIR
+          New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path -LiteralPath $vswhere)) {
+            throw "vswhere.exe was not found at $vswhere"
+          }
+          $vsInstall = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ([string]::IsNullOrWhiteSpace($vsInstall)) {
+            & $vswhere -all -products * -format json
+            throw "No Visual Studio installation with the VC x86/x64 tools was found"
+          }
+          Write-Host "Visual Studio installation: $vsInstall"
+
+          $msvcRoot = Join-Path $vsInstall "VC\Tools\MSVC"
+          if (-not (Test-Path -LiteralPath $msvcRoot)) {
+            & $vswhere -all -products * -format json
+            throw "MSVC tools directory was not found at $msvcRoot"
+          }
+          Write-Host "Installed MSVC toolsets:"
+          Get-ChildItem -LiteralPath $msvcRoot -Directory | Select-Object -ExpandProperty FullName
+
+          $asanDll = Get-ChildItem -LiteralPath $msvcRoot -Filter "clang_rt.asan_dynamic-x86_64.dll" -File -Recurse |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if ($null -eq $asanDll) {
+            & $vswhere -all -products * -format json
+            Get-ChildItem -LiteralPath $msvcRoot -Directory -Recurse | Select-Object -ExpandProperty FullName
+            throw "clang_rt.asan_dynamic-x86_64.dll was not found below $msvcRoot"
+          }
+          Write-Host "Using Windows ASan runtime: $($asanDll.FullName)"
+          $env:PATH = "$($asanDll.DirectoryName);$env:PATH"
+
+          $dumpbin = Get-ChildItem -LiteralPath $msvcRoot -Filter "dumpbin.exe" -File -Recurse |
+            Where-Object { $_.FullName -match "Hostx64\\x64" } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if ($null -eq $dumpbin) {
+            throw "x64 dumpbin.exe was not found below $msvcRoot"
+          }
+          $threadTest = Resolve-Path (Join-Path $env:BUILD_DIR "bin\Release\test_ent_thread.exe")
+          Write-Host "Inspecting dependencies with: $($dumpbin.FullName)"
+          & $dumpbin.FullName /DEPENDENTS $threadTest.Path *>&1 |
+            Tee-Object -FilePath (Join-Path $logDir "test_ent_thread-dependents.log")
+          if ($LASTEXITCODE -ne 0) {
+            throw "dumpbin /DEPENDENTS failed with exit code $LASTEXITCODE"
+          }
+
+          Push-Location $env:BUILD_DIR
+          try {
+            ctest -C Release --output-on-failure -V `
+              -R "^(test_ent_init|test_ent_init_concurrency|test_ent_log|test_ent_db|test_ent_thread|test_ent_thread_failures|test_utl_tpool_integration)$" `
+              *>&1 | Tee-Object -FilePath (Join-Path $logDir "ctest-windows-asan.log")
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+          }
+          finally {
+            Pop-Location
+          }
+
+      - name: Upload Windows ASan logs and dumps
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanitizer-logs-windows-asan
+          path: |
+            ${{ env.CI_LOG_DIR }}
+            ${{ env.BUILD_DIR }}/Testing/Temporary
+          if-no-files-found: ignore
+
   build-windows:
     runs-on: windows-2022
     strategy:

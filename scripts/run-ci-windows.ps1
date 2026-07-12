@@ -52,6 +52,9 @@ function Run-Configure {
         "-DENT_ENABLE_MYSQL=ON",
         "-DENT_ENABLE_PGSQL=ON"
     )
+    if ($env:ENT_ENABLE_ASAN -eq "ON") {
+        $CmakeArgs += "-DENT_ENABLE_ASAN=ON"
+    }
     if ($ToolchainFile) {
         $CmakeArgs += "-DCMAKE_TOOLCHAIN_FILE=$ToolchainFile"
     }

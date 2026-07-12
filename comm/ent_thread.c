@@ -36,6 +36,11 @@ typedef struct THREAD_DB
 #ifdef WIN32
     HANDLE         thHandle;
     DWORD          thId;
+    PTHREAD_START_ROUTINE thProc;
+    void*          thData;
+    CRITICAL_SECTION startLock;
+    CONDITION_VARIABLE startCv;
+    LONG           startState;
 #else
     void*          thHandle;
     pthread_t      thId;
@@ -56,6 +61,27 @@ enum
     ENT_THREAD_START_RUN_E,
     ENT_THREAD_START_ABORT_E
 };
+
+#ifdef WIN32
+static DWORD WINAPI iENT_ThreadProc(void* data)
+{
+    THREAD_DB* thDb = (THREAD_DB*)data;
+    LONG state;
+
+    EnterCriticalSection(&thDb->startLock);
+    while(thDb->startState == ENT_THREAD_START_PENDING_E)
+    {
+        SleepConditionVariableCS(&thDb->startCv, &thDb->startLock, INFINITE);
+    }
+    state = thDb->startState;
+    LeaveCriticalSection(&thDb->startLock);
+    if(state != ENT_THREAD_START_RUN_E)
+    {
+        return 0;
+    }
+    return thDb->thProc(thDb->thData);
+}
+#endif
 
 #define ENT_TH_TAG (0xEB90CA8F)
 
@@ -316,10 +342,16 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
     }
     memset(tmp,0,sizeof(THREAD_DB));
     
-     tmpHandle = CreateThread(NULL,0,thProc,thData,CREATE_SUSPENDED,&tmp->thId);
+     tmp->thProc = thProc;
+     tmp->thData = thData;
+     InitializeCriticalSection(&tmp->startLock);
+     InitializeConditionVariable(&tmp->startCv);
+     tmp->startState = ENT_THREAD_START_PENDING_E;
+     tmpHandle = CreateThread(NULL,0,iENT_ThreadProc,tmp,0,&tmp->thId);
      if(tmpHandle == NULL)
      {
         IENT_LOG_ERROR("CreateThread failed,error code %u\n",GetLastError());
+        DeleteCriticalSection(&tmp->startLock);
         free(tmp);
         iENT_ThreadEndCall(thCtx);
         return ENT_THRD_CREATE_FAILED;
@@ -331,21 +363,28 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid,ENT_THREAD handle,PTHREA
      UTL_LockLeave(thCtx->dllLock);
       if(sts < 0)
       {
-         ResumeThread(tmp->thHandle);
+         EnterCriticalSection(&tmp->startLock);
+         tmp->startState = ENT_THREAD_START_ABORT_E;
+         LeaveCriticalSection(&tmp->startLock);
+         WakeConditionVariable(&tmp->startCv);
          WaitForSingleObject(tmp->thHandle, INFINITE);
-        CloseHandle(tmp->thHandle);
-        tmp->thHandle = NULL;
-        tmp->thId = 0;
-        tmp->tag = 0x0;
-        free(tmp);
+         CloseHandle(tmp->thHandle);
+         tmp->thHandle = NULL;
+         tmp->thId = 0;
+         tmp->tag = 0x0;
+         DeleteCriticalSection(&tmp->startLock);
+         free(tmp);
         iENT_ThreadEndCall(thCtx);
          return ENT_THRD_CREATE_FAILED;
       }
-      ResumeThread(tmp->thHandle);
       if(tid!=NULL)
      {
          *tid = tmp;
      }
+      EnterCriticalSection(&tmp->startLock);
+      tmp->startState = ENT_THREAD_START_RUN_E;
+      LeaveCriticalSection(&tmp->startLock);
+      WakeConditionVariable(&tmp->startCv);
     iENT_ThreadEndCall(thCtx);
     return ENT_SYS_NORMAL;
 }
@@ -435,6 +474,7 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid,ENT_THREAD handle,int 
         thDb->thHandle = NULL;
         thDb->thId = 0;
         thDb->tag  = 0x0;
+        DeleteCriticalSection(&thDb->startLock);
     }
     free(thDb);
     iENT_ThreadEndCall(thCtx);
@@ -514,6 +554,7 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
             thDb->thHandle = NULL;
             thDb->thId = 0;
             thDb->tag = 0x0;
+            DeleteCriticalSection(&thDb->startLock);
         }
         free(thDb);
     }
