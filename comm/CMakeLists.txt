@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.6 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
 
 project(ent C)
 
@@ -45,6 +45,7 @@ set(ENT_PGSQL_RUNTIME "" CACHE INTERNAL "PostgreSQL runtime library")
 set(ENT_LUA_INCLUDE_DIR "" CACHE INTERNAL "Lua include directory")
 set(ENT_LUA_LIBRARY "" CACHE INTERNAL "Lua shared library")
 set(ENT_LUA_TARGET "" CACHE INTERNAL "Lua static target")
+set(ENT_LUA_DEP_TARGET "" CACHE INTERNAL "Lua shared dependency target")
 
 set(ENT_MSG_SPEC_FILE ${CMAKE_CURRENT_SOURCE_DIR}/../msg/ent.msg)
 set(ENT_MSG_GENERATOR ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/gen_ent_msg.py)
@@ -153,7 +154,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
       include_directories(${ENT_SQLITE_INCLUDE_DIR})
       get_filename_component(ENT_SQLITE_LIBRARY_DIR ${ENT_SQLITE_LIBRARY} DIRECTORY)
       if(WIN32)
-        find_file(ENT_SQLITE_RUNTIME NAMES sqlite3.dll HINTS ${ENT_SQLITE_LIBRARY_DIR} ${ENT_SQLITE_LIBRARY_DIR}/../bin)
+        get_filename_component(ENT_SQLITE_RUNTIME_CANDIDATE
+          "${ENT_SQLITE_LIBRARY_DIR}/../bin/sqlite3.dll" ABSOLUTE)
+        if(EXISTS "${ENT_SQLITE_RUNTIME_CANDIDATE}")
+          set(ENT_SQLITE_RUNTIME "${ENT_SQLITE_RUNTIME_CANDIDATE}")
+        else()
+          find_file(ENT_SQLITE_RUNTIME NAMES sqlite3.dll
+            HINTS ${ENT_SQLITE_LIBRARY_DIR} ${ENT_SQLITE_LIBRARY_DIR}/../bin)
+        endif()
         if(ENT_SQLITE_RUNTIME)
           set(ENT_SQLITE_RUNTIME ${ENT_SQLITE_RUNTIME} CACHE INTERNAL "SQLite runtime library" FORCE)
         endif()
@@ -409,6 +417,39 @@ endif()
 ent_prefer_release_library(ENT_SQLITE_LIBRARY)
 ent_prefer_release_library(ENT_MYSQL_LIBRARY)
 ent_prefer_release_library(ENT_PGSQL_LIBRARY)
+
+if(ENT_SQLITE_FOUND AND NOT TARGET SQLite::SQLite3)
+  add_library(SQLite::SQLite3 UNKNOWN IMPORTED)
+  set_target_properties(SQLite::SQLite3 PROPERTIES
+    IMPORTED_LOCATION "${ENT_SQLITE_LIBRARY}"
+    INTERFACE_INCLUDE_DIRECTORIES "${ENT_SQLITE_INCLUDE_DIR}"
+  )
+endif()
+
+if(ENT_MYSQL_FOUND AND NOT TARGET MariaDB::MariaDB)
+  add_library(MariaDB::MariaDB UNKNOWN IMPORTED)
+  set_target_properties(MariaDB::MariaDB PROPERTIES
+    IMPORTED_LOCATION "${ENT_MYSQL_LIBRARY}"
+    INTERFACE_INCLUDE_DIRECTORIES "${ENT_MYSQL_INCLUDE_DIR}"
+  )
+endif()
+
+if(ENT_PGSQL_FOUND AND NOT TARGET PostgreSQL::PostgreSQL)
+  add_library(PostgreSQL::PostgreSQL UNKNOWN IMPORTED)
+  set_target_properties(PostgreSQL::PostgreSQL PROPERTIES
+    IMPORTED_LOCATION "${ENT_PGSQL_LIBRARY}"
+    INTERFACE_INCLUDE_DIRECTORIES "${ENT_PGSQL_INCLUDE_DIR}"
+  )
+endif()
+
+if(ENT_ENABLE_LUA AND ENT_LUA_LINK_MODE STREQUAL "shared" AND ENT_LUA_LIBRARY)
+  add_library(EntLua::Lua UNKNOWN IMPORTED)
+  set_target_properties(EntLua::Lua PROPERTIES
+    IMPORTED_LOCATION "${ENT_LUA_LIBRARY}"
+    INTERFACE_INCLUDE_DIRECTORIES "${ENT_LUA_INCLUDE_DIR}"
+  )
+  set(ENT_LUA_DEP_TARGET EntLua::Lua CACHE INTERNAL "Lua shared dependency target" FORCE)
+endif()
 ent_export_dependency_settings()
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../inc)
 include_directories(${ENT_MSG_GENERATED_DIR})
@@ -468,23 +509,23 @@ function(ent_link_backend_deps target visibility)
     endif()
   endif()
 
-  if(ENT_SQLITE_FOUND AND ENT_SQLITE_LIBRARY)
-    target_link_libraries(${target} ${visibility} ${ENT_SQLITE_LIBRARY})
+  if(ENT_SQLITE_FOUND)
+    target_link_libraries(${target} ${visibility} SQLite::SQLite3)
   endif()
 
-  if(ENT_MYSQL_FOUND AND ENT_MYSQL_LIBRARY)
-    target_link_libraries(${target} ${visibility} ${ENT_MYSQL_LIBRARY})
+  if(ENT_MYSQL_FOUND)
+    target_link_libraries(${target} ${visibility} MariaDB::MariaDB)
   endif()
 
-  if(ENT_PGSQL_FOUND AND ENT_PGSQL_LIBRARY)
-    target_link_libraries(${target} ${visibility} ${ENT_PGSQL_LIBRARY})
+  if(ENT_PGSQL_FOUND)
+    target_link_libraries(${target} ${visibility} PostgreSQL::PostgreSQL)
   endif()
 
   if(ENT_ENABLE_LUA)
     if(ENT_LUA_TARGET)
       target_link_libraries(${target} ${visibility} ${ENT_LUA_TARGET})
-    elseif(ENT_LUA_LIBRARY)
-      target_link_libraries(${target} ${visibility} ${ENT_LUA_LIBRARY})
+    elseif(ENT_LUA_DEP_TARGET)
+      target_link_libraries(${target} ${visibility} ${ENT_LUA_DEP_TARGET})
     endif()
   endif()
 endfunction()
@@ -518,6 +559,29 @@ if(ENT_BUILD_SHARED)
   )
 
   ent_link_backend_deps(${LIB_NAME_SHARE} PRIVATE)
+
+  if(MSVC)
+    set(ENT_DELAYLOAD_DLLS)
+    if(ENT_MYSQL_FOUND)
+      if(ENT_MYSQL_RUNTIME)
+        get_filename_component(ENT_MYSQL_DLL_NAME "${ENT_MYSQL_RUNTIME}" NAME)
+      elseif(ENT_MYSQL_LIBRARY MATCHES "mariadb")
+        set(ENT_MYSQL_DLL_NAME libmariadb.dll)
+      else()
+        set(ENT_MYSQL_DLL_NAME libmysql.dll)
+      endif()
+      list(APPEND ENT_DELAYLOAD_DLLS "${ENT_MYSQL_DLL_NAME}")
+    endif()
+    if(ENT_PGSQL_FOUND)
+      list(APPEND ENT_DELAYLOAD_DLLS libpq.dll)
+    endif()
+    foreach(ENT_DELAYLOAD_DLL IN LISTS ENT_DELAYLOAD_DLLS)
+      target_link_options(${LIB_NAME_SHARE} PRIVATE "/DELAYLOAD:${ENT_DELAYLOAD_DLL}")
+    endforeach()
+    if(ENT_DELAYLOAD_DLLS)
+      target_link_libraries(${LIB_NAME_SHARE} PRIVATE delayimp)
+    endif()
+  endif()
 endif()
 
 if(ENT_BUILD_STATIC)

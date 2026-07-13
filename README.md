@@ -24,6 +24,8 @@
 
 ### Linux / macOS
 
+构建 ent 和消费安装后的 CMake package 均要求 CMake 3.15 或更高版本。
+
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
@@ -224,8 +226,12 @@ Release workflow 现在会按平台 / 架构打包两类文件：
 
 其中：
 
-- `runtime`：运行时文件，例如共享库、DLL、运行时依赖 DLL
-- `devel`：头文件、静态库 / 导入库、CMake package 文件
+- `runtime`：仅用于部署，包含共享库 / DLL 和允许再分发的运行时依赖。
+- `devel`：可独立解压使用的 SDK，包含 runtime 文件、头文件、静态库 / 导入库和 CMake package 文件；使用方不需要手工合并 runtime 包。
+
+Windows 包不会再分发 MariaDB/MySQL 或 PostgreSQL client DLL。共享库对这些可选 backend 使用延迟加载；调用相应 DB API 前，应用仍需自行部署与构建配置兼容的 connector runtime。
+
+devel SDK 对 ent 自身文件是完整的；使用静态库或默认全数据库后端配置时，消费环境仍需提供构建时已启用后端对应的 SQLite、MariaDB/MySQL 和 PostgreSQL 开发库。
 
 这样使用方可以按需获取：
 

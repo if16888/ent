@@ -108,7 +108,19 @@ function Run-InstallConsumer {
         $DownstreamSourcePath = [System.IO.Path]::GetFullPath($DownstreamSourceDir)
         $DownstreamBuildPath = [System.IO.Path]::GetFullPath($DownstreamBuildDir)
 
-        cmake -S $DownstreamSourcePath -B $DownstreamBuildPath -A $Platform -DCMAKE_BUILD_TYPE=Release "-Dent_DIR=$EntPackageDir"
+        $ConsumerArgs = @(
+            "-S", $DownstreamSourcePath,
+            "-B", $DownstreamBuildPath,
+            "-A", $Platform,
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-Dent_DIR=$EntPackageDir",
+            "-DVCPKG_TARGET_TRIPLET=$Triplet"
+        )
+        if ($ToolchainFile) {
+            $ConsumerArgs += "-DCMAKE_TOOLCHAIN_FILE=$ToolchainFile"
+            $ConsumerArgs += "-DVCPKG_INSTALLED_DIR=$([System.IO.Path]::GetFullPath((Join-Path $BuildDir 'vcpkg_installed')))"
+        }
+        cmake @ConsumerArgs
         cmake --build $DownstreamBuildPath --config Release
         & "$DownstreamBuildPath\Release\ent_downstream_consumer.exe"
     }
