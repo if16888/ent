@@ -1,10 +1,16 @@
 # ent AI Engineering Control Loop
 
-本文档是 ent 仓库的 AI 工作宪法。任何 Codex 或 AI coding agent 在本仓库内执行任务时，必须先理解本文件，再结合 `docs/ai/*` 与 `.codex/skills/*` 执行。
+本文档是 ent 公开仓库的 AI 工作宪法。任何 Codex 或 AI coding agent 在本仓库内执行任务时，必须先理解本文件、[`OPEN_SOURCE_SCOPE.md`](OPEN_SOURCE_SCOPE.md)，再结合 `docs/ai/*` 与 `.codex/skills/*` 执行。
 
 ## 项目定位
 
-`ent` 是一个 C 语言公共库，面向跨平台基础能力复用。当前重点模块包括 runtime / 多实例运行时、log 日志生命周期、`msg/ent.msg` 返回码与消息码体系、thread / tpool / timer、db handle 生命周期，以及后续计划中的 `ent_shm` 共享内存公共库。
+`ent` 是一个跨平台 C 基础组件公共库。公开仓库只维护可独立构建、测试、安装和复用的 **ent core**，当前重点模块包括：
+
+- handle-based runtime 与多实例生命周期；
+- log、message code、thread、lock、condition variable、thread pool、timer；
+- socket、dynamic library、基础数据库访问；
+- 本机、caller-synchronized 的基础 shared-memory mapping；
+- CMake package、测试、sanitizer 和 release artifact 验证。
 
 优先级顺序：
 
@@ -14,6 +20,18 @@
 4. 资源生命周期可证明，init / close / flush / free 路径可审计。
 5. 错误码和返回语义统一，避免裸数字和私有错误码扩散。
 6. 测试完整，尤其覆盖失败路径、重复调用、边界条件和并发关闭。
+
+## Public Scope Guardrails
+
+[`OPEN_SOURCE_SCOPE.md`](OPEN_SOURCE_SCOPE.md) 是公开功能边界的事实来源。AI agent 必须遵守：
+
+- 公共 core 可以被私有或产品级扩展依赖，但公共 core 不得反向依赖任何私有扩展。
+- 不在公开仓库实现、预留或设计以下能力：主备/高可用、leader election、quorum、fencing、split-brain prevention、跨节点复制、高级共享内存、多写者/RCU/lock-free、分布式同步、libevent/libev 集成、RPC/XDR/gRPC 或工业级运维控制。
+- 不新增上述能力的 public header、占位函数、未完成 stub、TODO、example、test、roadmap、benchmark 或设计文档。
+- 不把私有仓库名称、私有依赖、内部产品计划、闭源协议设计或未公开架构复制到 public branch、tag、PR、issue 或 release note。
+- feature request 和任务卡必须先做 scope check；越界请求应明确标记 `out of scope`，而不是先设计接口。
+- 基础 shared-memory 只维护当前公开且有测试证据的本机映射、生命周期和 caller-synchronized 语义，不扩大为分布式状态平台。
+- 修改公开边界文档时，必须同步 `OPEN_SOURCE_SCOPE.md`、`CONTRIBUTING.md`、feature request template 和 public backlog 中受影响的描述。
 
 ## AI 工作总规则
 
@@ -71,6 +89,7 @@ Windows native build 必须保持 toolchain 环境 shell-local：
 - Windows / Linux 文件路径、权限、文件句柄、映射句柄和换行差异。
 - CI 矩阵、平台依赖、artifact、缓存和 release packaging。
 - public header、导出符号、API / ABI 兼容性。
+- 任何可能改变公开/闭源边界、依赖方向或 public release 内容的修改。
 
 ## Repository Structure
 
@@ -79,10 +98,10 @@ Windows native build 必须保持 toolchain 环境 shell-local：
 - `example/`：示例消费者程序。
 - `test/`：测试目标，新增测试应按模块命名，例如 `test_ent_log.c`。
 - `msg/`：消息码定义，`msg/ent.msg` 是返回码语义的源头。
-- `3rd/`：第三方依赖或源码，Windows 历史依赖较多，改动需说明平台影响。
-- `docs/ai/`：AI 工程治理文档。
-- `.codex/skills/`：repo-local Codex skills，只服务本仓库闭环。
-- `scripts/ai/`：后续 AI 辅助脚本入口，当前不引入额外依赖。
+- `3rd/`：允许公开且有明确许可证/来源的第三方源码；不得放入来源不明的二进制资产。
+- `docs/ai/`：只记录公开 core 的 AI 工程治理和可公开 backlog。
+- `.codex/skills/`：repo-local Codex skills，只服务本公开仓库闭环。
+- `scripts/ai/`：AI 辅助脚本入口，不得引入私有依赖。
 
 ## Coding Style
 
@@ -107,7 +126,7 @@ Windows native build 必须保持 toolchain 环境 shell-local：
 - `DBS` 预留给 database service 与 backend 生命周期错误。
 - 参数化 DB API 也使用 `DBS` submodule；扩展 DB surface 时保持 `BAD_PARAMS`、`PARAM_COUNT`、`PREPARE_FAILED`、`BIND_FAILED`、`EXEC_FAILED` 与 `msg/ent.msg` 对齐。
 - `LOG` 预留给 log service 与 handle 生命周期错误。
-- `SHM` 预留给 shared memory service、file mapping 与 flush / close 生命周期错误。
+- `SHM` 只用于公开基础 shared-memory service、file mapping 与 flush / close 生命周期错误，不作为高级同步或复制协议命名空间。
 - 任何 message-code 变更，包括新增、删除、重命名 submodule、code 或 text，都必须在同一变更集中同步本文档。
 
 ## Testing Guidelines
@@ -117,6 +136,7 @@ Windows native build 必须保持 toolchain 环境 shell-local：
 - 没有 active test suite 的区域，至少使用现有 example 或相邻测试建立 smoke test 证据。
 - 新增测试优先放在 `test/`，通过 CMake / CTest 接入。
 - 如果测试因环境缺失无法运行，必须输出环境限制、未验证项和建议的 CI 验证范围。
+- 公共测试不得下载、编译或模拟私有模块以证明 public core 可用。
 
 ## Commit And PR Rules
 
@@ -125,6 +145,7 @@ Windows native build 必须保持 toolchain 环境 shell-local：
 - 不 amend 用户已有 commit，除非用户明确要求。
 - 不 merge PR，除非用户明确授权且治理文档允许。
 - PR 描述必须包含行为变化、验证命令、平台影响、未验证项和 rollback 路径。
+- PR 描述必须说明 scope check 结果；涉及 excluded capability 的 PR 不进入实现评审。
 
 ## Codex 输出要求
 
@@ -138,6 +159,7 @@ Windows native build 必须保持 toolchain 环境 shell-local：
 - 失败项。
 - 未验证项。
 - 是否已提交以及 commit hash。
+- scope check 结果。
 - 下一步建议。
 
 不得使用“应该通过”“看起来没问题”替代证据。没有运行的命令必须列为未验证项。

@@ -1,186 +1,151 @@
-# AI Task Backlog
+# Public Core Task Backlog
 
-本文档是 ent 后续 AI coding agent 任务的第一版 backlog。任何任务执行前都必须先生成任务卡；高风险模块先做 impact-scan。
+本文档只记录 `ent` 公开 core 的已完成基线、已知限制和可公开维护任务。功能边界以 [`OPEN_SOURCE_SCOPE.md`](../../OPEN_SOURCE_SCOPE.md) 为准。
 
-## 已完成 / 已关闭
+本文件不是内部产品路线图，也不得记录主备、高可用、跨节点复制、高级共享内存、分布式同步、event-loop 集成、RPC 或其他闭源扩展的设计与计划。
 
-### ENT-001：ent_log 返回码统一到 ent.msg
+## Backlog 使用规则
 
-- 状态：已完成（PR #9）
-- 说明：`ent_log` 成功返回路径已统一到 `ENT_SYS_NORMAL`，并完成对应 impact-scan、实现、验证和合并。
+每个任务在实施前必须形成任务卡，至少包含：
 
-### ENT-002：test_ent_log 增加 flush/close 边界测试
+- 目标与用户可见行为；
+- 非目标与 scope check；
+- 允许和禁止修改范围；
+- API / ABI / 平台影响；
+- 风险等级与失败回滚；
+- 本地验证、CI 和 release 验收命令。
 
-- 状态：已完成（PR #10）
-- 说明：`test_ent_log` 已补齐 flush / close / ctx / interval=0 边界测试。
+不符合公开范围的需求不进入本 backlog，也不以 placeholder API、stub、TODO 或“预研”形式保留。
 
-### ENT-003：ent_shm 生命周期边界硬化
+## 已完成基线
 
-- 状态：已完成（已收口）
-- 说明：`ent_shm` 的生命周期边界测试已补齐，当前不再作为待实现任务。
+### Runtime 与生命周期
 
-### ENT-009：重审 ENT_Init / ENT_RuntimeInit 多实例收口边界
+- handle-based `ENT_Init` / `ENT_Run` / `ENT_Stop` / `ENT_Close` 生命周期已经形成闭环。
+- 多实例初始化、失败隔离、独立停止和关闭已有测试覆盖。
+- close 只等待已经进入运行路径的调用；close 开始后的新入口由调用方 owner lock / lifecycle lock 互斥。
 
-- 状态：已完成（impact-scan）
-- 说明：已完成只读扫描，为后续 handle-based 收口提供了影响面与风险边界。
+### Log
 
-### ENT-010：收口 ENT_Init 为多实例入口并压缩函数长度
+- public 成功返回语义已统一到 `msg/ent.msg`。
+- flush、close、writer 和 context ownership 的主要生命周期边界已有测试。
+- service-level close 与 handle-level close 的责任已文档化。
 
-- 状态：已完成（PR #19）
-- 说明：已删除对外 `ENT_Runtime*` public API，`ENT_Init` / `ENT_Close` / `ENT_Run` / `ENT_SetRtAttributes` 成为 handle-based 对外入口。
+### Database
 
-### ENT-011：清理旧 Runtime API 并同步文档与测试
+- SQLite、MariaDB/MySQL、PostgreSQL 后端可以独立启用或关闭。
+- DB handle 的 active / closing / closed 生命周期和 close/reinit 边界已有并发测试。
+- 参数化 read/write API 是处理外部输入的推荐路径。
 
-- 状态：已完成（PR #19）
-- 说明：README、example、test/downstream_consumer 与 public header 已同步到 handle-based API。
+### Thread、timer 与 thread pool
 
-### ENT-012：ENT_HANDLE Init / Run / Stop / Close 闭环
+- 基础 thread、lock、condition variable、thread pool 和 timer API 已接入跨平台构建与测试。
+- 主要 init/close/join 和失败路径已有回归测试。
 
-- 状态：已完成（PR #20, PR #21）
-- 说明：`ENT_HANDLE` 的 `Init / Run / Stop / Close` 生命周期闭环已完成并合并，包含重复初始化拒绝、stop 唤醒、close 收口和并发边界修复。
+### Basic shared memory
 
-### ENT-102：db handle close / reinit 并发边界测试补齐
+- `ENT_SharedMap` 的公开契约已冻结为本机、caller-synchronized 的基础 mapping API。
+- 顺序 close、handle invalidation、flush 和主要失败路径已有基础测试。
+- 公开模块不承诺高级多写者、无锁、跨节点同步或复制能力。
 
-- 状态：已完成（已落地）
-- 说明：`test_ent_db` 已补齐 close 进行中对 active operation、reinit、重复 close、service close 的并发边界测试。
+### Build、CI 与发布
 
-### ENT-103：thread/tpool/timer 返回语义 review
-
-- 状态：已完成（review 完成，无立即实现缺口）
-- 说明：已完成对 thread / tpool / timer public wrapper 返回码、失败路径和生命周期语义的只读 review，当前未发现必须立即修改实现的 public contract 缺口。
-
-### ENT-201：docs/architecture/handle-lifecycle.md
-
-- 状态：已完成（已落地）
-- 说明：已补齐 `ENT_HANDLE` 生命周期架构文档，并与 README 的 handle-based 入口互相链接。
-
-### ENT-104：README 增加 handle-based API 返回语义速查表
-
-- 状态：已完成（已落地）
-- 说明：README 已补齐 handle-based public API 的返回语义速查表，并与 `docs/log-return-codes.md` 互相引用。
-
-### ENT-202：docs/architecture/log-lifecycle.md
-
-- 状态：已完成（已落地）
-- 说明：已补齐 log 生命周期文档，说明 service-level 和 handle-level close / flush 语义，以及当前 handle-based API 的收口边界。
-
-### ENT-101：ENT_HANDLE 多实例并发/隔离边界强化
-
-- 状态：已完成（基础覆盖已存在，暂无立即实现缺口）
-- 说明：`ENT_HANDLE` 的多实例初始化、独立运行、独立关闭、失败隔离、stop / close 闭环和 stale handle 拒绝已在代码、测试和 README 中收口；当前剩余更偏向更细并发边界强化，不再作为阻塞性待办。
-
-### ENT-004：Windows CI 路径回归可见性
-
-- 状态：已完成（已合并到 `master`，见 PR #22 / PR #23）
-- 说明：Windows CI 已补齐 `test_ent_log` 路径相关失败的日志收集与 artifact 上传，路径回归的可见性和定位能力已收口。
-
-### ENT-005：清点 public API 与内部 helper 的裸数字返回
-
-- 状态：已完成（review 完成，无立即实现缺口）
-- 说明：已完成对库内裸数字返回和私有错误码的只读扫描，当前未发现必须立即修改实现的 public contract 缺口。
-
-### ENT-015：全库句柄生命周期审计与 runtime 所有权设计
-
-- 状态：已完成（文档 + 设计）
-- 说明：已完成对 runtime / log / db / timer / thread / tpool / shm / socket / lock / cv 的句柄生命周期审计，并输出 runtime 所有权迁移设计。
-
-### ENT-017：ENT_HANDLE close concurrency contract hardening
-
-- 状态：已完成（PR #28，contract 冻结；无 registry）
-- 说明：已冻结 `ENT_Close()` 与 `ENT_Run` / `ENT_Stop` / `ENT_SetRtAttributes` 的并发契约；只承诺等待已进入运行路径的调用退出，不承诺 close 开始后的新入口任意并发安全。
-
-### ENT-022：ent_shm lifecycle contract
-
-- 状态：已完成（PR #29，contract 冻结；无 registry）
-- 说明：已冻结 `ENT_SharedMap` caller-synchronized 生命周期契约；只承诺顺序关闭和置空，不承诺 `Ptr` / `Size` / `Flush` 与 `Close` 并发安全。
-
-### ENT-026：fgn / protocol-analyzer reuse validation
-
-- 状态：已完成（计划 + 只读扫描）
-- 说明：已完成 fgn / protocol-analyzer 复用验证计划和 fgn 只读扫描；结论是 `ent_log` 是 fgn 第一原型候选，`ent_msg` 是规约分析工具第一候选，`ent_shm` 是次级候选。
-
-### ENT-027：fgn ent_log minimal prototype plan
-
-- 状态：已完成（原型前计划）
-- 说明：已完成 fgn `ent_log` 最小原型前评估，输出候选方案、推荐方案、构建影响、验收标准和停止条件。
+- Linux normal、ASan/UBSan、TSan 和 Windows x86/x64、x64 ASan 已形成标准 CI。
+- no-db 与 SQLite-only 配置已有独立 workflow。
+- CMake install、downstream `find_package` 和 release runtime/devel packaging 已接入验证。
+- Apache-2.0、NOTICE 和 THIRD_PARTY_NOTICES 已进入发布包。
 
 ## 进行中
 
-## P1
+### PUB-001：Release SDK relocatability
 
-### ENT-016：Runtime resource manager design review
+- 状态：PR 验证中。
+- 目标：使实际解压后的 devel SDK 可以分别构建并运行 shared/static consumer。
+- 验收：导出 CMake metadata 不含 build tree、runner 或 `vcpkg_installed` 绝对路径；真实 archive consumer 必须通过。
+- 非目标：不修改 public C API，不改变 DB 行为。
 
-- 目标：把 `ENT_CTX` 作为 runtime owner 的资源注册器设计成可实现的最小模型。
-- 非目标：不实现 registry，不修改 public API。
-- 风险：R2。
-- 推荐授权等级：L1。
-- 预期验证命令：`git diff --check`、人工 review。
+### PUB-002：Open-source scope closure
 
-### ENT-018：ent_log ctx lifecycle hardening
+- 状态：进行中。
+- 目标：让公开范围在 scope 文档、AI 规则、贡献入口和 backlog 中保持一致。
+- 验收：公开仓库不包含闭源功能的实现、public API 占位、roadmap 或设计文档。
+- 非目标：不删除已经属于 core 且有测试的基础模块。
 
-- 目标：审计并收口 `ENT_LOG_CTX` 的 owner-context 生命周期、close/free 边界和 writer/callback 竞争。
-- 非目标：不统一 log 返回码，不重构日志格式化路径。
+## P1：公开 core 可靠性
+
+### CORE-101：异步日志队列容量与过载语义
+
+- 目标：为异步日志队列建立可配置上限、明确的拒绝/丢弃策略和可观测计数。
+- 非目标：不改变日志格式，不引入外部 event loop。
 - 风险：R3。
-- 推荐授权等级：L1 / L2。
-- 预期验证命令：`git diff --check`、`ctest --test-dir build --output-on-failure -R "test_ent_log"`.
+- 验收：容量边界、关闭期间提交、过载返回语义和资源释放测试。
 
-### ENT-019：timer lifecycle hardening
+### CORE-102：线程池任务队列容量
 
-- 目标：收紧 `UTL_TimerDelete` / `UTL_TimerClose` / callback worker / RT worker 的生命周期边界。
-- 非目标：不改 timer 调度策略，不改公开 timer 类型。
+- 目标：为 thread pool queue 建立容量上限和确定的 backpressure / reject 语义。
+- 非目标：不实现分布式调度、RPC worker 或跨节点任务复制。
 - 风险：R3。
-- 推荐授权等级：L1 / L2。
-- 预期验证命令：`git diff --check`、`ctest --test-dir build --output-on-failure -R "test_utl_timer"`.
+- 验收：满队列、关闭竞争、重复 close、worker failure 和无泄漏测试。
 
-### ENT-020：db init/close edge cleanup
+### CORE-103：基础 shared-memory 安全加固
 
-- 目标：继续清理 DB init/close / reinit / service-close 边界，并为 runtime owner 迁移保留接口形状。
-- 非目标：不改 backend 连接策略，不新增数据库依赖。
+- 目标：强化本机 mapping 的名称、路径、权限、大小校验和异常关闭行为。
+- 非目标：不增加 multi-writer、RCU、version chain、transaction、replication 或 distributed synchronization。
 - 风险：R3。
-- 推荐授权等级：L1 / L2。
-- 预期验证命令：`git diff --check`、`ctest --test-dir build --output-on-failure -R "test_ent_db"`.
+- 验收：Windows/Linux 基础 mapping、无效输入、权限失败、重复关闭和清理测试。
 
-### ENT-021：ent_thread lifecycle contract
+### CORE-104：数据库结果与输入资源上限
 
-- 目标：明确 `ENT_THREAD` 的 join/close 语义、owner-thread 责任和并发边界。
-- 非目标：不把线程服务改成 runtime owner。
-- 风险：R2。
-- 推荐授权等级：L1。
-- 预期验证命令：`git diff --check`、`ctest --test-dir build --output-on-failure -R "test_ent_thread"`.
-
-## P2
-
-### ENT-023：runtime-aware API migration plan
-
-- 目标：为 `ENT_DbInitHandleEx` / `ENT_LogInitHandleEx` / `UTL_TimerCreateEx` / `UTL_TPoolInitEx` / `ENT_SharedMapOpenEx` 设计迁移路线。
-- 非目标：不立即实现所有 Ex API。
-- 风险：R2。
-- 推荐授权等级：L1。
-- 预期验证命令：`git diff --check`、人工 review。
-
-### ENT-024：resource registry implementation prototype
-
-- 目标：基于 `ENT_CTX` 做一个最小的资源注册/析构原型。
-- 非目标：不做全量 API 迁移，不把所有句柄改成 `ENT_HANDLE`。
+- 目标：对可控的结果 materialization、参数数量、字段长度和错误返回建立明确上限。
+- 非目标：不实现 ORM、连接池集群、故障转移或在线复制。
 - 风险：R3。
+- 验收：超限拒绝、边界值、不同 backend 一致性和释放路径测试。
 
-### FGN-ENT-001：fgn ent_log minimal prototype
+### CORE-105：公开 API 文档校准
 
-- 目标：基于 `ENT-027` 推荐方案，在 `fgn` 中实现一个最小 `ent_log` 复用原型。
-- 非目标：不改 ent public API，不引入 runtime registry，不迁移 `ent_shm` / `ent_msg`，不全量重构 logging。
-- 风险：R3。
-- 推荐授权等级：L1 / L2。
-- 预期验证命令：fgn Windows build、fgn smoke、日志输出检查、回滚检查。
+- 目标：确保 public headers、README、architecture docs 和 tests 对生命周期、线程安全和可选后端描述一致。
+- 非目标：不提前承诺未实现 API。
+- 风险：R1。
+- 验收：文档链接、示例构建和 public symbol 清单 review。
 
-### ENT-203：benchmark/report 结构预研
+## P2：工程质量增强
 
-- 状态：已完成（模板已落地）
-- 说明：`docs/benchmark-report-template.md` 已补齐 benchmark/report 结构模板，覆盖 CSV、markdown、环境元数据、复现命令和统计字段。
+### ENG-201：编译器 warning baseline
 
-### ENT-204：fgn 复用 ent_shm 的边界分析
+- 目标：逐步接入 GCC/Clang `-Wall -Wextra` 和 MSVC `/W4`，形成可维护的 warning baseline。
+- 非目标：不在一个 PR 中全库重写风格。
 
-- 目标：分析 fgn 未来复用 ent_shm / log / msg / runtime 思想的边界、依赖方向和不可复用点。
-- 非目标：不修改 fgn，不迁移代码，不改变 ent public API。
-- 风险：R2，涉及跨仓库架构判断。
-- 推荐授权等级：L1。
-- 预期验证命令：只读分析命令、引用证据清单、人工 review。
+### ENG-202：静态分析
+
+- 目标：评估并接入适合 C 项目的 CodeQL 或等价静态分析。
+- 非目标：不把第三方扫描结果直接等同于有效漏洞。
+
+### ENG-203：覆盖率报告
+
+- 目标：建立 Linux 测试覆盖率基线，识别未覆盖的失败和释放路径。
+- 非目标：不以覆盖率数字替代行为测试质量。
+
+### ENG-204：ABI 变化检查
+
+- 目标：在进入更稳定版本前评估 public symbol / ABI diff 检查。
+- 非目标：0.x 阶段不承诺 minor version ABI 不变。
+
+### ENG-205：输入解析 fuzzing
+
+- 目标：选择消息生成、配置解析或其他边界明确的公开输入面进行最小 fuzzing。
+- 非目标：不引入私有协议或产品数据格式。
+
+## 明确不进入公开 backlog 的事项
+
+以下事项不在 public core 中立项、预研或预留 API：
+
+- active/standby、primary/backup 和自动 failover；
+- leader election、quorum、fencing、split-brain prevention；
+- snapshot、journal、incremental 或 cross-node replication；
+- advanced multi-writer / lock-free / RCU shared-memory engine；
+- distributed synchronization 和工业实时状态复制；
+- libevent、libev 或其他 event-loop integration；
+- RPC、XDR、gRPC、service discovery、retry、flow control 或 streaming；
+- 私有产品运维、许可、部署控制或内部项目复用计划。
+
+这类需求应在独立私有环境中管理，依赖方向只能是私有扩展依赖公开 `ent` core。

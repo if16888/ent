@@ -10,6 +10,36 @@ explicitly state otherwise before submission.
 
 ---
 
+## Project Scope
+
+Before designing an API or implementation, read
+[`OPEN_SOURCE_SCOPE.md`](OPEN_SOURCE_SCOPE.md).
+
+This repository publishes the reusable **ent core**. Suitable contributions
+include generally useful runtime, lifecycle, logging, concurrency, basic local
+IPC, database-wrapper, build, test, documentation, and packaging improvements.
+
+The following categories are intentionally outside this public repository:
+
+- active/standby or primary/backup high availability;
+- leader election, quorum, fencing, or split-brain prevention;
+- snapshot, journal, incremental, or cross-node replication;
+- advanced multi-writer, RCU, transactional, or lock-free shared memory;
+- distributed synchronization or industrial real-time state replication;
+- libevent/libev integration layers;
+- RPC, XDR, gRPC, service discovery, retry, flow-control, or streaming layers;
+- private product operations, licensing, or deployment control.
+
+Do not submit placeholder APIs, stubs, speculative roadmap documents, or TODOs
+for excluded capabilities. A request may be closed as out of scope without
+implying that its use case is invalid.
+
+Every feature PR must state its scope-check result and confirm that the public
+core remains independent of private repositories, binaries, services, and CI
+artifacts.
+
+---
+
 ## Development Environment
 
 | Requirement | Minimum / supported version | Notes |
@@ -102,6 +132,9 @@ matrix:
    mechanism. Use join, condition variables, events, or explicit test gates.
 5. A close path must clearly distinguish between "resource remains live" and
    "resource was destroyed" in both its return value and handle state.
+6. Basic shared-memory changes must preserve the documented local,
+   caller-synchronized contract and must not silently introduce distributed or
+   advanced multi-writer semantics.
 
 ---
 
@@ -116,6 +149,8 @@ matrix:
 - Failure-injection tests may compile production sources directly when a
   narrow test seam is required. Keep these tests focused and document why.
 - Do not delete, skip, or weaken existing tests to obtain a green CI run.
+- Public tests must not require private repositories, private binaries, private
+  services, or private product data.
 
 ---
 
@@ -127,6 +162,7 @@ matrix:
 - PR descriptions must include:
   - Summary of observable behaviour changes
   - Modified file list
+  - Scope-check result against `OPEN_SOURCE_SCOPE.md`
   - Commands actually executed
   - Tested and untested platforms/configurations
   - Rollback path
@@ -156,3 +192,5 @@ Do not open a public issue for a suspected vulnerability. Follow
 - Optional database combinations are tested, but applications are responsible
   for installing and deploying the runtime libraries of the backends they
   choose to enable.
+- The shared-memory module is limited to the documented local IPC contract and
+  does not provide distributed replication or advanced multi-writer guarantees.
