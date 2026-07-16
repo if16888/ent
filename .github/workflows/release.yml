@@ -17,11 +17,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build libsqlite3-dev default-libmysqlclient-dev libpq-dev
+
+      - name: Validate public source boundary
+        run: python3 scripts/check_public_scope.py --root .
 
       - name: Configure
         run: ./scripts/run-ci-linux.sh configure
@@ -46,6 +51,9 @@ jobs:
           cmake --install build --prefix build/package-devel --component devel
           cp LICENSE NOTICE THIRD_PARTY_NOTICES build/package-runtime/
           cp LICENSE NOTICE THIRD_PARTY_NOTICES build/package-devel/
+
+          python3 scripts/check_public_scope.py --root build/package-runtime
+          python3 scripts/check_public_scope.py --root build/package-devel
 
           forbidden_runtime="$(find build/package-runtime build/package-devel -type f \
             \( -name 'libmariadb.so*' \
@@ -100,6 +108,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Cache vcpkg downloads and binary packages
         uses: actions/cache@v4
@@ -110,6 +120,10 @@ jobs:
           key: ${{ runner.os }}-vcpkg-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}
           restore-keys: |
             ${{ runner.os }}-vcpkg-${{ matrix.triplet }}-
+
+      - name: Validate public source boundary
+        shell: pwsh
+        run: python .\scripts\check_public_scope.py --root .
 
       - name: Configure
         shell: pwsh
@@ -154,6 +168,11 @@ jobs:
           cmake --install $env:BUILD_DIR --config Release --prefix $DevelPackage --component devel
           Copy-Item LICENSE, NOTICE, THIRD_PARTY_NOTICES -Destination $RuntimePackage
           Copy-Item LICENSE, NOTICE, THIRD_PARTY_NOTICES -Destination $DevelPackage
+
+          python .\scripts\check_public_scope.py --root $RuntimePackage
+          if ($LASTEXITCODE -ne 0) { throw "Runtime public-scope validation failed" }
+          python .\scripts\check_public_scope.py --root $DevelPackage
+          if ($LASTEXITCODE -ne 0) { throw "Devel SDK public-scope validation failed" }
 
           $PackageRoots = @($RuntimePackage, $DevelPackage)
           $ForbiddenRuntime = foreach ($Root in $PackageRoots) {
