@@ -22,14 +22,17 @@ PUBLIC_HEADERS = {
     "ent_utility.h",
 }
 
-FORBIDDEN_PATH_PARTS = {
+FORBIDDEN_PATH_TOKENS = (
     "ent-enterprise",
     "ent_enterprise",
     "advanced_shm",
+    "replication",
     "election",
     "fencing",
-    "replication",
-}
+    "libevent",
+    "libev",
+    "rpc_adapter",
+)
 
 FORBIDDEN_IDENTIFIERS = (
     "ent::enterprise",
@@ -76,6 +79,16 @@ def check_text_metadata(root: Path, findings: list[str]) -> None:
                 )
 
 
+def private_path_tokens(relative: Path) -> list[str]:
+    matches: set[str] = set()
+    for part in relative.parts:
+        lowered = part.lower()
+        for token in FORBIDDEN_PATH_TOKENS:
+            if token in lowered:
+                matches.add(token)
+    return sorted(matches)
+
+
 def check(root: Path) -> list[str]:
     findings: list[str] = []
 
@@ -84,11 +97,10 @@ def check(root: Path) -> list[str]:
 
     for path in iter_files(root):
         relative = path.relative_to(root)
-        lowered_parts = {part.lower() for part in relative.parts}
-        leaked_parts = lowered_parts & FORBIDDEN_PATH_PARTS
-        if leaked_parts:
+        leaked_tokens = private_path_tokens(relative)
+        if leaked_tokens:
             findings.append(
-                f"forbidden private path component {sorted(leaked_parts)}: {relative}"
+                f"forbidden private path token {leaked_tokens}: {relative}"
             )
 
     check_header_surface(root, findings)
