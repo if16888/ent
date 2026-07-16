@@ -14,6 +14,7 @@ PUBLIC_HEADERS = {
     "ent_init.h",
     "ent_log.h",
     "ent_msg.h",
+    "ent_msg_gen.h",
     "ent_script.h",
     "ent_shm.h",
     "ent_thread.h",
