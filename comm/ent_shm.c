@@ -178,18 +178,15 @@ static MSG_ID_T iENT_SharedMapRelease(ENT_SharedMap* map)
 #ifdef WIN32
 static int iENT_SharedMapWindowsHandleIsRegular(HANDLE file_handle)
 {
-    FILE_ATTRIBUTE_TAG_INFO tag_info;
+    BY_HANDLE_FILE_INFORMATION file_info;
 
-    memset(&tag_info, 0, sizeof(tag_info));
-    if(!GetFileInformationByHandleEx(file_handle,
-                                     FileAttributeTagInfo,
-                                     &tag_info,
-                                     sizeof(tag_info)))
+    memset(&file_info, 0, sizeof(file_info));
+    if(!GetFileInformationByHandle(file_handle, &file_info))
     {
         return 0;
     }
 
-    return (tag_info.FileAttributes &
+    return (file_info.dwFileAttributes &
             (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) == 0;
 }
 
@@ -226,20 +223,21 @@ static MSG_ID_T iENT_SharedMapOpenWindows(const ENT_SharedMapOptions* options,
                                   FILE_SHARE_DELETE,
                               NULL,
                               creation_disposition,
-                              FILE_ATTRIBUTE_NORMAL,
+                              FILE_ATTRIBUTE_NORMAL |
+                                  FILE_FLAG_OPEN_REPARSE_POINT,
                               NULL);
     if(file_handle == INVALID_HANDLE_VALUE)
     {
         return ENT_SHM_PATH_FAILED;
     }
 
+    create_error = GetLastError();
     if(!iENT_SharedMapWindowsHandleIsRegular(file_handle))
     {
         CloseHandle(file_handle);
         return ENT_SHM_PATH_FAILED;
     }
 
-    create_error = GetLastError();
     if(options->mode == ENT_SHM_MODE_READ_ONLY)
     {
         if(!GetFileSizeEx(file_handle, &file_size))
