@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Fail when private enterprise implementation leaks into the public ent core."""
+"""Fail when private enterprise implementation leaks into public source or SDKs."""
 
 from __future__ import annotations
 
 import argparse
 import sys
 from pathlib import Path
+from typing import Iterable
 
 PUBLIC_HEADERS = {
     "ent_comm.h",
@@ -29,7 +30,6 @@ FORBIDDEN_PATH_PARTS = {
     "replication",
 }
 
-SOURCE_ROOTS = ("comm", "inc", "cmake", "example", "test", "test_optional")
 FORBIDDEN_IDENTIFIERS = (
     "ent::enterprise",
     "ENT_ENTERPRISE_",
@@ -38,43 +38,30 @@ FORBIDDEN_IDENTIFIERS = (
     "EE_PEP_",
 )
 
+TEXT_METADATA_SUFFIXES = {".c", ".h", ".cmake", ".txt", ".in", ".pc"}
 
-def iter_files(root: Path):
+
+def iter_files(root: Path) -> Iterable[Path]:
     for path in root.rglob("*"):
-        if not path.is_file() or ".git" in path.parts:
+        if path.is_file() and ".git" not in path.parts:
+            yield path
+
+
+def check_header_surface(root: Path, findings: list[str]) -> None:
+    for directory_name in ("inc", "include"):
+        include_dir = root / directory_name
+        if not include_dir.is_dir():
             continue
-        yield path
-
-
-def check(root: Path) -> list[str]:
-    findings: list[str] = []
-
-    for path in iter_files(root):
-        relative = path.relative_to(root)
-        lowered_parts = {part.lower() for part in relative.parts}
-        leaked_parts = lowered_parts & FORBIDDEN_PATH_PARTS
-        if leaked_parts:
-            findings.append(
-                f"forbidden private path component {sorted(leaked_parts)}: {relative}"
-            )
-
-    include_dir = root / "inc"
-    if include_dir.is_dir():
-        for header in include_dir.glob("*.h"):
+        for header in include_dir.rglob("*.h"):
             if header.name not in PUBLIC_HEADERS:
-                findings.append(f"unexpected public header: {header.relative_to(root)}")
+                findings.append(
+                    f"unexpected public header: {header.relative_to(root)}"
+                )
 
-    source_paths: list[Path] = []
-    for directory in SOURCE_ROOTS:
-        candidate = root / directory
-        if candidate.is_dir():
-            source_paths.extend(iter_files(candidate))
-    for candidate in (root / "CMakeLists.txt", root / "cmake"):
-        if candidate.is_file():
-            source_paths.append(candidate)
 
-    for path in source_paths:
-        if path.suffix.lower() not in {".c", ".h", ".cmake", ".txt", ".in"}:
+def check_text_metadata(root: Path, findings: list[str]) -> None:
+    for path in iter_files(root):
+        if path.suffix.lower() not in TEXT_METADATA_SUFFIXES:
             continue
         try:
             text = path.read_text(encoding="utf-8")
@@ -87,12 +74,35 @@ def check(root: Path) -> list[str]:
                     f"private identifier {identifier!r}: {path.relative_to(root)}"
                 )
 
+
+def check(root: Path) -> list[str]:
+    findings: list[str] = []
+
+    if not root.is_dir():
+        return [f"scope root does not exist or is not a directory: {root}"]
+
+    for path in iter_files(root):
+        relative = path.relative_to(root)
+        lowered_parts = {part.lower() for part in relative.parts}
+        leaked_parts = lowered_parts & FORBIDDEN_PATH_PARTS
+        if leaked_parts:
+            findings.append(
+                f"forbidden private path component {sorted(leaked_parts)}: {relative}"
+            )
+
+    check_header_surface(root, findings)
+    check_text_metadata(root, findings)
     return sorted(set(findings))
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=Path(__file__).resolve().parents[1],
+        help="source checkout or extracted runtime/devel package root",
+    )
     args = parser.parse_args()
     root = args.root.resolve()
 
