@@ -1089,6 +1089,7 @@ LUA_API int lua_load (lua_State *L, lua_Reader reader, void *data,
   ZIO z;
   int status;
   lua_lock(L);
+  luaC_checkGC(L);
   if (!chunkname) chunkname = "?";
   luaZ_init(L, &z, reader, data);
   status = luaD_protectedparser(L, &z, chunkname, mode);
@@ -1171,7 +1172,15 @@ LUA_API int lua_gc (lua_State *L, int what, ...) {
         luaC_step(L);
       }
       else {  /* add 'data' to total debt */
-        debt = cast(l_mem, data) * 1024 + g->GCdebt;
+        if (data > 0 && cast(l_mem, data) > MAX_LMEM / 1024)
+          debt = MAX_LMEM;
+        else {
+          l_mem step = cast(l_mem, data) * 1024;
+          if (step > 0 && g->GCdebt > MAX_LMEM - step)
+            debt = MAX_LMEM;
+          else
+            debt = step + g->GCdebt;
+        }
         luaE_setdebt(g, debt);
         luaC_checkGC(L);
       }
@@ -1459,5 +1468,4 @@ LUA_API void lua_upvaluejoin (lua_State *L, int fidx1, int n1,
   *up1 = *up2;
   luaC_objbarrier(L, f1, *up1);
 }
-
 

@@ -53,6 +53,9 @@ FORBIDDEN_PERSONAL_CONTACT_SUFFIXES = (
 )
 
 MAX_ARCHIVE_MEMBER_BYTES = 64 * 1024 * 1024
+MAX_ARCHIVE_TOTAL_BYTES = 256 * 1024 * 1024
+MAX_ARCHIVE_MEMBERS = 10000
+MAX_FILE_BYTES = 64 * 1024 * 1024
 
 SECRET_PATTERNS = (
     ("private key", re.compile(rb"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")),
@@ -68,7 +71,15 @@ IDENTIFIER_SCAN_EXEMPT_PATHS = {Path("scripts/check_public_scope.py")}
 
 def iter_files(root: Path) -> Iterable[Path]:
     for path in root.rglob("*"):
-        if path.is_file() and ".git" not in path.parts:
+        if ".git" in path.parts:
+            continue
+        try:
+            metadata = path.lstat()
+        except OSError:
+            continue
+        if (stat.S_ISREG(metadata.st_mode) and
+                not path.is_symlink() and
+                not is_reparse_point(path)):
             yield path
 
 
@@ -92,6 +103,9 @@ def scan_payload(label: str, payload: bytes, findings: list[str]) -> None:
 
 
 def scan_archive(path: Path, findings: list[str]) -> None:
+    total_uncompressed = 0
+    member_count = 0
+
     def scan_member(archive_label: str, member_name: str, payload: bytes) -> None:
         member = Path(member_name.replace("\\", "/"))
         tokens = private_path_tokens(member)
@@ -110,8 +124,20 @@ def scan_archive(path: Path, findings: list[str]) -> None:
         if zipfile.is_zipfile(path):
             with zipfile.ZipFile(path) as archive:
                 for member in archive.infolist():
+                    member_count += 1
+                    if member_count > MAX_ARCHIVE_MEMBERS:
+                        findings.append(f"archive has too many members: {path}")
+                        break
                     if member.is_dir():
                         continue
+                    unix_mode = member.external_attr >> 16
+                    if stat.S_ISLNK(unix_mode):
+                        findings.append(f"archive link is not allowed: {path}!{member.filename}")
+                        continue
+                    total_uncompressed += member.file_size
+                    if total_uncompressed > MAX_ARCHIVE_TOTAL_BYTES:
+                        findings.append(f"archive exceeds total scan limit: {path}")
+                        break
                     if member.file_size > MAX_ARCHIVE_MEMBER_BYTES:
                         findings.append(f"archive member exceeds scan limit: {path}!{member.filename}")
                         continue
@@ -119,11 +145,19 @@ def scan_archive(path: Path, findings: list[str]) -> None:
         elif tarfile.is_tarfile(path):
             with tarfile.open(path, mode="r:*") as archive:
                 for member in archive.getmembers():
+                    member_count += 1
+                    if member_count > MAX_ARCHIVE_MEMBERS:
+                        findings.append(f"archive has too many members: {path}")
+                        break
                     if member.issym() or member.islnk():
                         findings.append(f"archive link is not allowed: {path}!{member.name}")
                         continue
                     if not member.isfile():
                         continue
+                    total_uncompressed += member.size
+                    if total_uncompressed > MAX_ARCHIVE_TOTAL_BYTES:
+                        findings.append(f"archive exceeds total scan limit: {path}")
+                        break
                     extracted = archive.extractfile(member)
                     if extracted is not None:
                         scan_member(str(path), member.name, extracted.read(MAX_ARCHIVE_MEMBER_BYTES + 1))
@@ -152,7 +186,12 @@ def check_file_contents(root: Path, findings: list[str]) -> None:
         if relative in IDENTIFIER_SCAN_EXEMPT_PATHS:
             continue
         try:
-            payload = path.read_bytes()
+            file_size = path.stat().st_size
+            if file_size > MAX_FILE_BYTES:
+                findings.append(f"file exceeds scan limit: {relative}")
+                continue
+            with path.open("rb") as file_handle:
+                payload = file_handle.read(MAX_FILE_BYTES + 1)
         except OSError as error:
             findings.append(f"file could not be inspected: {relative}: {error}")
             continue
@@ -235,6 +274,17 @@ def run_self_test() -> int:
             archive.writestr("assets/details.xml", "EE_ADVSHM_PRIVATE")
         if not check(root):
             print("public-scope self-test failed: archived leak was accepted", file=sys.stderr)
+            return 1
+        archive_path.unlink()
+
+        archive_path = root / "linked-release.zip"
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            member = zipfile.ZipInfo("assets/link")
+            member.create_system = 3
+            member.external_attr = (stat.S_IFLNK | 0o777) << 16
+            archive.writestr(member, "../../outside")
+        if not check(root):
+            print("public-scope self-test failed: ZIP symbolic link was accepted", file=sys.stderr)
             return 1
         archive_path.unlink()
 

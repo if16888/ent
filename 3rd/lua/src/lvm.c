@@ -359,10 +359,17 @@ void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
       luaT_callTM(L, tm, t, key, val);
       return;
     }
-    t = tm;  /* else repeat assignment over 'tm' */
-    if (luaV_fastget(L, t, key, slot, luaH_get)) {
-      luaV_finishfastset(L, t, slot, val);
-      return;  /* done */
+    t = tm;  /* else must repeat assignment over 'tm' */
+    if (!ttistable(t))
+      slot = NULL;
+    else {
+      Table *h = hvalue(t);  /* next access can change the value at 't' */
+      slot = luaH_get(h, key);
+      if (!isempty(slot)) {
+        setobj2t(L, cast(TValue *, slot), val);
+        luaC_barrierback(L, obj2gco(h), val);
+        return;  /* done */
+      }
     }
     /* else 'return luaV_finishset(L, t, key, val, slot)' (loop) */
   }

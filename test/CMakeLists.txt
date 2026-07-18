@@ -141,6 +141,29 @@ if(TARGET ent_s)
   add_test(NAME test_ent_script COMMAND test_ent_script)
 endif()
 
+if(ENT_ENABLE_LUA AND (ENT_LUA_TARGET OR ENT_LUA_DEP_TARGET))
+  add_executable(test_lua_upstream test_lua_upstream.c)
+
+  target_include_directories(
+    test_lua_upstream
+    PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/../3rd/lua/src
+      ${ENT_LUA_INCLUDE_DIR}
+  )
+
+  if(ENT_LUA_TARGET)
+    target_link_libraries(test_lua_upstream PRIVATE ${ENT_LUA_TARGET})
+  else()
+    target_link_libraries(test_lua_upstream PRIVATE ${ENT_LUA_DEP_TARGET})
+  endif()
+
+  if(APPLE OR UNIX)
+    target_link_libraries(test_lua_upstream PRIVATE m)
+  endif()
+
+  add_test(NAME test_lua_upstream COMMAND test_lua_upstream)
+endif()
+
 add_executable(
   test_utl_dll
   test_utl_dll.c

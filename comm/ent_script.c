@@ -39,6 +39,7 @@
 #include "lualib.h"
 
 #define ENT_SCRIPT_MEMORY_LIMIT_BYTES ((size_t)16u * 1024u * 1024u)
+#define ENT_SCRIPT_SOURCE_LIMIT_BYTES ((size_t)1u * 1024u * 1024u)
 #define ENT_SCRIPT_INSTRUCTION_LIMIT   1000000
 #define ENT_SCRIPT_HOOK_INTERVAL       1000
 #endif
@@ -401,13 +402,17 @@ static MSG_ID_T iENT_ScriptLoadChunk(lua_State* state,
         if(rootFinalLength == 0 || candidateFinalLength == 0 ||
            rootFinalLength >= sizeof(rootFinal) || candidateFinalLength >= sizeof(candidateFinal) ||
            !iENT_ScriptPathHasRootPrefix(rootFinal, candidateFinal) ||
-           !GetFileSizeEx(fileHandle, &fileSize) || fileSize.QuadPart < 0 ||
-           (unsigned long long)fileSize.QuadPart > (unsigned long long)((size_t)-1 - 1) ||
-           (unsigned long long)fileSize.QuadPart > 0xFFFFFFFFull)
+           !GetFileSizeEx(fileHandle, &fileSize) || fileSize.QuadPart < 0)
         {
             CloseHandle(rootHandle);
             CloseHandle(fileHandle);
             return ENT_SCR_BAD_ARGUMENT;
+        }
+        if((unsigned long long)fileSize.QuadPart > ENT_SCRIPT_SOURCE_LIMIT_BYTES)
+        {
+            CloseHandle(rootHandle);
+            CloseHandle(fileHandle);
+            return ENT_SCR_LOAD_FAILED;
         }
         buffer = (char*)malloc((size_t)fileSize.QuadPart + 1);
         if(buffer == NULL)
@@ -428,7 +433,7 @@ static MSG_ID_T iENT_ScriptLoadChunk(lua_State* state,
         CloseHandle(rootHandle);
         CloseHandle(fileHandle);
         buffer[(size_t)fileSize.QuadPart] = '\0';
-        *luaStatus = luaL_loadbuffer(state, buffer, (size_t)fileSize.QuadPart, displayPath);
+        *luaStatus = luaL_loadbufferx(state, buffer, (size_t)fileSize.QuadPart, displayPath, "t");
         free(buffer);
         return ENT_SYS_NORMAL;
     }
@@ -490,7 +495,7 @@ static MSG_ID_T iENT_ScriptLoadChunk(lua_State* state,
             if(fileFd >= 0) close(fileFd);
             return ENT_SCR_BAD_ARGUMENT;
         }
-        if((unsigned long long)fileStat.st_size > (unsigned long long)((size_t)-1 - 1))
+        if((unsigned long long)fileStat.st_size > ENT_SCRIPT_SOURCE_LIMIT_BYTES)
         {
             close(fileFd);
             return ENT_SCR_LOAD_FAILED;
@@ -514,7 +519,7 @@ static MSG_ID_T iENT_ScriptLoadChunk(lua_State* state,
         }
         close(fileFd);
         buffer[totalRead] = '\0';
-        *luaStatus = luaL_loadbuffer(state, buffer, totalRead, displayPath);
+        *luaStatus = luaL_loadbufferx(state, buffer, totalRead, displayPath, "t");
         free(buffer);
         return ENT_SYS_NORMAL;
     }
@@ -605,6 +610,8 @@ static void iENT_ScriptOpenAllowedLibraries(lua_State* state)
     lua_setglobal(state, "loadfile");
     lua_pushnil(state);
     lua_setglobal(state, "load");
+    lua_pushnil(state);
+    lua_setglobal(state, "collectgarbage");
 }
 #endif
 

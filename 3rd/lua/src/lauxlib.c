@@ -501,12 +501,23 @@ static const luaL_Reg boxmt[] = {  /* box metamethods */
 };
 
 
+/* Get/create metatable for boxes only after it is fully initialized. */
+static void getBoxMT (lua_State *L) {
+  const char *BOXMT = "_UBOX*";
+  if (luaL_getmetatable(L, BOXMT) == LUA_TNIL) {
+    luaL_newlibtable(L, boxmt);
+    luaL_setfuncs(L, boxmt, 0);
+    lua_copy(L, -1, -2);
+    lua_setfield(L, LUA_REGISTRYINDEX, BOXMT);
+  }
+}
+
+
 static void newbox (lua_State *L) {
   UBox *box = (UBox *)lua_newuserdatauv(L, sizeof(UBox), 0);
   box->box = NULL;
   box->bsize = 0;
-  if (luaL_newmetatable(L, "_UBOX*"))  /* creating metatable? */
-    luaL_setfuncs(L, boxmt, 0);  /* set its metamethods */
+  getBoxMT(L);
   lua_setmetatable(L, -2);
 }
 
@@ -1123,4 +1134,3 @@ LUALIB_API void luaL_checkversion_ (lua_State *L, lua_Number ver, size_t sz) {
     luaL_error(L, "version mismatch: app. needs %f, Lua core provides %f",
                   (LUAI_UACNUMBER)ver, (LUAI_UACNUMBER)v);
 }
-

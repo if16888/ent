@@ -255,13 +255,46 @@ int main(void)
         return EXIT_FAILURE;
     }
 
+    {
+        const unsigned char binaryChunk[] = {0x1b, 'L', 'u', 'a', 0x54, 0x00};
+        if(expect_true(fwrite(binaryChunk, 1, sizeof(binaryChunk), fp) == sizeof(binaryChunk),
+                       "test should write a binary lua chunk signature") != 0)
+        {
+            fclose(fp);
+            remove(scriptPath);
+            return EXIT_FAILURE;
+        }
+        fclose(fp);
+        fp = NULL;
+        if(expect_true(ENT_ScriptReload(scriptFile) == ENT_SCR_COMPILE_FAILED,
+                       "ENT_ScriptReload should reject precompiled lua chunks") != 0)
+        {
+            remove(scriptPath);
+            return EXIT_FAILURE;
+        }
+    }
+
+    fp = ENT_FOpen(scriptPath, "wb");
+    if(expect_true(fp != NULL, "test should replace the binary chunk with text lua") != 0)
+    {
+        remove(scriptPath);
+        return EXIT_FAILURE;
+    }
+
     fprintf(fp, "function calc_discount(args)\n");
-    fprintf(fp, "  if require ~= nil or package ~= nil or io ~= nil or os ~= nil or debug ~= nil then\n");
+    fprintf(fp, "  if require ~= nil or package ~= nil or io ~= nil or os ~= nil or debug ~= nil or collectgarbage ~= nil then\n");
     fprintf(fp, "    return {code = -2, message = \"unsafe library exposed\"}\n");
     fprintf(fp, "  end\n");
     fprintf(fp, "  if dofile ~= nil or loadfile ~= nil or load ~= nil then\n");
     fprintf(fp, "    return {code = -3, message = \"dynamic loader exposed\"}\n");
     fprintf(fp, "  end\n");
+    fprintf(fp, "  if utf8.len(string.char(255,143,143,143,143,143,143,143)) ~= nil then\n");
+    fprintf(fp, "    return {code = -4, message = \"invalid utf8 accepted\"}\n");
+    fprintf(fp, "  end\n");
+    fprintf(fp, "  local n = 20000\n");
+    fprintf(fp, "  local iter = string.gmatch(string.rep(\"a\", n), string.rep(\"a?\", n))\n");
+    fprintf(fp, "  pcall(iter)\n");
+    fprintf(fp, "  pcall(iter)\n");
     fprintf(fp, "  local amount = tonumber(args[\"amount\"] or 0)\n");
     fprintf(fp, "  local vip = (args[\"vip\"] == true)\n");
     fprintf(fp, "  local tier = tostring(args[\"tier\"] or \"none\")\n");
@@ -343,6 +376,27 @@ int main(void)
                    "instruction-limit script should load") != 0 ||
        expect_true(ENT_ScriptCall("exhaust_budget", NULL, &out) == ENT_SCR_RUNTIME_FAILED,
                    "script instruction budget should stop an infinite loop") != 0)
+    {
+        remove(scriptPath);
+        return EXIT_FAILURE;
+    }
+
+    fp = ENT_FOpen(scriptPath, "wb");
+    if(expect_true(fp != NULL, "test should create an oversized source file") != 0)
+    {
+        remove(scriptPath);
+        return EXIT_FAILURE;
+    }
+    if(expect_true(fseek(fp, (long)(1024u * 1024u), SEEK_SET) == 0 && fputc('\n', fp) != EOF,
+                   "test should create a source file over the 1 MiB limit") != 0)
+    {
+        fclose(fp);
+        remove(scriptPath);
+        return EXIT_FAILURE;
+    }
+    fclose(fp);
+    if(expect_true(ENT_ScriptReload(scriptFile) == ENT_SCR_LOAD_FAILED,
+                   "ENT_ScriptReload should reject source files over 1 MiB") != 0)
     {
         remove(scriptPath);
         return EXIT_FAILURE;
