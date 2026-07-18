@@ -43,6 +43,10 @@ FORBIDDEN_IDENTIFIERS = (
     "EE_PEP_",
 )
 
+FORBIDDEN_PERSONAL_CONTACT_SUFFIXES = (
+    "@" + "foxmail" + ".com",
+)
+
 TEXT_METADATA_SUFFIXES = {
     ".c", ".cmake", ".h", ".in", ".json", ".md", ".pc", ".ps1",
     ".py", ".sh", ".toml", ".txt", ".yaml", ".yml",
@@ -90,6 +94,12 @@ def check_text_metadata(root: Path, findings: list[str]) -> None:
             if identifier in text:
                 findings.append(
                     f"private identifier {identifier!r}: {relative}"
+                )
+        lowered_text = text.lower()
+        for suffix in FORBIDDEN_PERSONAL_CONTACT_SUFFIXES:
+            if suffix.lower() in lowered_text:
+                findings.append(
+                    f"personal contact domain {suffix!r}: {relative}"
                 )
 
 
@@ -143,6 +153,14 @@ def run_self_test() -> int:
             print("public-scope self-test failed: YAML private identifier was accepted", file=sys.stderr)
             return 1
         (root / "private-leak.yml").unlink()
+
+        (root / "personal-contact.c").write_text(
+            "/* contact: private" + "@foxmail" + ".com */\n", encoding="utf-8"
+        )
+        if not check(root):
+            print("public-scope self-test failed: personal contact was accepted", file=sys.stderr)
+            return 1
+        (root / "personal-contact.c").unlink()
 
         nested_header = include_dir / "private"
         nested_header.mkdir()
