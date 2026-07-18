@@ -1,5 +1,5 @@
 param(
-    [string]$WorkspaceRoot = "/home/lf/workspace",
+    [string]$WorkspaceRoot = "",
     [string]$RepoName = "ent",
     [string]$Stage = "all",
     [switch]$NoSync
@@ -31,9 +31,48 @@ function ConvertTo-WslPath {
     return $normalized
 }
 
+function Assert-SafeWslPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    if($Path -notmatch '^/[A-Za-z0-9._/-]+$')
+    {
+        throw "WorkspaceRoot must be an absolute WSL path containing only letters, digits, '.', '_', '-', and '/'."
+    }
+
+    $segments = @($Path.Split('/', [System.StringSplitOptions]::RemoveEmptyEntries))
+    if($segments.Count -lt 2 -or $segments -contains '.' -or $segments -contains '..')
+    {
+        throw "WorkspaceRoot must name a non-root directory with at least two safe path components."
+    }
+}
+
+if($RepoName -notmatch '^[A-Za-z0-9._-]+$' -or $RepoName -in @('.', '..'))
+{
+    throw "RepoName contains unsupported characters."
+}
+
+if($Stage -notin @('configure', 'build', 'test', 'all'))
+{
+    throw "Stage must be one of: configure, build, test, all."
+}
+
+if([string]::IsNullOrWhiteSpace($WorkspaceRoot))
+{
+    $wslHome = (Invoke-Wsl -Command 'printf "%s" "$HOME"' | Out-String).Trim()
+    if([string]::IsNullOrWhiteSpace($wslHome))
+    {
+        throw "Could not resolve the WSL user home directory."
+    }
+    $WorkspaceRoot = "$($wslHome.TrimEnd('/'))/workspace"
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $repoWsl = ConvertTo-WslPath -Path $repoRoot
 $workspaceRoot = $WorkspaceRoot.TrimEnd("/")
+Assert-SafeWslPath -Path $workspaceRoot
 $targetWsl = "$workspaceRoot/$RepoName"
 
 if(-not $NoSync.IsPresent)

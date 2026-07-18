@@ -667,13 +667,16 @@ ctest --test-dir build --output-on-failure
 
 ### WSL
 
-如果要把代码同步到 `/home/lf/workspace` 后再在 WSL 里编译，直接用仓库里的脚本：
+如果要把代码同步到当前 WSL 用户主目录下的 `workspace` 后再编译，直接使用仓库脚本：
 
 ```powershell
 scripts\run-ci-wsl.ps1
 ```
 
-脚本会把当前仓库同步到 `/home/lf/workspace/ent`，然后在 WSL 内执行 `cmake` 和 `ctest`。
+脚本默认从 WSL 的 `$HOME` 动态解析目标目录，将当前仓库同步到
+`$HOME/workspace/ent`，然后在 WSL 内执行 `cmake` 和 `ctest`。也可以通过
+`-WorkspaceRoot` 显式指定其他绝对 WSL 路径；路径、仓库名和阶段参数都会在
+进入 shell 前校验。
 
 ### 说明
 
