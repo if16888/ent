@@ -1,0 +1,9 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Public-scope checker synthetic AWS key fixture"
+condition = "AND"
+regexTarget = "match"
+paths = ['''^scripts/check_public_scope\.py$''']
+regexes = ['''^AKIAABCDEFGHIJKLMNOP$''']
