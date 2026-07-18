@@ -288,7 +288,8 @@ def run_self_test() -> int:
             return 1
         archive_path.unlink()
 
-        (root / "credential.bin").write_bytes(b"prefix AKIAABCDEFGHIJKLMNOP suffix")
+        synthetic_aws_key = b"AK" + b"IAABCDEFGHIJKLMNOP"
+        (root / "credential.bin").write_bytes(b"prefix " + synthetic_aws_key + b" suffix")
         if not check(root):
             print("public-scope self-test failed: credential pattern was accepted", file=sys.stderr)
             return 1
