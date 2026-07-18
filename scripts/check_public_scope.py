@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import tempfile
 from pathlib import Path
 from typing import Iterable
 
@@ -42,7 +43,14 @@ FORBIDDEN_IDENTIFIERS = (
     "EE_PEP_",
 )
 
-TEXT_METADATA_SUFFIXES = {".c", ".h", ".cmake", ".txt", ".in", ".pc"}
+TEXT_METADATA_SUFFIXES = {
+    ".c", ".cmake", ".h", ".in", ".json", ".md", ".pc", ".ps1",
+    ".py", ".sh", ".toml", ".txt", ".yaml", ".yml",
+}
+
+# This checker contains the forbidden identifiers it enforces. Its rule table
+# is not an enterprise leak and must not cause the checker to reject itself.
+IDENTIFIER_SCAN_EXEMPT_PATHS = {Path("scripts/check_public_scope.py")}
 
 
 def iter_files(root: Path) -> Iterable[Path]:
@@ -57,14 +65,20 @@ def check_header_surface(root: Path, findings: list[str]) -> None:
         if not include_dir.is_dir():
             continue
         for header in include_dir.rglob("*.h"):
-            if header.name not in PUBLIC_HEADERS:
+            relative = header.relative_to(root)
+            if (len(relative.parts) != 2 or
+                    relative.parts[0] != directory_name or
+                    header.name not in PUBLIC_HEADERS):
                 findings.append(
-                    f"unexpected public header: {header.relative_to(root)}"
+                    f"unexpected public header: {relative}"
                 )
 
 
 def check_text_metadata(root: Path, findings: list[str]) -> None:
     for path in iter_files(root):
+        relative = path.relative_to(root)
+        if relative in IDENTIFIER_SCAN_EXEMPT_PATHS:
+            continue
         if path.suffix.lower() not in TEXT_METADATA_SUFFIXES:
             continue
         try:
@@ -75,7 +89,7 @@ def check_text_metadata(root: Path, findings: list[str]) -> None:
         for identifier in FORBIDDEN_IDENTIFIERS:
             if identifier in text:
                 findings.append(
-                    f"private identifier {identifier!r}: {path.relative_to(root)}"
+                    f"private identifier {identifier!r}: {relative}"
                 )
 
 
@@ -108,6 +122,39 @@ def check(root: Path) -> list[str]:
     return sorted(set(findings))
 
 
+def run_self_test() -> int:
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        root = Path(temporary_directory)
+        include_dir = root / "include"
+        include_dir.mkdir()
+        (include_dir / "ent_shm.h").write_text("/* public */\n", encoding="utf-8")
+        if check(root):
+            print("public-scope self-test failed: public header was rejected", file=sys.stderr)
+            return 1
+
+        (root / "private-leak.md").write_text("ENT_ENTERPRISE_SECRET\n", encoding="utf-8")
+        if not check(root):
+            print("public-scope self-test failed: Markdown private identifier was accepted", file=sys.stderr)
+            return 1
+        (root / "private-leak.md").unlink()
+
+        (root / "private-leak.yml").write_text("EE_REPL_PRIVATE\n", encoding="utf-8")
+        if not check(root):
+            print("public-scope self-test failed: YAML private identifier was accepted", file=sys.stderr)
+            return 1
+        (root / "private-leak.yml").unlink()
+
+        nested_header = include_dir / "private"
+        nested_header.mkdir()
+        (nested_header / "ent_shm.h").write_text("/* private */\n", encoding="utf-8")
+        if not check(root):
+            print("public-scope self-test failed: nested same-name header was accepted", file=sys.stderr)
+            return 1
+
+    print("public-scope self-test passed")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -116,7 +163,14 @@ def main() -> int:
         default=Path(__file__).resolve().parents[1],
         help="source checkout or extracted runtime/devel package root",
     )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="run checker regression tests",
+    )
     args = parser.parse_args()
+    if args.self_test:
+        return run_self_test()
     root = args.root.resolve()
 
     findings = check(root)

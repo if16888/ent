@@ -426,14 +426,15 @@ static int iENT_SharedMapPosixBaseFlags(int access_flags)
 static int iENT_SharedMapOpenExistingPosix(const char* path, int access_flags)
 {
 #ifndef O_NOFOLLOW
-    struct stat path_stat;
-    if(lstat(path, &path_stat) != 0 || S_ISLNK(path_stat.st_mode))
-    {
-        errno = ELOOP;
-        return -1;
-    }
-#endif
+    /* A lstat() followed by open() is racy. Refuse this unsupported
+     * platform instead of silently weakening the no-symlink invariant. */
+    (void)path;
+    (void)access_flags;
+    errno = ELOOP;
+    return -1;
+#else
     return open(path, iENT_SharedMapPosixBaseFlags(access_flags));
+#endif
 }
 
 static int iENT_SharedMapOpenPosixFile(const char* path,
