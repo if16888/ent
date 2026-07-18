@@ -667,17 +667,28 @@ ctest --test-dir build --output-on-failure
 
 ### WSL
 
-如果要把代码同步到 `/home/lf/workspace` 后再在 WSL 里编译，直接用仓库里的脚本：
+如果要把代码同步到当前 WSL 用户主目录下的 `workspace` 后再编译，直接使用仓库脚本：
 
 ```powershell
 scripts\run-ci-wsl.ps1
 ```
 
-脚本会把当前仓库同步到 `/home/lf/workspace/ent`，然后在 WSL 内执行 `cmake` 和 `ctest`。
+脚本默认从 WSL 的 `$HOME` 动态解析目标目录，将当前仓库同步到
+`$HOME/workspace/ent`，然后在 WSL 内执行 `cmake` 和 `ctest`。也可以通过
+`-WorkspaceRoot` 显式指定其他绝对 WSL 路径；路径、仓库名和阶段参数都会在
+进入 shell 前校验。
 
 ### 说明
 
 - SQLite 对应 `sqlite3`
 - MySQL / MariaDB 对应 `libmariadb` 或 `mysqlclient`
 - PostgreSQL 对应 `libpq`
-- Lua 仍然使用仓库内的 `3rd/lua` 源码目录
+- Lua 仍然使用仓库内的 `3rd/lua` 源码目录，默认关闭。启用后只注册
+  base/coroutine/table/string/math/utf8 白名单库，不提供 `require`、`package`、
+  `io`、`os`、`debug`、`load`、`loadfile` 或 `dofile`。
+- 规则文件只接受 Lua 文本源码，不接受预编译字节码；单个源码文件最大 1 MiB，
+  脚本环境不暴露 `collectgarbage`。
+- 每个 Lua 状态最多使用 16 MiB Lua 分配内存，每次加载或函数调用最多执行
+  1,000,000 条 Lua 指令；超限返回运行错误。该后端用于执行受控业务规则，
+  不是操作系统级隔离边界，仍不应运行来源不可信的脚本。
+- Lua 5.4.8 的下游勘误补丁记录在 `3rd/lua/PATCHES.md`。

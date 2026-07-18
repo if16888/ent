@@ -12,7 +12,8 @@ Release packaging policy
   runtime libraries. Applications enabling those backends must install and
   deploy compatible client libraries under the upstream license terms.
 - Lua source is used only when ENT_ENABLE_LUA=ON and remains under the Lua MIT
-  license below.
+  license below. Applied upstream corrections are recorded in
+  3rd/lua/PATCHES.md.
 
 -------------------------------------------------------------------------------
 SQLite
@@ -78,10 +79,10 @@ Homepage: https://www.postgresql.org/
 SPDX-License-Identifier: PostgreSQL
 
 -------------------------------------------------------------------------------
-Lua 5.4 (optional — only when ENT_ENABLE_LUA=ON)
+Lua 5.4.8 (optional — only when ENT_ENABLE_LUA=ON)
 -------------------------------------------------------------------------------
 
-Copyright (C) 1994-2023 Lua.org, PUC-Rio.
+Copyright (C) 1994-2025 Lua.org, PUC-Rio.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

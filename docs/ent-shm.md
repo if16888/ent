@@ -1,158 +1,85 @@
 # ENT Shared Map
 
-`ent_shm` is the portable file-backed shared-memory utility in `ent`.
-It wraps the OS-specific mapping primitives behind a small C99 API so higher-level
-code can reuse the same implementation on Windows, Linux, and macOS.
+`ent_shm` is the portable file-backed shared-memory utility in `ent`. It wraps the
+OS-specific mapping primitives behind a small C99 API so higher-level code can reuse
+the same implementation on Windows, Linux and macOS.
 
 `ENT_SharedMap` is a caller-synchronized resource. It is intentionally a bare
-shared-map handle, not a runtime-owned child resource.
+shared-map handle, not a runtime-owned child resource and not a distributed state
+platform.
 
-## Why file-backed mmap instead of POSIX shm only
+## File-backed design
 
-- A regular file gives the same fast shared-memory behavior as `shm_open`/`mmap`,
-  but it is easier to inspect, recover, and version.
-- Windows does not have POSIX `shm_open`, so a file-backed design keeps the API
-  portable without adding a second abstraction for the same concept.
-- A snapshot file can be deleted, copied, or archived with normal filesystem tools.
-- Recovery is simpler because the backing file remains visible after a crash.
+A regular file provides the same mapped-memory data path as `shm_open`/`mmap`, while
+remaining visible for inspection, recovery, copying and format migration. Windows uses
+file mapping over a regular file for the same cross-platform contract.
 
-## Platform Mapping
+## Secure path contract
 
-`ENT_SharedMapOpen` returns `MSG_ID_T` and maps to the native primitives on each platform:
+The backing path is a security boundary. `ENT_SharedMapOpen` now enforces the following
+baseline rules:
 
-- Windows
-  - `CreateFileA`
-  - `CreateFileMappingA`
-  - `MapViewOfFile`
-  - `FlushViewOfFile`
-  - `FlushFileBuffers`
-  - `UnmapViewOfFile`
-  - `CloseHandle`
-- POSIX
-  - `open`
-  - `ftruncate`
-  - `mmap`
-  - `msync`
-  - `munmap`
-  - `close`
+- POSIX creation is atomic with `O_CREAT | O_EXCL` before falling back to an existing
+  file;
+- new POSIX files are created with owner-only `0600` permissions before umask;
+- POSIX opens request `O_NOFOLLOW`, `O_CLOEXEC` and nonblocking inspection;
+- the opened descriptor is validated with `fstat` and must refer to a regular file;
+- symbolic links and non-regular objects such as FIFOs are rejected;
+- Windows rejects directories and reparse-point handles before mapping.
 
-`ENT_SHM_F_LOCK_MEMORY` is best effort:
+Callers must still place backing files in a trusted directory. The API does not create
+or validate the parent directory, enforce a service account, change permissions on an
+existing file, or provide application-level authorization. Production applications
+should use a dedicated non-public directory and explicitly validate any stronger owner,
+group or ACL policy they require.
 
-- Windows uses `VirtualLock`
-- POSIX uses `mlock`
+## Platform mapping
 
-Lock failure does not fail the open call.
+Windows uses `CreateFileA`, `CreateFileMappingA`, `MapViewOfFile`,
+`FlushViewOfFile`, `FlushFileBuffers`, `UnmapViewOfFile` and `CloseHandle`.
 
-## Return Codes
+POSIX uses `open`, `fstat`, `ftruncate`, `mmap`, `msync`, `munmap` and `close`.
 
-- `ENT_SYS_NORMAL`: success.
-- `ENT_SHM_BAD_ARGUMENT`: invalid options, NULL output pointer, or NULL map passed to flush.
-- `ENT_SHM_BAD_SIZE`: invalid mapping size or flush span size.
-- `ENT_SHM_PATH_FAILED`: path/open/stat access failed.
-- `ENT_SHM_ALLOC_FAILED`: internal allocation failed.
-- `ENT_SHM_RESIZE_FAILED`: backing file resize failed.
-- `ENT_SHM_MAP_FAILED`: mapping creation failed.
-- `ENT_SHM_RANGE_FAILED`: flush range is out of bounds.
-- `ENT_SHM_FLUSH_FAILED`: flush to disk failed.
-- `ENT_SHM_CLOSE_FAILED`: release of mapping resources failed.
+`ENT_SHM_F_LOCK_MEMORY` is best effort: Windows uses `VirtualLock` and POSIX uses
+`mlock`. Lock failure does not fail the open call.
 
-`ENT_SharedMapClose(&map)` accepts a pointer to the map handle and sets `map`
-to `NULL` after releasing the mapping.
+## Lifecycle
 
-The public lifecycle contract is conservative:
+- `ENT_SharedMapOpen` returns a mapped handle or a precise `ENT_SHM_*` error.
+- `ENT_SharedMapPtr` and `ENT_SharedMapSize` expose the mapped address and size.
+- `ENT_SharedMapFlush` flushes a selected range; a zero length means the whole map.
+- `ENT_SharedMapClose(&map)` releases the mapping and sets the caller's handle to
+  `NULL`.
 
-- callers must not invoke `ENT_SharedMapPtr()`, `ENT_SharedMapSize()`, or
-  `ENT_SharedMapFlush()` concurrently with `ENT_SharedMapClose(&map)` on the same
-  handle;
-- once `ENT_SharedMapClose(&map)` succeeds, the caller's `map` variable becomes
-  `NULL`;
-- any raw pointer copied from a shared-map handle before close immediately loses
-  its callable contract after close;
-- there is no state machine, active-op counter, or registry behind
-  `ENT_SharedMap` today;
-- if runtime-owned shared-map management is ever needed, it should be designed
-  as a separate task with state, registry, and activeOps support.
+Callers must not race pointer, size or flush operations with close on the same handle.
+Any raw pointer copied before close loses its contract immediately after close.
 
-## API Example
+## Example
 
 ```c
-#include <stdio.h>
-#include <string.h>
-#include "ent_shm.h"
-
-int main(void)
-{
-    ENT_SharedMapOptions opts;
-    ENT_SharedMap* map = NULL;
-    char* data = NULL;
-
-    memset(&opts, 0, sizeof(opts));
-    opts.path = "demo.fgnshm";
-    opts.size = (ENT_SIZE)4096u;
-    opts.mode = ENT_SHM_MODE_READ_WRITE;
-    opts.flags = ENT_SHM_F_CREATE_IF_MISSING | ENT_SHM_F_TRUNCATE_IF_EXISTS;
-
-    if(ENT_SharedMapOpen(&opts, &map) != ENT_SYS_NORMAL)
-    {
-        return 1;
-    }
-
-    data = (char*)ENT_SharedMapPtr(map);
-    strcpy(data, "hello snapshot");
-    if(ENT_SharedMapFlush(map, (ENT_OFFSET)0u, (ENT_SIZE)0u) != ENT_SYS_NORMAL)
-    {
-        ENT_SharedMapClose(&map);
-        return 1;
-    }
-    if(ENT_SharedMapClose(&map) != ENT_SYS_NORMAL)
-    {
-        return 1;
-    }
-    return 0;
-}
-```
-
-Reader side:
-
-```c
-ENT_SharedMapOptions opts;
+ENT_SharedMapOptions options;
 ENT_SharedMap* map = NULL;
-const char* data = NULL;
 
-memset(&opts, 0, sizeof(opts));
-opts.path = "demo.fgnshm";
-opts.size = (ENT_SIZE)0u;
-opts.mode = ENT_SHM_MODE_READ_ONLY;
-opts.flags = 0;
+memset(&options, 0, sizeof(options));
+options.path = "/var/lib/my-service/state.bin";
+options.size = (ENT_SIZE)4096u;
+options.mode = ENT_SHM_MODE_READ_WRITE;
+options.flags = ENT_SHM_F_CREATE_IF_MISSING |
+                ENT_SHM_F_TRUNCATE_IF_EXISTS;
 
-if(ENT_SharedMapOpen(&opts, &map) == ENT_SYS_NORMAL)
+if(ENT_SharedMapOpen(&options, &map) == ENT_SYS_NORMAL)
 {
-    data = (const char*)ENT_SharedMapPtr(map);
-    puts(data);
+    memcpy(ENT_SharedMapPtr(map), "snapshot", 9u);
+    ENT_SharedMapFlush(map, (ENT_OFFSET)0u, (ENT_SIZE)0u);
     ENT_SharedMapClose(&map);
 }
 ```
 
-The sequence above assumes caller-side serialization. It does not imply that
-`ENT_SharedMapPtr()`, `ENT_SharedMapSize()`, `ENT_SharedMapFlush()`, and
-`ENT_SharedMapClose(&map)` are safe to race on the same handle.
+## Current limits
 
-## fgn Integration Pattern
-
-The expected fgn usage is a plain snapshot file such as `metadata.fgnshm`:
-
-1. Writer opens the file with `ENT_SHM_MODE_READ_WRITE`.
-2. Writer builds the in-memory snapshot layout.
-3. Writer calls `ENT_SharedMapFlush` after publishing the update.
-4. Reader opens the same file with `ENT_SHM_MODE_READ_ONLY`.
-5. Reader consumes the snapshot without knowing any OS mapping details.
-
-This keeps the file-mapping mechanics in `ent`, while the fgn layer owns only
-the snapshot schema and update policy.
-
-## Current Limits
-
-- No complex concurrency lock protocol yet.
-- No typed or versioned snapshot schema yet.
-- No crash-consistent double-buffer or journal yet.
-- No UTF-16 Windows path support yet; the API currently uses `CreateFileA`.
+- caller-side synchronization only;
+- no typed or versioned schema in the core utility;
+- no crash-consistent double buffer or journal;
+- no multi-node consistency or replication;
+- no UTF-16 Windows path API yet;
+- existing-file ownership and ACL policy remain the caller's responsibility.

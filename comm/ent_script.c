@@ -37,6 +37,11 @@
 #include "lua.h"
 #include "lauxlib.h"
 #include "lualib.h"
+
+#define ENT_SCRIPT_MEMORY_LIMIT_BYTES ((size_t)16u * 1024u * 1024u)
+#define ENT_SCRIPT_SOURCE_LIMIT_BYTES ((size_t)1u * 1024u * 1024u)
+#define ENT_SCRIPT_INSTRUCTION_LIMIT   1000000
+#define ENT_SCRIPT_HOOK_INTERVAL       1000
 #endif
 
 #ifndef ENT_SCRIPT_PATH_MAX
@@ -77,6 +82,8 @@ typedef struct
     char scriptRoot[ENT_SCRIPT_PATH_MAX];
 #if ENT_ENABLE_LUA
     lua_State* state;
+    size_t luaMemoryUsed;
+    int luaInstructionsRemaining;
 #endif
 } ENT_SCRIPT_CTX_T;
 
@@ -395,13 +402,17 @@ static MSG_ID_T iENT_ScriptLoadChunk(lua_State* state,
         if(rootFinalLength == 0 || candidateFinalLength == 0 ||
            rootFinalLength >= sizeof(rootFinal) || candidateFinalLength >= sizeof(candidateFinal) ||
            !iENT_ScriptPathHasRootPrefix(rootFinal, candidateFinal) ||
-           !GetFileSizeEx(fileHandle, &fileSize) || fileSize.QuadPart < 0 ||
-           (unsigned long long)fileSize.QuadPart > (unsigned long long)((size_t)-1 - 1) ||
-           (unsigned long long)fileSize.QuadPart > 0xFFFFFFFFull)
+           !GetFileSizeEx(fileHandle, &fileSize) || fileSize.QuadPart < 0)
         {
             CloseHandle(rootHandle);
             CloseHandle(fileHandle);
             return ENT_SCR_BAD_ARGUMENT;
+        }
+        if((unsigned long long)fileSize.QuadPart > ENT_SCRIPT_SOURCE_LIMIT_BYTES)
+        {
+            CloseHandle(rootHandle);
+            CloseHandle(fileHandle);
+            return ENT_SCR_LOAD_FAILED;
         }
         buffer = (char*)malloc((size_t)fileSize.QuadPart + 1);
         if(buffer == NULL)
@@ -422,7 +433,7 @@ static MSG_ID_T iENT_ScriptLoadChunk(lua_State* state,
         CloseHandle(rootHandle);
         CloseHandle(fileHandle);
         buffer[(size_t)fileSize.QuadPart] = '\0';
-        *luaStatus = luaL_loadbuffer(state, buffer, (size_t)fileSize.QuadPart, displayPath);
+        *luaStatus = luaL_loadbufferx(state, buffer, (size_t)fileSize.QuadPart, displayPath, "t");
         free(buffer);
         return ENT_SYS_NORMAL;
     }
@@ -484,7 +495,7 @@ static MSG_ID_T iENT_ScriptLoadChunk(lua_State* state,
             if(fileFd >= 0) close(fileFd);
             return ENT_SCR_BAD_ARGUMENT;
         }
-        if((unsigned long long)fileStat.st_size > (unsigned long long)((size_t)-1 - 1))
+        if((unsigned long long)fileStat.st_size > ENT_SCRIPT_SOURCE_LIMIT_BYTES)
         {
             close(fileFd);
             return ENT_SCR_LOAD_FAILED;
@@ -508,27 +519,99 @@ static MSG_ID_T iENT_ScriptLoadChunk(lua_State* state,
         }
         close(fileFd);
         buffer[totalRead] = '\0';
-        *luaStatus = luaL_loadbuffer(state, buffer, totalRead, displayPath);
+        *luaStatus = luaL_loadbufferx(state, buffer, totalRead, displayPath, "t");
         free(buffer);
         return ENT_SYS_NORMAL;
     }
 #endif
 }
 
-static void iENT_ScriptDisableDangerousGlobals(lua_State* state)
+static void* iENT_ScriptLuaAllocate(void* userData,
+                                    void* pointer,
+                                    size_t oldSize,
+                                    size_t newSize)
 {
-    lua_pushnil(state);
-    lua_setglobal(state, "io");
-    lua_pushnil(state);
-    lua_setglobal(state, "os");
-    lua_pushnil(state);
-    lua_setglobal(state, "debug");
-    lua_pushnil(state);
-    lua_setglobal(state, "package");
+    ENT_SCRIPT_CTX_T* context = (ENT_SCRIPT_CTX_T*)userData;
+    void* resized;
+
+    if(newSize == 0)
+    {
+        free(pointer);
+        if(pointer != NULL && oldSize <= context->luaMemoryUsed)
+        {
+            context->luaMemoryUsed -= oldSize;
+        }
+        return NULL;
+    }
+
+    if(pointer == NULL)
+    {
+        oldSize = 0;
+    }
+    if(newSize > oldSize &&
+       newSize - oldSize > ENT_SCRIPT_MEMORY_LIMIT_BYTES - context->luaMemoryUsed)
+    {
+        return NULL;
+    }
+
+    resized = realloc(pointer, newSize);
+    if(resized == NULL)
+    {
+        return NULL;
+    }
+    context->luaMemoryUsed = context->luaMemoryUsed - oldSize + newSize;
+    return resized;
+}
+
+static void iENT_ScriptInstructionHook(lua_State* state, lua_Debug* debug)
+{
+    (void)debug;
+    gEntScriptCtx.luaInstructionsRemaining -= ENT_SCRIPT_HOOK_INTERVAL;
+    if(gEntScriptCtx.luaInstructionsRemaining <= 0)
+    {
+        luaL_error(state, "script instruction limit exceeded");
+    }
+}
+
+static void iENT_ScriptBeginExecution(lua_State* state)
+{
+    gEntScriptCtx.luaInstructionsRemaining = ENT_SCRIPT_INSTRUCTION_LIMIT;
+    lua_sethook(state, iENT_ScriptInstructionHook, LUA_MASKCOUNT, ENT_SCRIPT_HOOK_INTERVAL);
+}
+
+static void iENT_ScriptEndExecution(lua_State* state)
+{
+    lua_sethook(state, NULL, 0, 0);
+    gEntScriptCtx.luaInstructionsRemaining = 0;
+}
+
+static void iENT_ScriptOpenAllowedLibraries(lua_State* state)
+{
+    static const luaL_Reg allowedLibraries[] = {
+        {LUA_GNAME, luaopen_base},
+        {LUA_COLIBNAME, luaopen_coroutine},
+        {LUA_TABLIBNAME, luaopen_table},
+        {LUA_STRLIBNAME, luaopen_string},
+        {LUA_MATHLIBNAME, luaopen_math},
+        {LUA_UTF8LIBNAME, luaopen_utf8},
+        {NULL, NULL}
+    };
+    const luaL_Reg* library;
+
+    for(library = allowedLibraries; library->func != NULL; ++library)
+    {
+        luaL_requiref(state, library->name, library->func, 1);
+        lua_pop(state, 1);
+    }
+
     lua_pushnil(state);
     lua_setglobal(state, "dofile");
     lua_pushnil(state);
     lua_setglobal(state, "loadfile");
+    lua_pushnil(state);
+    lua_setglobal(state, "load");
+    lua_pushnil(state);
+    lua_setglobal(state, "collectgarbage");
 }
 #endif
 
@@ -558,7 +641,8 @@ ENT_PUBLIC MSG_ID_T ENT_ScriptInit(const char* scriptRoot)
     }
 
 #if ENT_ENABLE_LUA
-    gEntScriptCtx.state = luaL_newstate();
+    gEntScriptCtx.luaMemoryUsed = 0;
+    gEntScriptCtx.state = lua_newstate(iENT_ScriptLuaAllocate, &gEntScriptCtx);
     if(gEntScriptCtx.state == NULL)
     {
         memset(gEntScriptCtx.scriptRoot, 0, sizeof(gEntScriptCtx.scriptRoot));
@@ -566,8 +650,7 @@ ENT_PUBLIC MSG_ID_T ENT_ScriptInit(const char* scriptRoot)
         return ENT_SCR_LOAD_FAILED;
     }
 
-    luaL_openlibs(gEntScriptCtx.state);
-    iENT_ScriptDisableDangerousGlobals(gEntScriptCtx.state);
+    iENT_ScriptOpenAllowedLibraries(gEntScriptCtx.state);
 #endif
 
     gEntScriptCtx.isInit = true;
@@ -629,7 +712,9 @@ ENT_PUBLIC MSG_ID_T ENT_ScriptReload(const char* scriptName)
         goto END_OF_ROUTINE;
     }
 
+    iENT_ScriptBeginExecution(gEntScriptCtx.state);
     rc = lua_pcall(gEntScriptCtx.state, 0, 0, 0);
+    iENT_ScriptEndExecution(gEntScriptCtx.state);
     if(rc != LUA_OK)
     {
         fprintf(stderr, "ENT_ScriptReload runtime failed,file[%s],reason[%s]\n",
@@ -727,7 +812,9 @@ ENT_PUBLIC MSG_ID_T ENT_ScriptCall(const char* fn,
             }
         }
 
+        iENT_ScriptBeginExecution(gEntScriptCtx.state);
         rc = lua_pcall(gEntScriptCtx.state, 1, 1, 0);
+        iENT_ScriptEndExecution(gEntScriptCtx.state);
         if(rc != LUA_OK)
         {
             fprintf(stderr, "ENT_ScriptCall runtime failed,fn[%s],reason[%s]\n",

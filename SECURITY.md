@@ -2,13 +2,15 @@
 
 ## Supported Versions
 
-ent is in the **0.x / Preview** stage. Only the latest commit on `master` is
-actively maintained. No backports to older commits are provided.
+ent is in the **0.x / Preview** stage. The latest stable release and the latest
+commit on `master` receive security fixes. Older releases and commits do not
+receive backports.
 
 | Version | Supported |
 |---|---|
+| latest stable release | Yes |
 | latest `master` | Yes |
-| older tags / commits | No |
+| older releases / commits | No |
 
 ## Reporting a Vulnerability
 
@@ -20,8 +22,7 @@ disclosure before a fix is available can put users at risk.
 Use [GitHub Private Security Advisories](https://github.com/if16888/ent/security/advisories/new)
 to report a vulnerability confidentially.
 
-If the advisory form is unavailable, email **noreply@github.com** with the
-subject prefix `[ent security]`. Include:
+Include:
 
 - A brief description of the vulnerability.
 - Steps to reproduce or a minimal proof of concept.
@@ -31,6 +32,10 @@ subject prefix `[ent security]`. Include:
 
 Do not include credentials, private keys, production data, or unrelated
 personal information in the report.
+
+If the advisory form is temporarily unavailable, do not send vulnerability
+details through a public issue or discussion. Retry the private advisory form
+later.
 
 ### Response Commitment
 
