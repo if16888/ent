@@ -705,6 +705,89 @@ static int test_multiple_map_same_file(void)
     return 0;
 }
 
+#ifdef WIN32
+static int test_windows_rejects_directory_and_reparse_point(void)
+{
+    ENT_SharedMapOptions options;
+    ENT_SharedMap* map = NULL;
+    char target_path[MAX_PATH];
+    char directory_path[MAX_PATH];
+    char link_path[MAX_PATH];
+    HANDLE target = INVALID_HANDLE_VALUE;
+    DWORD link_error;
+
+    memset(&options, 0, sizeof(options));
+    if(prepare_temp_path(target_path, sizeof(target_path)) != 0 ||
+       snprintf(directory_path, sizeof(directory_path), "%s.dir", target_path) >= (int)sizeof(directory_path) ||
+       snprintf(link_path, sizeof(link_path), "%s.link", target_path) >= (int)sizeof(link_path))
+    {
+        return 1;
+    }
+
+    DeleteFileA(link_path);
+    RemoveDirectoryA(directory_path);
+    if(!CreateDirectoryA(directory_path, NULL))
+    {
+        fprintf(stderr, "CreateDirectoryA failed,error[%lu]\n", (unsigned long)GetLastError());
+        return 1;
+    }
+
+    options.path = directory_path;
+    options.size = TEST_SHM_SMALL_SIZE;
+    options.mode = ENT_SHM_MODE_READ_WRITE;
+    options.flags = ENT_SHM_F_CREATE_IF_MISSING | ENT_SHM_F_TRUNCATE_IF_EXISTS;
+    if(expect_true(ENT_SharedMapOpen(&options, &map) == ENT_SHM_PATH_FAILED,
+                   "Windows shared map should reject a directory path") != 0)
+    {
+        RemoveDirectoryA(directory_path);
+        return 1;
+    }
+    RemoveDirectoryA(directory_path);
+
+    target = CreateFileA(target_path, GENERIC_READ | GENERIC_WRITE, 0, NULL,
+                         CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    if(target == INVALID_HANDLE_VALUE)
+    {
+        fprintf(stderr, "CreateFileA test target failed,error[%lu]\n", (unsigned long)GetLastError());
+        return 1;
+    }
+    CloseHandle(target);
+
+    if(!CreateSymbolicLinkA(link_path, target_path, 0x2u))
+    {
+        link_error = GetLastError();
+        if(link_error == ERROR_PRIVILEGE_NOT_HELD ||
+           link_error == ERROR_INVALID_PARAMETER ||
+           link_error == ERROR_NOT_SUPPORTED)
+        {
+            fprintf(stderr,
+                    "SKIP: Windows symbolic-link rejection requires Developer Mode or symbolic-link privilege,error[%lu]\n",
+                    (unsigned long)link_error);
+            DeleteFileA(target_path);
+            return 0;
+        }
+        fprintf(stderr, "CreateSymbolicLinkA failed,error[%lu]\n", (unsigned long)link_error);
+        DeleteFileA(target_path);
+        return 1;
+    }
+
+    options.path = link_path;
+    options.size = TEST_SHM_SIZE_ZERO;
+    options.flags = 0;
+    if(expect_true(ENT_SharedMapOpen(&options, &map) == ENT_SHM_PATH_FAILED,
+                   "Windows shared map should reject a reparse-point path") != 0)
+    {
+        DeleteFileA(link_path);
+        DeleteFileA(target_path);
+        return 1;
+    }
+
+    DeleteFileA(link_path);
+    DeleteFileA(target_path);
+    return 0;
+}
+#endif
+
 int main(void)
 {
     int failures = 0;
@@ -717,6 +800,9 @@ int main(void)
     failures += test_repeated_close_is_safe();
     failures += test_read_only_repeated_close_is_safe();
     failures += test_multiple_map_same_file();
+#ifdef WIN32
+    failures += test_windows_rejects_directory_and_reparse_point();
+#endif
 
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

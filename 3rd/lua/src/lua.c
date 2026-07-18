@@ -302,7 +302,8 @@ static int collectargs (char **argv, int *first) {
       case '-':  /* '--' */
         if (argv[i][2] != '\0')  /* extra characters after '--'? */
           return has_error;  /* invalid option */
-        *first = i + 1;
+        /* if there is a script name, it comes after '--' */
+        *first = (argv[i + 1] != NULL) ? i + 1 : 0;
         return args;
       case '\0':  /* '-' */
         return args;  /* script "name" is '-' */
@@ -684,4 +685,3 @@ int main (int argc, char **argv) {
   lua_close(L);
   return (result && status == LUA_OK) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
-

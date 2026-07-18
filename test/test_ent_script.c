@@ -256,6 +256,12 @@ int main(void)
     }
 
     fprintf(fp, "function calc_discount(args)\n");
+    fprintf(fp, "  if require ~= nil or package ~= nil or io ~= nil or os ~= nil or debug ~= nil then\n");
+    fprintf(fp, "    return {code = -2, message = \"unsafe library exposed\"}\n");
+    fprintf(fp, "  end\n");
+    fprintf(fp, "  if dofile ~= nil or loadfile ~= nil or load ~= nil then\n");
+    fprintf(fp, "    return {code = -3, message = \"dynamic loader exposed\"}\n");
+    fprintf(fp, "  end\n");
     fprintf(fp, "  local amount = tonumber(args[\"amount\"] or 0)\n");
     fprintf(fp, "  local vip = (args[\"vip\"] == true)\n");
     fprintf(fp, "  local tier = tostring(args[\"tier\"] or \"none\")\n");
@@ -320,6 +326,40 @@ int main(void)
 
     if(expect_true(ENT_ScriptCall("missing_fn", &in, &out) == ENT_SCR_FUNC_NOTFOUND,
                    "ENT_ScriptCall should report missing lua function") != 0)
+    {
+        remove(scriptPath);
+        return EXIT_FAILURE;
+    }
+
+    fp = ENT_FOpen(scriptPath, "wb");
+    if(expect_true(fp != NULL, "test should create an instruction-limit script") != 0)
+    {
+        remove(scriptPath);
+        return EXIT_FAILURE;
+    }
+    fprintf(fp, "function exhaust_budget(args) while true do end end\n");
+    fclose(fp);
+    if(expect_true(ENT_ScriptReload(scriptFile) == ENT_SYS_NORMAL,
+                   "instruction-limit script should load") != 0 ||
+       expect_true(ENT_ScriptCall("exhaust_budget", NULL, &out) == ENT_SCR_RUNTIME_FAILED,
+                   "script instruction budget should stop an infinite loop") != 0)
+    {
+        remove(scriptPath);
+        return EXIT_FAILURE;
+    }
+
+    fp = ENT_FOpen(scriptPath, "wb");
+    if(expect_true(fp != NULL, "test should create a memory-limit script") != 0)
+    {
+        remove(scriptPath);
+        return EXIT_FAILURE;
+    }
+    fprintf(fp, "function exhaust_memory(args) return string.rep('x', 32 * 1024 * 1024) end\n");
+    fclose(fp);
+    if(expect_true(ENT_ScriptReload(scriptFile) == ENT_SYS_NORMAL,
+                   "memory-limit script should load") != 0 ||
+       expect_true(ENT_ScriptCall("exhaust_memory", NULL, &out) == ENT_SCR_RUNTIME_FAILED,
+                   "script memory budget should reject an oversized allocation") != 0)
     {
         remove(scriptPath);
         return EXIT_FAILURE;

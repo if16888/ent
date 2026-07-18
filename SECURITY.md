@@ -2,13 +2,15 @@
 
 ## Supported Versions
 
-ent is in the **0.x / Preview** stage. Only the latest commit on `master` is
-actively maintained. No backports to older commits are provided.
+ent is in the **0.x / Preview** stage. The latest stable release and the latest
+commit on `master` receive security fixes. Older releases and commits do not
+receive backports.
 
 | Version | Supported |
 |---|---|
+| latest stable release | Yes |
 | latest `master` | Yes |
-| older tags / commits | No |
+| older releases / commits | No |
 
 ## Reporting a Vulnerability
 

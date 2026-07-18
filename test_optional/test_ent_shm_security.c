@@ -26,7 +26,98 @@ static int expect_true(int condition, const char* message)
     return 0;
 }
 
-#ifndef WIN32
+#ifdef WIN32
+static int make_temp_path(char* path, size_t path_size)
+{
+    char directory[MAX_PATH];
+    char temporary[MAX_PATH];
+
+    if(GetTempPathA((DWORD)sizeof(directory), directory) == 0 ||
+       GetTempFileNameA(directory, "esh", 0, temporary) == 0)
+    {
+        return 1;
+    }
+    DeleteFileA(temporary);
+    return snprintf(path, path_size, "%s", temporary) >= (int)path_size;
+}
+
+static int test_windows_security_boundaries(void)
+{
+    ENT_SharedMapOptions options;
+    ENT_SharedMap* map = NULL;
+    char path[MAX_PATH] = {0};
+    char directory[MAX_PATH] = {0};
+    char target[MAX_PATH] = {0};
+    char link_path[MAX_PATH] = {0};
+    DWORD link_error;
+    int failed = 0;
+
+    if(make_temp_path(path, sizeof(path)) != 0 ||
+       snprintf(directory, sizeof(directory), "%s.dir", path) >= (int)sizeof(directory) ||
+       snprintf(target, sizeof(target), "%s.target", path) >= (int)sizeof(target) ||
+       snprintf(link_path, sizeof(link_path), "%s.link", path) >= (int)sizeof(link_path))
+    {
+        return 1;
+    }
+
+    memset(&options, 0, sizeof(options));
+    options.path = path;
+    options.size = TEST_MAP_SIZE;
+    options.mode = ENT_SHM_MODE_READ_WRITE;
+    options.flags = ENT_SHM_F_CREATE_IF_MISSING | ENT_SHM_F_TRUNCATE_IF_EXISTS;
+    failed |= expect_true(ENT_SharedMapOpen(&options, &map) == ENT_SYS_NORMAL,
+                          "Windows secure shared-map creation should succeed");
+    if(map != NULL)
+    {
+        failed |= expect_true(ENT_SharedMapClose(&map) == ENT_SYS_NORMAL,
+                              "Windows secure shared-map close should succeed");
+    }
+    DeleteFileA(path);
+
+    if(!CreateDirectoryA(directory, NULL))
+    {
+        return 1;
+    }
+    options.path = directory;
+    failed |= expect_true(ENT_SharedMapOpen(&options, &map) == ENT_SHM_PATH_FAILED,
+                          "Windows shared-map directory path must be rejected");
+    RemoveDirectoryA(directory);
+
+    {
+        HANDLE file = CreateFileA(target, GENERIC_READ | GENERIC_WRITE, 0, NULL,
+                                  CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+        if(file == INVALID_HANDLE_VALUE)
+        {
+            return 1;
+        }
+        CloseHandle(file);
+    }
+    if(!CreateSymbolicLinkA(link_path, target, 0x2u))
+    {
+        link_error = GetLastError();
+        if(link_error == ERROR_PRIVILEGE_NOT_HELD ||
+           link_error == ERROR_INVALID_PARAMETER ||
+           link_error == ERROR_NOT_SUPPORTED)
+        {
+            fprintf(stderr,
+                    "SKIP: Windows reparse-point test requires Developer Mode or symbolic-link privilege,error[%lu]\n",
+                    (unsigned long)link_error);
+            DeleteFileA(target);
+            return failed;
+        }
+        DeleteFileA(target);
+        return 1;
+    }
+    options.path = link_path;
+    options.size = 0;
+    options.flags = 0;
+    failed |= expect_true(ENT_SharedMapOpen(&options, &map) == ENT_SHM_PATH_FAILED,
+                          "Windows shared-map reparse point must be rejected");
+    DeleteFileA(link_path);
+    DeleteFileA(target);
+    return failed;
+}
+#else
 static int make_temp_dir(char* path, size_t path_size)
 {
     char pattern[] = "/tmp/ent_shm_security_XXXXXX";
@@ -196,7 +287,7 @@ static int test_non_regular_file_is_rejected(void)
 int main(void)
 {
 #ifdef WIN32
-    return EXIT_SUCCESS;
+    return test_windows_security_boundaries() == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 #else
     int failed = 0;
 

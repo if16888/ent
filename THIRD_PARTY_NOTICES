@@ -12,7 +12,8 @@ Release packaging policy
   runtime libraries. Applications enabling those backends must install and
   deploy compatible client libraries under the upstream license terms.
 - Lua source is used only when ENT_ENABLE_LUA=ON and remains under the Lua MIT
-  license below.
+  license below. Applied upstream corrections are recorded in
+  3rd/lua/PATCHES.md.
 
 -------------------------------------------------------------------------------
 SQLite

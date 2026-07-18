@@ -4,8 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import os
+import re
+import stat
 import sys
+import tarfile
 import tempfile
+import zipfile
 from pathlib import Path
 from typing import Iterable
 
@@ -47,10 +52,14 @@ FORBIDDEN_PERSONAL_CONTACT_SUFFIXES = (
     "@" + "foxmail" + ".com",
 )
 
-TEXT_METADATA_SUFFIXES = {
-    ".c", ".cmake", ".h", ".in", ".json", ".md", ".pc", ".ps1",
-    ".py", ".sh", ".toml", ".txt", ".yaml", ".yml",
-}
+MAX_ARCHIVE_MEMBER_BYTES = 64 * 1024 * 1024
+
+SECRET_PATTERNS = (
+    ("private key", re.compile(rb"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")),
+    ("GitHub token", re.compile(rb"(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{30,}")),
+    ("GitHub fine-grained token", re.compile(rb"github_pat_[A-Za-z0-9_]{40,}")),
+    ("AWS access key", re.compile(rb"(?:AKIA|ASIA)[A-Z0-9]{16}")),
+)
 
 # This checker contains the forbidden identifiers it enforces. Its rule table
 # is not an enterprise leak and must not cause the checker to reject itself.
@@ -61,6 +70,65 @@ def iter_files(root: Path) -> Iterable[Path]:
     for path in root.rglob("*"):
         if path.is_file() and ".git" not in path.parts:
             yield path
+
+
+def is_reparse_point(path: Path) -> bool:
+    attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    reparse_attribute = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    return bool(attributes & reparse_attribute)
+
+
+def scan_payload(label: str, payload: bytes, findings: list[str]) -> None:
+    lowered = payload.lower()
+    for identifier in FORBIDDEN_IDENTIFIERS:
+        if identifier.encode("utf-8").lower() in lowered:
+            findings.append(f"private identifier {identifier!r}: {label}")
+    for suffix in FORBIDDEN_PERSONAL_CONTACT_SUFFIXES:
+        if suffix.encode("utf-8").lower() in lowered:
+            findings.append(f"personal contact domain {suffix!r}: {label}")
+    for description, pattern in SECRET_PATTERNS:
+        if pattern.search(payload):
+            findings.append(f"possible {description}: {label}")
+
+
+def scan_archive(path: Path, findings: list[str]) -> None:
+    def scan_member(archive_label: str, member_name: str, payload: bytes) -> None:
+        member = Path(member_name.replace("\\", "/"))
+        tokens = private_path_tokens(member)
+        if member.is_absolute() or ".." in member.parts:
+            findings.append(f"unsafe archive member path: {archive_label}!{member_name}")
+        if tokens:
+            findings.append(
+                f"forbidden private path token {tokens}: {archive_label}!{member_name}"
+            )
+        if len(payload) > MAX_ARCHIVE_MEMBER_BYTES:
+            findings.append(f"archive member exceeds scan limit: {archive_label}!{member_name}")
+            return
+        scan_payload(f"{archive_label}!{member_name}", payload, findings)
+
+    try:
+        if zipfile.is_zipfile(path):
+            with zipfile.ZipFile(path) as archive:
+                for member in archive.infolist():
+                    if member.is_dir():
+                        continue
+                    if member.file_size > MAX_ARCHIVE_MEMBER_BYTES:
+                        findings.append(f"archive member exceeds scan limit: {path}!{member.filename}")
+                        continue
+                    scan_member(str(path), member.filename, archive.read(member))
+        elif tarfile.is_tarfile(path):
+            with tarfile.open(path, mode="r:*") as archive:
+                for member in archive.getmembers():
+                    if member.issym() or member.islnk():
+                        findings.append(f"archive link is not allowed: {path}!{member.name}")
+                        continue
+                    if not member.isfile():
+                        continue
+                    extracted = archive.extractfile(member)
+                    if extracted is not None:
+                        scan_member(str(path), member.name, extracted.read(MAX_ARCHIVE_MEMBER_BYTES + 1))
+    except (OSError, tarfile.TarError, zipfile.BadZipFile) as error:
+        findings.append(f"archive could not be inspected: {path}: {error}")
 
 
 def check_header_surface(root: Path, findings: list[str]) -> None:
@@ -78,29 +146,19 @@ def check_header_surface(root: Path, findings: list[str]) -> None:
                 )
 
 
-def check_text_metadata(root: Path, findings: list[str]) -> None:
+def check_file_contents(root: Path, findings: list[str]) -> None:
     for path in iter_files(root):
         relative = path.relative_to(root)
         if relative in IDENTIFIER_SCAN_EXEMPT_PATHS:
             continue
-        if path.suffix.lower() not in TEXT_METADATA_SUFFIXES:
-            continue
         try:
-            text = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            findings.append(f"non-UTF-8 source metadata: {path.relative_to(root)}")
+            payload = path.read_bytes()
+        except OSError as error:
+            findings.append(f"file could not be inspected: {relative}: {error}")
             continue
-        for identifier in FORBIDDEN_IDENTIFIERS:
-            if identifier in text:
-                findings.append(
-                    f"private identifier {identifier!r}: {relative}"
-                )
-        lowered_text = text.lower()
-        for suffix in FORBIDDEN_PERSONAL_CONTACT_SUFFIXES:
-            if suffix.lower() in lowered_text:
-                findings.append(
-                    f"personal contact domain {suffix!r}: {relative}"
-                )
+        scan_payload(str(relative), payload, findings)
+        if zipfile.is_zipfile(path) or tarfile.is_tarfile(path):
+            scan_archive(path, findings)
 
 
 def private_path_tokens(relative: Path) -> list[str]:
@@ -119,6 +177,12 @@ def check(root: Path) -> list[str]:
     if not root.is_dir():
         return [f"scope root does not exist or is not a directory: {root}"]
 
+    for path in root.rglob("*"):
+        if ".git" in path.parts:
+            continue
+        if path.is_symlink() or is_reparse_point(path):
+            findings.append(f"link or reparse point is not allowed: {path.relative_to(root)}")
+
     for path in iter_files(root):
         relative = path.relative_to(root)
         leaked_tokens = private_path_tokens(relative)
@@ -128,7 +192,7 @@ def check(root: Path) -> list[str]:
             )
 
     check_header_surface(root, findings)
-    check_text_metadata(root, findings)
+    check_file_contents(root, findings)
     return sorted(set(findings))
 
 
@@ -153,6 +217,43 @@ def run_self_test() -> int:
             print("public-scope self-test failed: YAML private identifier was accepted", file=sys.stderr)
             return 1
         (root / "private-leak.yml").unlink()
+
+        (root / "extensionless").write_text("EE_PEP_PRIVATE\n", encoding="utf-8")
+        if not check(root):
+            print("public-scope self-test failed: extensionless leak was accepted", file=sys.stderr)
+            return 1
+        (root / "extensionless").unlink()
+
+        (root / "private-leak.html").write_text("<p>ENT_ENTERPRISE_SECRET</p>\n", encoding="utf-8")
+        if not check(root):
+            print("public-scope self-test failed: HTML leak was accepted", file=sys.stderr)
+            return 1
+        (root / "private-leak.html").unlink()
+
+        archive_path = root / "release.zip"
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            archive.writestr("assets/details.xml", "EE_ADVSHM_PRIVATE")
+        if not check(root):
+            print("public-scope self-test failed: archived leak was accepted", file=sys.stderr)
+            return 1
+        archive_path.unlink()
+
+        (root / "credential.bin").write_bytes(b"prefix AKIAABCDEFGHIJKLMNOP suffix")
+        if not check(root):
+            print("public-scope self-test failed: credential pattern was accepted", file=sys.stderr)
+            return 1
+        (root / "credential.bin").unlink()
+
+        link_path = root / "linked-public-header"
+        try:
+            os.symlink(include_dir / "ent_shm.h", link_path)
+        except (OSError, NotImplementedError):
+            pass
+        else:
+            if not check(root):
+                print("public-scope self-test failed: symbolic link was accepted", file=sys.stderr)
+                return 1
+            link_path.unlink()
 
         (root / "personal-contact.c").write_text(
             "/* contact: private" + "@foxmail" + ".com */\n", encoding="utf-8"
