@@ -15,7 +15,7 @@ import argparse
 import sys
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence
 
 import gen_ent_msg
 
@@ -93,10 +93,23 @@ def _parse_spec(
     return replacements
 
 
-def _replace_symbols(path: Path, replacements: Dict[str, str]) -> None:
+def _rewrite_generated(
+    path: Path,
+    replacements: Dict[str, str],
+    temporary_inputs: Sequence[Path],
+    source_inputs: Sequence[Path],
+) -> None:
     text = path.read_text(encoding="utf-8")
     for old_symbol in sorted(replacements, key=len, reverse=True):
         text = text.replace(old_symbol, replacements[old_symbol])
+
+    temporary_notice = ", ".join(item.name for item in temporary_inputs)
+    source_notice = ", ".join(item.name for item in source_inputs)
+    text = text.replace(
+        f" * Sources: {temporary_notice}",
+        f" * Sources: {source_notice}",
+        1,
+    )
     path.write_text(text, encoding="utf-8")
 
 
@@ -112,12 +125,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         known.symbol_prefix, "symbol prefix"
     ).upper()
     replacements: Dict[str, str] = {}
+    source_inputs = [Path(raw_path) for raw_path in known.input]
 
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_root = Path(temp_dir)
         transformed_inputs = []
-        for index, raw_path in enumerate(known.input):
-            source = Path(raw_path)
+        for index, source in enumerate(source_inputs):
             transformed = temp_root / f"spec-{index}.msg"
             current = _parse_spec(source, transformed, symbol_prefix)
             for old_symbol, new_symbol in current.items():
@@ -145,8 +158,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
         result = gen_ent_msg.main(base_args)
 
-    _replace_symbols(Path(known.header), replacements)
-    _replace_symbols(Path(known.source), replacements)
+        _rewrite_generated(
+            Path(known.header),
+            replacements,
+            transformed_inputs,
+            source_inputs,
+        )
+        _rewrite_generated(
+            Path(known.source),
+            replacements,
+            transformed_inputs,
+            source_inputs,
+        )
     return result
 
 
