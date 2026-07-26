@@ -70,19 +70,19 @@ def main() -> int:
         spec_a = root / "a.msg"
         spec_b = root / "b.msg"
         spec_a.write_text(
-            "module REPL 17\n"
+            "module DATA 17\n"
             "submodule QUE 5\n"
             "BAD err 1 queue failure\n",
             encoding="utf-8",
         )
         spec_b.write_text(
-            "module TRAN 18\n"
+            "module NETW 18\n"
             "submodule TLS 2\n"
             "BAD err 1 tls failure\n",
             encoding="utf-8",
         )
-        generic_h = root / "ee_msg_gen.h"
-        generic_c = root / "ee_msg_gen.c"
+        generic_h = root / "acme_msg_gen.h"
+        generic_c = root / "acme_msg_gen.c"
         run_generator(
             generator,
             [
@@ -95,23 +95,23 @@ def main() -> int:
                 "--source",
                 str(generic_c),
                 "--symbol-prefix",
-                "EE",
+                "ACME",
                 "--type-prefix",
-                "EE",
+                "ACME",
                 "--table-prefix",
-                "g_ee_msg",
+                "g_acme_msg",
                 "--include-guard",
-                "EE_MSG_GEN_H",
+                "ACME_MSG_GEN_H",
                 "--emit-symbol-name",
             ],
         )
         generic_header = generic_h.read_text(encoding="utf-8")
         generic_source = generic_c.read_text(encoding="utf-8")
         for expected in (
-            "EE_REPL_QUE_BAD",
-            "EE_TRAN_TLS_BAD",
-            "EE_MSG_ITEM_T",
-            "g_ee_msg_items",
+            "ACME_DATA_QUE_BAD",
+            "ACME_NETW_TLS_BAD",
+            "ACME_MSG_ITEM_T",
+            "g_acme_msg_items",
             "const char* symbol;",
         ):
             if expected not in generic_header and expected not in generic_source:
@@ -119,7 +119,7 @@ def main() -> int:
 
         duplicate = root / "duplicate.msg"
         duplicate.write_text(
-            "module REPL 17\n"
+            "module DATA 17\n"
             "submodule QUE 5\n"
             "OTHER err 1 duplicate code\n",
             encoding="utf-8",
@@ -136,7 +136,7 @@ def main() -> int:
                 "--source",
                 str(root / "duplicate.c"),
                 "--symbol-prefix",
-                "EE",
+                "ACME",
             ],
             expect_success=False,
         )
