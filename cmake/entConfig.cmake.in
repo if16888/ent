@@ -22,6 +22,7 @@ if(@ENT_ENABLE_LUA@ AND "@ENT_LUA_LINK_MODE@" STREQUAL "shared")
   list(POP_FRONT CMAKE_MODULE_PATH)
 endif()
 
+include("${CMAKE_CURRENT_LIST_DIR}/EntMsgCodegen.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/entTargets.cmake")
 
 check_required_components(ent)
