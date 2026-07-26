@@ -19,7 +19,7 @@
 #define  _ENT_THREAD_H_
 
 #include "ent_comm.h"
-#ifdef WIN32
+#ifdef _WIN32
 #include "windows.h"
 #else
 
@@ -28,7 +28,7 @@
 typedef void* ENT_THREAD;
 typedef void* ENT_THREAD_ID;
 
-#ifndef WIN32
+#ifndef _WIN32
 typedef void* ( *PTHREAD_START_ROUTINE)(void* );
 #endif
 

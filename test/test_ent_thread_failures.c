@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #else
 #include <pthread.h>
@@ -25,7 +25,7 @@ static int s_lock_close_calls = 0;
 static int s_cv_init_fail = 0;
 static int s_callback_calls = 0;
 static int s_wrapper_calls = 0;
-#ifdef WIN32
+#ifdef _WIN32
 static LPTHREAD_START_ROUTINE s_saved_start_routine = NULL;
 static LPVOID s_saved_param = NULL;
 #endif
@@ -64,7 +64,7 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle, const char* format, ...){(void)logHandl
 #define UTL_DllInsHead mock_UTL_DllInsHead
 #define UTL_DllRemHead mock_UTL_DllRemHead
 #define UTL_DllRemCurr mock_UTL_DllRemCurr
-#ifdef WIN32
+#ifdef _WIN32
 #define CreateThread mock_CreateThread
 #define WakeConditionVariable mock_WakeConditionVariable
 #define WaitForSingleObject mock_WaitForSingleObject
@@ -205,7 +205,7 @@ static MSG_ID_T mock_UTL_DllRemCurr(DLL_D_HDR* curr, DLL_D_HDR** out)
     return ENT_SYS_NORMAL;
 }
 
-#ifndef WIN32
+#ifndef _WIN32
 static int mock_pthread_mutex_init(pthread_mutex_t* mutex, const pthread_mutexattr_t* attr)
 {
     (void)mutex;
@@ -293,14 +293,14 @@ static BOOL mock_CloseHandle(HANDLE handle)
 }
 #endif
 
-#ifdef WIN32
+#ifdef _WIN32
 static DWORD WINAPI dummy_thread(void* data)
 #else
 static void* dummy_thread(void* data)
 #endif
 {
     s_callback_calls++;
-#ifdef WIN32
+#ifdef _WIN32
     return (DWORD)(ULONG_PTR)data;
 #else
     return data;
@@ -341,7 +341,7 @@ static int test_thread_create_reclaims_created_thread_if_registration_fails(void
     s_close_calls = 0;
     s_callback_calls = 0;
     s_wrapper_calls = 0;
-#ifdef WIN32
+#ifdef _WIN32
     s_saved_start_routine = NULL;
     s_saved_param = NULL;
 #endif
@@ -374,7 +374,7 @@ static int test_thread_create_reclaims_created_thread_if_registration_fails(void
         return 1;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     if(expect_true(s_wrapper_calls == 1,
                    "registration failure should execute the internal wrapper") != 0)
     {
@@ -383,7 +383,7 @@ static int test_thread_create_reclaims_created_thread_if_registration_fails(void
     }
 #endif
 
-#ifdef WIN32
+#ifdef _WIN32
     if(expect_true(s_wait_calls == 1,
                    "Windows create failure path should wait for the created thread before discarding it") != 0)
     {

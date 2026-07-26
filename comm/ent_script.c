@@ -22,11 +22,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #endif
 
-#ifndef WIN32
+#ifndef _WIN32
 #include <fcntl.h>
 #include <pthread.h>
 #include <sys/stat.h>
@@ -45,14 +45,14 @@
 #endif
 
 #ifndef ENT_SCRIPT_PATH_MAX
-#ifdef WIN32
+#ifdef _WIN32
 #define ENT_SCRIPT_PATH_MAX 260
 #else
 #define ENT_SCRIPT_PATH_MAX 1024
 #endif
 #endif
 
-#ifdef WIN32
+#ifdef _WIN32
 static SRWLOCK sScriptLock = SRWLOCK_INIT;
 static void iENT_ScriptLock(void)
 {
@@ -135,7 +135,7 @@ static bool iENT_ScriptNameIsSafe(const char* name)
         return false;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     if((name[0] >= 'A' && name[0] <= 'Z') ||
        (name[0] >= 'a' && name[0] <= 'z'))
     {
@@ -228,7 +228,7 @@ static bool iENT_ScriptPathHasRootPrefix(const char* root, const char* path)
     {
         return false;
     }
-#ifdef WIN32
+#ifdef _WIN32
     if(_strnicmp(root, path, rootLength) != 0)
 #else
     if(strncmp(root, path, rootLength) != 0)
@@ -237,7 +237,7 @@ static bool iENT_ScriptPathHasRootPrefix(const char* root, const char* path)
         return false;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     return path[rootLength] == '\0' || path[rootLength] == '/' || path[rootLength] == '\\';
 #else
     return path[rootLength] == '\0' || path[rootLength] == '/';
@@ -260,7 +260,7 @@ static MSG_ID_T iENT_ScriptResolvePath(char* out,
         return ENT_SCR_BAD_ARGUMENT;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     {
         char fullRoot[ENT_SCRIPT_PATH_MAX * 4] = {0};
         char rootFinal[ENT_SCRIPT_PATH_MAX * 4] = {0};
@@ -361,7 +361,7 @@ static MSG_ID_T iENT_ScriptLoadChunk(lua_State* state,
         return ENT_SCR_BAD_ARGUMENT;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     {
         char candidate[ENT_SCRIPT_PATH_MAX * 4] = {0};
         char fullRoot[ENT_SCRIPT_PATH_MAX * 4] = {0};

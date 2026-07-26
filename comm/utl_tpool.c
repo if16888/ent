@@ -19,7 +19,7 @@
 #include <time.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #else
 #include <pthread.h>
@@ -87,7 +87,7 @@ static int sPoolIdx;
 #define DEFAULT_NUM   8
 #define UTL_TPOOL_TAG (0xEB90F00D)
 
-#ifdef WIN32
+#ifdef _WIN32
 static INIT_ONCE sTPoolRegistryOnce = INIT_ONCE_STATIC_INIT;
 static CRITICAL_SECTION sTPoolRegistryLock;
 static BOOL CALLBACK iUTL_TPoolRegistryInitOnce(PINIT_ONCE once, PVOID param, PVOID* context)
@@ -369,7 +369,7 @@ static DWORD iUTL_TPoolTaskPro(void* data)
     return 0;
 }
 
-#ifdef WIN32
+#ifdef _WIN32
 static DWORD WINAPI  iUTL_TPoolTaskProWin(void* data)
 {
     return iUTL_TPoolTaskPro(data);
@@ -460,7 +460,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolInit(UTL_TPOOL*  pool,int num)
         }
         memset(thCtx,0,sizeof(UTL_TPOOL_THREAD));
         thCtx->pool = poolCtx;
-#ifdef WIN32
+#ifdef _WIN32
         sts = ENT_ThreadCreate(&thCtx->thId,poolCtx->thHandle,iUTL_TPoolTaskProWin,thCtx);
 #else
         sts = ENT_ThreadCreate(&thCtx->thId,poolCtx->thHandle,iUTL_TPoolTaskProLinux,thCtx);

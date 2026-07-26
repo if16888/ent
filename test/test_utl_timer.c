@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#ifndef WIN32
+#ifndef _WIN32
 #include <pthread.h>
 #endif
 
@@ -174,7 +174,7 @@ static void* reentrant_timer_api_cb(void* data)
     return NULL;
 }
 
-#ifndef WIN32
+#ifndef _WIN32
 typedef struct
 {
     UTL_TIMER_T timer;
@@ -580,7 +580,7 @@ static int test_timer_create_us_periodic_timer_fires_on_linux(void)
 #endif
 }
 
-#ifndef WIN32
+#ifndef _WIN32
 static int test_timer_callback_can_self_delete_safely(void)
 {
     TIMER_SELF_DELETE_PROBE probe;
@@ -701,7 +701,7 @@ int main(void)
     failures += test_timer_create_us_has_consistent_failure_contract();
     failures += test_timer_create_us_delete_does_not_wait_full_period();
     failures += test_timer_create_us_periodic_timer_fires_on_linux();
-#ifndef WIN32
+#ifndef _WIN32
     failures += test_timer_callback_can_self_delete_safely();
     failures += test_timer_create_is_rejected_while_close_progresses();
 #endif

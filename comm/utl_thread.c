@@ -15,7 +15,7 @@
  *
  *-----------------------------------------------------------------------------
  */
-#ifdef WIN32
+#ifdef _WIN32
 #include "windows.h"
 #else
 #include <pthread.h>
@@ -28,13 +28,13 @@
 #include "ent_msg.h"
 #include "ent_utility.h"
 
-#if !defined(WIN32) && defined(__linux__)
+#if !defined(_WIN32) && defined(__linux__)
 #define ENT_HAS_PTHREAD_SPINLOCK 1
 #else
 #define ENT_HAS_PTHREAD_SPINLOCK 0
 #endif
 
-#ifndef WIN32
+#ifndef _WIN32
 static clockid_t iUTL_CVClockId(void)
 {
 #if defined(__linux__)
@@ -50,7 +50,7 @@ typedef struct
     UTL_LOCK_TYPE_T  lockType;
     union
     {
-#ifdef WIN32
+#ifdef _WIN32
         CRITICAL_SECTION   cs;
         SRWLOCK            rw;
         CRITICAL_SECTION   spin;
@@ -69,7 +69,7 @@ typedef struct
 
 typedef struct
 {
-#ifdef WIN32
+#ifdef _WIN32
     CONDITION_VARIABLE    cv;
 #else
     pthread_cond_t        cv;
@@ -152,7 +152,7 @@ ENT_PUBLIC MSG_ID_T UTL_LockInit(UTL_LOCK* lock,const char* name)
     }
 
     tmp->lockType = LOCK_MUTEX_E;
-#ifdef WIN32
+#ifdef _WIN32
     tmp->lockName = ENT_StrDup(name);
     InitializeCriticalSection(&tmp->lock.cs);
 #else
@@ -180,7 +180,7 @@ static MSG_ID_T iUTL_LockInitRW(UTL_LOCK* lock,const char* name)
         return -2;
     }
     tmp->lockType = LOCK_RW_E;
-#ifdef WIN32
+#ifdef _WIN32
     tmp->lockName = ENT_StrDup(name);
     InitializeSRWLock(&tmp->lock.rw);
 #else
@@ -209,7 +209,7 @@ static MSG_ID_T iUTL_LockInitSpin(UTL_LOCK* lock,const char* name)
         return -2;
     }
     tmp->lockType = LOCK_SPIN_E;
-#ifdef WIN32
+#ifdef _WIN32
     tmp->lockName = ENT_StrDup(name);
     if(!InitializeCriticalSectionAndSpinCount(&tmp->lock.spin,4000))
     {
@@ -273,7 +273,7 @@ ENT_PUBLIC MSG_ID_T UTL_LockInitEx(UTL_LOCK* lock,const char* name,UTL_LOCK_TYPE
 static MSG_ID_T iUTL_LockEnterMutex(UTL_LOCK lock)
 {
     UTL_TH_LOCK* tmp = (UTL_TH_LOCK*)lock;
-#ifdef WIN32
+#ifdef _WIN32
     EnterCriticalSection(&tmp->lock.cs);
     return 0;
 #else
@@ -290,7 +290,7 @@ static MSG_ID_T iUTL_LockEnterMutex(UTL_LOCK lock)
 static MSG_ID_T iUTL_LockEnterRW(UTL_LOCK lock,UTL_LOCK_RW_TYPE_T rwType)
 {
     UTL_TH_LOCK* tmp = (UTL_TH_LOCK*)lock;
-#ifdef WIN32
+#ifdef _WIN32
     switch(rwType)
     {
         case RW_WRITE_E:
@@ -327,7 +327,7 @@ static MSG_ID_T iUTL_LockEnterRW(UTL_LOCK lock,UTL_LOCK_RW_TYPE_T rwType)
 static MSG_ID_T iUTL_LockEnterSpin(UTL_LOCK lock)
 {
     UTL_TH_LOCK* tmp = (UTL_TH_LOCK*)lock;
-#ifdef WIN32
+#ifdef _WIN32
     EnterCriticalSection(&tmp->lock.spin);
     return 0;
 #else
@@ -409,7 +409,7 @@ ENT_PUBLIC MSG_ID_T UTL_LockEnterEx(UTL_LOCK lock,UTL_LOCK_RW_TYPE_T rwType)
 static MSG_ID_T iUTL_LockLeaveMutex(UTL_LOCK lock)
 {
     UTL_TH_LOCK* tmp = (UTL_TH_LOCK*)lock;
-#ifdef WIN32
+#ifdef _WIN32
     LeaveCriticalSection(&tmp->lock.cs);
     return 0;
 #else
@@ -426,7 +426,7 @@ static MSG_ID_T iUTL_LockLeaveMutex(UTL_LOCK lock)
 static MSG_ID_T iUTL_LockLeaveRW(UTL_LOCK lock,UTL_LOCK_RW_TYPE_T rwType)
 {
     UTL_TH_LOCK* tmp = (UTL_TH_LOCK*)lock;
-#ifdef WIN32
+#ifdef _WIN32
     switch(rwType)
     {
         case RW_WRITE_E:
@@ -463,7 +463,7 @@ static MSG_ID_T iUTL_LockLeaveRW(UTL_LOCK lock,UTL_LOCK_RW_TYPE_T rwType)
 static MSG_ID_T iUTL_LockLeaveSpin(UTL_LOCK lock)
 {
     UTL_TH_LOCK* tmp = (UTL_TH_LOCK*)lock;
-#ifdef WIN32
+#ifdef _WIN32
     LeaveCriticalSection(&tmp->lock.spin);
     return 0;
 #else
@@ -544,7 +544,7 @@ ENT_PUBLIC MSG_ID_T UTL_LockLeaveEx(UTL_LOCK lock,UTL_LOCK_RW_TYPE_T rwType)
 static MSG_ID_T iUTL_LockCloseMutex(UTL_LOCK lock)
 {
     UTL_TH_LOCK* tmp = (UTL_TH_LOCK*)lock;
-#ifdef WIN32
+#ifdef _WIN32
     DeleteCriticalSection(&tmp->lock.cs);
 #else
     pthread_mutex_destroy(&tmp->lock.cs);
@@ -560,7 +560,7 @@ static MSG_ID_T iUTL_LockCloseMutex(UTL_LOCK lock)
 static MSG_ID_T iUTL_LockCloseRW(UTL_LOCK lock)
 {
     UTL_TH_LOCK* tmp = (UTL_TH_LOCK*)lock;
-#ifdef WIN32
+#ifdef _WIN32
 #else
     pthread_rwlock_destroy(&tmp->lock.rw);
 #endif
@@ -575,7 +575,7 @@ static MSG_ID_T iUTL_LockCloseRW(UTL_LOCK lock)
 static MSG_ID_T iUTL_LockCloseSpin(UTL_LOCK lock)
 {
     UTL_TH_LOCK* tmp = (UTL_TH_LOCK*)lock;
-#ifdef WIN32
+#ifdef _WIN32
     DeleteCriticalSection(&tmp->lock.spin);
 #else
 #if ENT_HAS_PTHREAD_SPINLOCK
@@ -641,7 +641,7 @@ ENT_PUBLIC MSG_ID_T UTL_CVInit(UTL_CV* cv,const char* name)
         return ENT_UTHD_ALLOC_FAILED;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     tmp->cvName = ENT_StrDup(name);
     InitializeConditionVariable(&tmp->cv);
 #else
@@ -690,7 +690,7 @@ ENT_PUBLIC MSG_ID_T UTL_CVClose(UTL_CV* cv)
     }
 
     UTL_TH_CV* tmp = (UTL_TH_CV*)(*cv);
-#ifdef WIN32
+#ifdef _WIN32
 #else
     pthread_cond_destroy(&tmp->cv);
 #endif
@@ -705,7 +705,7 @@ ENT_PUBLIC MSG_ID_T UTL_CVClose(UTL_CV* cv)
 
 static MSG_ID_T iUTL_CVWaitMutex(UTL_TH_CV* cvCtx,UTL_TH_LOCK* lockCtx,int ms)
 {
-#ifdef WIN32
+#ifdef _WIN32
     BOOL ok = SleepConditionVariableCS(&cvCtx->cv,&lockCtx->lock.cs,ms > 0 ? (DWORD)ms : INFINITE);
     if(ok)
     {
@@ -762,7 +762,7 @@ static MSG_ID_T iUTL_CVWaitMutex(UTL_TH_CV* cvCtx,UTL_TH_LOCK* lockCtx,int ms)
 
 static MSG_ID_T iUTL_CVWaitRW(UTL_TH_CV* cvCtx,UTL_TH_LOCK* lockCtx,int ms,UTL_LOCK_RW_TYPE_T rwType)
 {
-#ifdef WIN32
+#ifdef _WIN32
     ULONG flag = 0;
     BOOL ok;
 
@@ -831,7 +831,7 @@ ENT_PUBLIC MSG_ID_T UTL_CVWake(UTL_CV cv)
     }
 
     UTL_TH_CV* cvCtx = (UTL_TH_CV*)cv;
-#ifdef WIN32
+#ifdef _WIN32
     WakeConditionVariable(&cvCtx->cv);
 #else
     pthread_cond_signal(&cvCtx->cv);
@@ -848,7 +848,7 @@ ENT_PUBLIC MSG_ID_T UTL_CVWakeAll(UTL_CV cv)
     }
 
     UTL_TH_CV* cvCtx = (UTL_TH_CV*)cv;
-#ifdef WIN32
+#ifdef _WIN32
     WakeAllConditionVariable(&cvCtx->cv);
 #else
     pthread_cond_broadcast(&cvCtx->cv);

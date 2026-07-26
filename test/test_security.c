@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #else
 #include <unistd.h>
@@ -112,7 +112,7 @@ static void safe_reset_ent(void)
 
 static int get_temp_root(char* path, size_t path_len)
 {
-#ifdef WIN32
+#ifdef _WIN32
     DWORD len = GetTempPathA((DWORD)path_len, path);
     if(len == 0 || len >= path_len)
     {
@@ -154,7 +154,7 @@ static int build_temp_path(char* path, size_t path_len, const char* leaf_name)
 
 static int prepare_temp_db_path(char* db_path, size_t db_path_len, const char* prefix)
 {
-#ifdef WIN32
+#ifdef _WIN32
     char temp_dir[MAX_PATH];
     char temp_file[MAX_PATH];
 
@@ -212,7 +212,7 @@ static int prepare_temp_db_path(char* db_path, size_t db_path_len, const char* p
 
 static void cleanup_temp_db_path(const char* db_path)
 {
-#ifdef WIN32
+#ifdef _WIN32
     DeleteFileA(db_path);
 #else
     unlink(db_path);
@@ -368,7 +368,7 @@ static void test_init_long_workpath_no_overflow(void)
     /* 构造一个 4096 字节长的路径 */
     char long_path[4097];
     memset(long_path, 'B', 4096);
-#ifdef WIN32
+#ifdef _WIN32
     long_path[0] = 'C';
     long_path[1] = ':';
     long_path[2] = '\\';

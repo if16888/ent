@@ -3,7 +3,7 @@
 #include <string.h>
 #include <errno.h>
 #include <stdint.h>
-#ifdef WIN32
+#ifdef _WIN32
 #include <Windows.h>
 #else
 #include <pthread.h>
@@ -26,7 +26,7 @@ static volatile int s_block_wait_released = 0;
 
 static int test_flag_load(volatile int* value)
 {
-#ifdef WIN32
+#ifdef _WIN32
     return *value;
 #else
     return __sync_fetch_and_add(value, 0);
@@ -35,7 +35,7 @@ static int test_flag_load(volatile int* value)
 
 static void test_flag_store(volatile int* value, int state)
 {
-#ifdef WIN32
+#ifdef _WIN32
     *value = state;
 #else
     __sync_lock_test_and_set(value, state);
@@ -90,7 +90,7 @@ static const char* expected_log_path_for(const char* work_path)
 {
     size_t len = strlen(work_path);
 
-#ifdef WIN32
+#ifdef _WIN32
     if(work_path[len - 1] == '\\' || work_path[len - 1] == '/')
 #else
     if(work_path[len - 1] == '/')
@@ -135,7 +135,7 @@ static void enable_blocking_wait(UTL_CV cv)
 
 static void iENT_TestSleepMs(unsigned int ms)
 {
-#ifdef WIN32
+#ifdef _WIN32
     Sleep(ms);
 #else
     struct timespec ts;
@@ -277,13 +277,13 @@ typedef struct TEST_CLOSE_THREAD_CTX
     MSG_ID_T    ret;
 } TEST_CLOSE_THREAD_CTX;
 
-#ifdef WIN32
+#ifdef _WIN32
 static DWORD WINAPI close_thread_proc(void* arg);
 #else
 static void* close_thread_proc(void* arg);
 #endif
 
-#ifdef WIN32
+#ifdef _WIN32
 typedef HANDLE TEST_THREAD;
 static DWORD WINAPI run_stop_thread_proc(void* arg)
 #else
@@ -298,14 +298,14 @@ static void* run_stop_thread_proc(void* arg)
         ctx->ret = ENT_Run(ctx->handle);
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     return 0;
 #else
     return NULL;
 #endif
 }
 
-#ifdef WIN32
+#ifdef _WIN32
 static DWORD WINAPI close_thread_proc(void* arg)
 #else
 static void* close_thread_proc(void* arg)
@@ -319,7 +319,7 @@ static void* close_thread_proc(void* arg)
         ctx->ret = ENT_Close(ctx->handle);
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     return 0;
 #else
     return NULL;
@@ -328,7 +328,7 @@ static void* close_thread_proc(void* arg)
 
 static int start_test_thread(TEST_THREAD* th, TEST_RUN_THREAD_CTX* ctx)
 {
-#ifdef WIN32
+#ifdef _WIN32
     if(th == NULL)
     {
         return -1;
@@ -343,7 +343,7 @@ static int start_test_thread(TEST_THREAD* th, TEST_RUN_THREAD_CTX* ctx)
 
 static int start_close_test_thread(TEST_THREAD* th, TEST_CLOSE_THREAD_CTX* ctx)
 {
-#ifdef WIN32
+#ifdef _WIN32
     if(th == NULL)
     {
         return -1;
@@ -358,7 +358,7 @@ static int start_close_test_thread(TEST_THREAD* th, TEST_CLOSE_THREAD_CTX* ctx)
 
 static int join_test_thread(TEST_THREAD th)
 {
-#ifdef WIN32
+#ifdef _WIN32
     if(WaitForSingleObject(th, INFINITE) != WAIT_OBJECT_0)
     {
         return -1;
@@ -370,7 +370,7 @@ static int join_test_thread(TEST_THREAD th)
 #endif
 }
 
-#ifndef WIN32
+#ifndef _WIN32
 int mlockall(int flags)
 {
     (void)flags;
@@ -1537,7 +1537,7 @@ static int test_ent_init_realtime_mode_can_degrade_to_normal(void)
     reset_close_counters();
     reset_log_failures();
 
-#ifndef WIN32
+#ifndef _WIN32
     s_mlockall_result = -1;
     s_mlockall_errno = EPERM;
 #endif
@@ -1562,7 +1562,7 @@ static int test_ent_init_realtime_mode_can_degrade_to_normal(void)
         return 1;
     }
 
-#ifndef WIN32
+#ifndef _WIN32
     if(expect_true(handle->ctx.rtLastError == EPERM, "ENT_Init should preserve the mlockall errno when realtime degrades") != 0)
     {
         close_handle_if_needed(&handle);
@@ -1588,7 +1588,7 @@ static int test_ent_set_rt_attributes_rejects_uninitialized_context(void)
 
 static int test_ent_rt_memory_lock_is_process_owned(void)
 {
-#ifdef WIN32
+#ifdef _WIN32
     return 0;
 #else
     ENT_HANDLE first = NULL;

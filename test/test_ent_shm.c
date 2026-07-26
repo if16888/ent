@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #else
 #include <unistd.h>
@@ -28,7 +28,7 @@ static int expect_true(int condition, const char* message)
 
 static int prepare_temp_path(char* path, size_t path_len)
 {
-#ifdef WIN32
+#ifdef _WIN32
     char temp_dir[MAX_PATH];
     char temp_file[MAX_PATH];
 
@@ -80,7 +80,7 @@ static int prepare_temp_path(char* path, size_t path_len)
 
 static void cleanup_temp_path(const char* path)
 {
-#ifdef WIN32
+#ifdef _WIN32
     DeleteFileA(path);
 #else
     unlink(path);
@@ -705,7 +705,7 @@ static int test_multiple_map_same_file(void)
     return 0;
 }
 
-#ifdef WIN32
+#ifdef _WIN32
 static int test_windows_rejects_directory_and_reparse_point(void)
 {
     ENT_SharedMapOptions options;
@@ -800,7 +800,7 @@ int main(void)
     failures += test_repeated_close_is_safe();
     failures += test_read_only_repeated_close_is_safe();
     failures += test_multiple_map_same_file();
-#ifdef WIN32
+#ifdef _WIN32
     failures += test_windows_rejects_directory_and_reparse_point();
 #endif
 

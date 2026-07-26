@@ -20,7 +20,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <time.h>
-#ifdef WIN32
+#ifdef _WIN32
 #include <Windows.h>
 #include <tchar.h>
 #else
@@ -36,7 +36,7 @@
 
 #define DEF_MAX_NUM_LOG 15
 
-#ifdef WIN32
+#ifdef _WIN32
 static SRWLOCK sLogMutex = SRWLOCK_INIT;
 #pragma warning(disable : 4996)
 #else
@@ -82,7 +82,7 @@ static void iENT_LogHandleUnlinkLocked(ENT_LOG_CTX_INTERNAL* target)
 
 static void iENT_LogGlobalLock(void)
 {
-#ifdef WIN32
+#ifdef _WIN32
     AcquireSRWLockExclusive(&sLogMutex);
 #else
     pthread_mutex_lock(&sLogMutex);
@@ -91,7 +91,7 @@ static void iENT_LogGlobalLock(void)
 
 static void iENT_LogGlobalUnlock(void)
 {
-#ifdef WIN32
+#ifdef _WIN32
     ReleaseSRWLockExclusive(&sLogMutex);
 #else
     pthread_mutex_unlock(&sLogMutex);
@@ -176,7 +176,7 @@ static MSG_ID_T iENT_LogCtxBeginCall(struct ENT_LOG_CTX_TAG* ctx,
 {
     MSG_ID_T sts = ENT_SYS_NORMAL;
 
-#ifdef WIN32
+#ifdef _WIN32
     AcquireSRWLockExclusive(&sLogMutex);
 #else
     pthread_mutex_lock(&sLogMutex);
@@ -199,7 +199,7 @@ static MSG_ID_T iENT_LogCtxBeginCall(struct ENT_LOG_CTX_TAG* ctx,
     {
         ctx->activeCalls++;
     }
-#ifdef WIN32
+#ifdef _WIN32
     ReleaseSRWLockExclusive(&sLogMutex);
 #else
     pthread_mutex_unlock(&sLogMutex);
@@ -214,7 +214,7 @@ static void iENT_LogCtxEndCall(struct ENT_LOG_CTX_TAG* ctx)
         return;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     iENT_LogGlobalLock();
 #else
     pthread_mutex_lock(&sLogMutex);
@@ -225,13 +225,13 @@ static void iENT_LogCtxEndCall(struct ENT_LOG_CTX_TAG* ctx)
     }
     if(ctx->state == ENT_LOG_HANDLE_CLOSING_E && ctx->activeCalls == 0)
     {
-#ifdef WIN32
+#ifdef _WIN32
         WakeAllConditionVariable(&ctx->closeCv);
 #else
         pthread_cond_broadcast(&ctx->closeCv);
 #endif
     }
-#ifdef WIN32
+#ifdef _WIN32
     iENT_LogGlobalUnlock();
 #else
     pthread_mutex_unlock(&sLogMutex);
@@ -246,7 +246,7 @@ MSG_ID_T iENT_LogPathCheck(const char* path)
         return ENT_LOG_BAD_ARGUMENT;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     {
         HANDLE hDir = INVALID_HANDLE_VALUE;
         WCHAR wPath[MAX_PATH];
@@ -376,7 +376,7 @@ static MSG_ID_T iENT_LogInitCtx(ENT_LOG_CTX_INTERNAL* log,
         }
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     InitializeCriticalSection(&log->cs);
     InitializeConditionVariable(&log->closeCv);
     InitializeConditionVariable(&log->bufferCv);
@@ -432,7 +432,7 @@ static MSG_ID_T iENT_LogInitCtx(ENT_LOG_CTX_INTERNAL* log,
 
 ENT_LOG_HANDLE_STATE_E iENT_LogStateGet(const ENT_LOG_CTX_INTERNAL* log)
 {
-#ifdef WIN32
+#ifdef _WIN32
     return (ENT_LOG_HANDLE_STATE_E)InterlockedCompareExchange((volatile LONG*)&log->handleState, 0, 0);
 #else
     return (ENT_LOG_HANDLE_STATE_E)__sync_val_compare_and_swap((volatile int*)&log->handleState, 0, 0);
@@ -441,7 +441,7 @@ ENT_LOG_HANDLE_STATE_E iENT_LogStateGet(const ENT_LOG_CTX_INTERNAL* log)
 
 void iENT_LogStateSet(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_HANDLE_STATE_E state)
 {
-#ifdef WIN32
+#ifdef _WIN32
     InterlockedExchange(&log->handleState, (LONG)state);
 #else
     __sync_lock_test_and_set(&log->handleState, (int)state);
@@ -450,7 +450,7 @@ void iENT_LogStateSet(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_HANDLE_STATE_E state)
 
 int iENT_LogActiveGet(const ENT_LOG_CTX_INTERNAL* log)
 {
-#ifdef WIN32
+#ifdef _WIN32
     return (int)InterlockedCompareExchange((volatile LONG*)&log->activeWriters, 0, 0);
 #else
     return __sync_val_compare_and_swap((volatile int*)&log->activeWriters, 0, 0);
@@ -459,7 +459,7 @@ int iENT_LogActiveGet(const ENT_LOG_CTX_INTERNAL* log)
 
 void iENT_LogActiveInc(ENT_LOG_CTX_INTERNAL* log)
 {
-#ifdef WIN32
+#ifdef _WIN32
     InterlockedIncrement(&log->activeWriters);
 #else
     __sync_add_and_fetch(&log->activeWriters, 1);
@@ -468,7 +468,7 @@ void iENT_LogActiveInc(ENT_LOG_CTX_INTERNAL* log)
 
 int iENT_LogActiveDec(ENT_LOG_CTX_INTERNAL* log)
 {
-#ifdef WIN32
+#ifdef _WIN32
     return (int)InterlockedDecrement(&log->activeWriters);
 #else
     return __sync_sub_and_fetch(&log->activeWriters, 1);
@@ -518,7 +518,7 @@ MSG_ID_T iENT_LogAcquireWriter(ENT_LOG_CTX_INTERNAL** logCtx, ENT_LOG logHandle)
         return ENT_LOG_NOT_INITIALIZED;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     iENT_LogGlobalLock();
 #else
     pthread_mutex_lock(&sLogMutex);
@@ -526,7 +526,7 @@ MSG_ID_T iENT_LogAcquireWriter(ENT_LOG_CTX_INTERNAL** logCtx, ENT_LOG logHandle)
 
     if(sLogMutexInit == false)
     {
-#ifdef WIN32
+#ifdef _WIN32
         iENT_LogGlobalUnlock();
 #else
         pthread_mutex_unlock(&sLogMutex);
@@ -540,7 +540,7 @@ MSG_ID_T iENT_LogAcquireWriter(ENT_LOG_CTX_INTERNAL** logCtx, ENT_LOG logHandle)
             log = iENT_LogDefaultCtx();
         else
         {
-#ifdef WIN32
+#ifdef _WIN32
             iENT_LogGlobalUnlock();
 #else
             pthread_mutex_unlock(&sLogMutex);
@@ -554,7 +554,7 @@ MSG_ID_T iENT_LogAcquireWriter(ENT_LOG_CTX_INTERNAL** logCtx, ENT_LOG logHandle)
         log = iENT_LogHandleFindLocked((ENT_LOG_CTX_INTERNAL*)logHandle);
         if(log == NULL || log->tag != ENTLOG_TAG || log->isInit == false)
         {
-#ifdef WIN32
+#ifdef _WIN32
             iENT_LogGlobalUnlock();
 #else
             pthread_mutex_unlock(&sLogMutex);
@@ -566,7 +566,7 @@ MSG_ID_T iENT_LogAcquireWriter(ENT_LOG_CTX_INTERNAL** logCtx, ENT_LOG logHandle)
 
     if(iENT_LogStateGet(log) != ENT_LOG_HANDLE_ACTIVE_E)
     {
-#ifdef WIN32
+#ifdef _WIN32
         iENT_LogGlobalUnlock();
 #else
         pthread_mutex_unlock(&sLogMutex);
@@ -576,7 +576,7 @@ MSG_ID_T iENT_LogAcquireWriter(ENT_LOG_CTX_INTERNAL** logCtx, ENT_LOG logHandle)
 
     iENT_LogActiveInc(log);
     *logCtx = log;
-#ifdef WIN32
+#ifdef _WIN32
     iENT_LogGlobalUnlock();
 #else
     pthread_mutex_unlock(&sLogMutex);
@@ -588,7 +588,7 @@ void iENT_LogReleaseWriter(ENT_LOG_CTX_INTERNAL* log)
 {
     if(iENT_LogActiveDec(log) == 0 && iENT_LogStateGet(log) == ENT_LOG_HANDLE_CLOSING_E)
     {
-#ifdef WIN32
+#ifdef _WIN32
         iENT_LogGlobalLock();
         if(iENT_LogStateGet(log) == ENT_LOG_HANDLE_CLOSING_E && iENT_LogActiveGet(log) == 0)
             WakeAllConditionVariable(&log->closeCv);
@@ -662,7 +662,7 @@ MSG_ID_T ENT_LogCtxInit(ENT_LOG_CTX* pCtx)
     ctx->tag = ENTLOG_CTX_TAG;
     ctx->isInit = true;
     ctx->logHandle = NULL;
-#ifdef WIN32
+#ifdef _WIN32
     InitializeConditionVariable(&ctx->closeCv);
 #else
     if(pthread_cond_init(&ctx->closeCv, NULL) != 0)
@@ -674,7 +674,7 @@ MSG_ID_T ENT_LogCtxInit(ENT_LOG_CTX* pCtx)
     ctx->state = ENT_LOG_HANDLE_ACTIVE_E;
     ctx->activeCalls = 0;
     ctx->registryNext = NULL;
-#ifdef WIN32
+#ifdef _WIN32
     iENT_LogGlobalLock();
 #else
     pthread_mutex_lock(&sLogMutex);
@@ -682,7 +682,7 @@ MSG_ID_T ENT_LogCtxInit(ENT_LOG_CTX* pCtx)
     ctx->registryNext = sLogCtxHead;
     sLogCtxHead = ctx;
     sLogCtxNum++;
-#ifdef WIN32
+#ifdef _WIN32
     iENT_LogGlobalUnlock();
 #else
     pthread_mutex_unlock(&sLogMutex);
@@ -702,7 +702,7 @@ MSG_ID_T ENT_LogCtxClose(ENT_LOG_CTX ctx)
         return ENT_LOG_NOT_INITIALIZED;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     iENT_LogGlobalLock();
 #else
     pthread_mutex_lock(&sLogMutex);
@@ -710,7 +710,7 @@ MSG_ID_T ENT_LogCtxClose(ENT_LOG_CTX ctx)
     logCtx = iENT_LogCtxFindLocked(logCtx);
     if(logCtx == NULL)
     {
-#ifdef WIN32
+#ifdef _WIN32
         iENT_LogGlobalUnlock();
 #else
         pthread_mutex_unlock(&sLogMutex);
@@ -719,7 +719,7 @@ MSG_ID_T ENT_LogCtxClose(ENT_LOG_CTX ctx)
     }
     if(logCtx == NULL || logCtx->tag != ENTLOG_CTX_TAG || logCtx->isInit == false)
     {
-#ifdef WIN32
+#ifdef _WIN32
         iENT_LogGlobalUnlock();
 #else
         pthread_mutex_unlock(&sLogMutex);
@@ -729,7 +729,7 @@ MSG_ID_T ENT_LogCtxClose(ENT_LOG_CTX ctx)
     }
     if(logCtx->state == ENT_LOG_HANDLE_CLOSING_E)
     {
-#ifdef WIN32
+#ifdef _WIN32
         iENT_LogGlobalUnlock();
 #else
         pthread_mutex_unlock(&sLogMutex);
@@ -738,7 +738,7 @@ MSG_ID_T ENT_LogCtxClose(ENT_LOG_CTX ctx)
     }
     if(logCtx->state != ENT_LOG_HANDLE_ACTIVE_E)
     {
-#ifdef WIN32
+#ifdef _WIN32
         iENT_LogGlobalUnlock();
 #else
         pthread_mutex_unlock(&sLogMutex);
@@ -749,13 +749,13 @@ MSG_ID_T ENT_LogCtxClose(ENT_LOG_CTX ctx)
     logCtx->state = ENT_LOG_HANDLE_CLOSING_E;
     while(logCtx->activeCalls > 0)
     {
-#ifdef WIN32
+#ifdef _WIN32
         SleepConditionVariableSRW(&logCtx->closeCv, &sLogMutex, INFINITE, 0);
 #else
         pthread_cond_wait(&logCtx->closeCv, &sLogMutex);
 #endif
     }
-#ifdef WIN32
+#ifdef _WIN32
     iENT_LogGlobalUnlock();
 #else
     pthread_mutex_unlock(&sLogMutex);
@@ -766,7 +766,7 @@ MSG_ID_T ENT_LogCtxClose(ENT_LOG_CTX ctx)
         closeSts = iENT_LogCloseHandle(logCtx->logHandle);
         if(closeSts != ENT_SYS_NORMAL)
         {
-#ifdef WIN32
+#ifdef _WIN32
             iENT_LogGlobalLock();
 #else
             pthread_mutex_lock(&sLogMutex);
@@ -775,7 +775,7 @@ MSG_ID_T ENT_LogCtxClose(ENT_LOG_CTX ctx)
             {
                 logCtx->state = ENT_LOG_HANDLE_ACTIVE_E;
             }
-#ifdef WIN32
+#ifdef _WIN32
             iENT_LogGlobalUnlock();
 #else
             pthread_mutex_unlock(&sLogMutex);
@@ -785,7 +785,7 @@ MSG_ID_T ENT_LogCtxClose(ENT_LOG_CTX ctx)
         logCtx->logHandle = NULL;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     iENT_LogGlobalLock();
 #else
     pthread_mutex_lock(&sLogMutex);
@@ -798,12 +798,12 @@ MSG_ID_T ENT_LogCtxClose(ENT_LOG_CTX ctx)
     {
         sLogCtxNum--;
     }
-#ifdef WIN32
+#ifdef _WIN32
     iENT_LogGlobalUnlock();
 #else
     pthread_mutex_unlock(&sLogMutex);
 #endif
-#ifndef WIN32
+#ifndef _WIN32
     pthread_cond_destroy(&logCtx->closeCv);
 #endif
     free(logCtx);
@@ -1148,7 +1148,7 @@ MSG_ID_T iENT_LogInitHandle(ENT_LOG* pLogHandle, const char* moduleName, const c
         return ENT_LOG_NOT_INITIALIZED;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     iENT_LogGlobalLock();
 #else
     pthread_mutex_lock(&sLogMutex);
@@ -1199,7 +1199,7 @@ MSG_ID_T iENT_LogInitHandle(ENT_LOG* pLogHandle, const char* moduleName, const c
     sLogNum++;
 
 END_OF_ROUTINE:
-#ifdef WIN32
+#ifdef _WIN32
     iENT_LogGlobalUnlock();
 #else
     pthread_mutex_unlock(&sLogMutex);
@@ -1218,7 +1218,7 @@ MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
         return ENT_LOG_NOT_INITIALIZED;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     iENT_LogGlobalLock();
 #else
     pthread_mutex_lock(&sLogMutex);
@@ -1266,14 +1266,14 @@ MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
     closeStarted = true;
     while(iENT_LogActiveGet(log) > 0)
     {
-#ifdef WIN32
+#ifdef _WIN32
         SleepConditionVariableSRW(&log->closeCv, &sLogMutex, INFINITE, 0);
 #else
         pthread_cond_wait(&log->closeCv, &sLogMutex);
 #endif
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     EnterCriticalSection(&log->cs);
 #else
     pthread_mutex_lock(&log->cs);
@@ -1282,7 +1282,7 @@ MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
     iENT_LogFastFlagSet(&log->isBufferFast, 0);
     log->isDebug = false;
     iENT_LogFastFlagSet(&log->isDebugFast, 0);
-#ifdef WIN32
+#ifdef _WIN32
     LeaveCriticalSection(&log->cs);
 #else
     pthread_mutex_unlock(&log->cs);
@@ -1309,7 +1309,7 @@ MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
     log->isInit = false;
     iENT_LogStateSet(log, ENT_LOG_HANDLE_CLOSED_E);
     iENT_LogHandleUnlinkLocked(log);
-#ifdef WIN32
+#ifdef _WIN32
     DeleteCriticalSection(&log->cs);
 #else
     pthread_mutex_destroy(&log->cs);
@@ -1343,7 +1343,7 @@ END_OF_ROUTINE:
     {
         log->closeAttemptActive = false;
     }
-#ifdef WIN32
+#ifdef _WIN32
     iENT_LogGlobalUnlock();
 #else
     pthread_mutex_unlock(&sLogMutex);

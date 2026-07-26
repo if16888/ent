@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #else
 #include <errno.h>
@@ -26,7 +26,7 @@ static int expect_true(int condition, const char* message)
     return 0;
 }
 
-#ifdef WIN32
+#ifdef _WIN32
 static int make_temp_path(char* path, size_t path_size)
 {
     char directory[MAX_PATH];
@@ -286,7 +286,7 @@ static int test_non_regular_file_is_rejected(void)
 
 int main(void)
 {
-#ifdef WIN32
+#ifdef _WIN32
     return test_windows_security_boundaries() == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 #else
     int failed = 0;

@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #else
 #include <pthread.h>
@@ -29,7 +29,7 @@ extern void UTL_TPoolTestSetThreadListInsertFailure(BOOL enable);
 
 typedef struct
 {
-#ifdef WIN32
+#ifdef _WIN32
     HANDLE thread;
 #else
     pthread_t thread;
@@ -37,7 +37,7 @@ typedef struct
     int joined;
 } TEST_THREAD_ID;
 
-#ifdef WIN32
+#ifdef _WIN32
 typedef struct
 {
     PTHREAD_START_ROUTINE thProc;
@@ -223,7 +223,7 @@ MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid, ENT_THREAD handle, PTHREAD_START_R
             return -6;
         }
 
-#ifdef WIN32
+#ifdef _WIN32
         {
             TEST_THREAD_START_DATA* startData =
                 (TEST_THREAD_START_DATA*)calloc(1, sizeof(TEST_THREAD_START_DATA));
@@ -272,7 +272,7 @@ MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid, ENT_THREAD handle, int ms)
             threadId = (TEST_THREAD_ID*)(*tid);
             if(!threadId->joined)
             {
-#ifdef WIN32
+#ifdef _WIN32
                 WaitForSingleObject(threadId->thread, INFINITE);
                 CloseHandle(threadId->thread);
 #else
@@ -298,7 +298,7 @@ MSG_ID_T UTL_Sleep(int ms)
 {
     if(ms > 0)
     {
-#ifdef WIN32
+#ifdef _WIN32
         Sleep((DWORD)ms);
 #else
         usleep((useconds_t)ms * 1000U);

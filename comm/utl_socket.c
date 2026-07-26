@@ -15,7 +15,7 @@
  *
  *-----------------------------------------------------------------------------
  */
-#ifdef WIN32
+#ifdef _WIN32
 #pragma warning(disable : 4996)
 #include <Winsock2.h>
 #else
@@ -33,7 +33,7 @@
 static bool sUtlInitFlag  = false;
 static bool sUtlRetryFlag = true;
 
-#ifdef WIN32
+#ifdef _WIN32
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :UTL_SocketInit

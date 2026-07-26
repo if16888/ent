@@ -15,7 +15,7 @@
 #include <string.h>
 #include <time.h>
 #include "ient_comm.h"
-#ifdef WIN32
+#ifdef _WIN32
 #include <sys/timeb.h>
 #include <Windows.h>
 #include <tchar.h>
@@ -60,7 +60,7 @@ static MSG_ID_T iENT_LogRollCheck(ENT_LOG logHandle, time_t nowTime)
 
     if(log->logFp == NULL || log->nextCreate + 86400 < nowTime)
     {
-#ifdef WIN32
+#ifdef _WIN32
         localtime_s(&nowTm, &nowTime);
 #else
         localtime_r(&nowTime, &nowTm);
@@ -73,7 +73,7 @@ static MSG_ID_T iENT_LogRollCheck(ENT_LOG logHandle, time_t nowTime)
     }
     else
     {
-#ifdef WIN32
+#ifdef _WIN32
         localtime_s(&nowTm, &log->nextCreate);
 #else
         localtime_r(&log->nextCreate, &nowTm);
@@ -120,7 +120,7 @@ static MSG_ID_T iENT_LogRollCheck(ENT_LOG logHandle, time_t nowTime)
         {
             time_t deleteTime;
             deleteTime = log->nextCreate - (log->maxNum + 1) * 86400;
-#ifdef WIN32
+#ifdef _WIN32
             localtime_s(&nowTm, &deleteTime);
 #else
             localtime_r(&deleteTime, &nowTm);
@@ -133,7 +133,7 @@ static MSG_ID_T iENT_LogRollCheck(ENT_LOG logHandle, time_t nowTime)
                 snprintf(fileName, sizeof(fileName) - 1, "%s%s%s_%s.log", log->logPath, ENT_FILE_SEP, log->moduleName, dayStr);
 
             fileName[sizeof(fileName) - 1] = '\0';
-#ifdef WIN32
+#ifdef _WIN32
             DeleteFileA(fileName);
 #else
             unlink(fileName);
@@ -177,7 +177,7 @@ MSG_ID_T iENT_LogFormatMessage(const char* format,
     }
     else
     {
-#ifdef WIN32
+#ifdef _WIN32
         va_list sizeArgs;
         va_copy(sizeArgs, va_args);
         requiredLen = _vscprintf(format, sizeArgs);
@@ -265,14 +265,14 @@ MSG_ID_T iENT_LogFlushMaybe(ENT_LOG_CTX_INTERNAL* log, FILE* fp, bool forceFlush
 }
 
 int iENT_LogFastFlagGet(
-#ifdef WIN32
+#ifdef _WIN32
     const volatile LONG* flag
 #else
     const volatile int* flag
 #endif
 )
 {
-#ifdef WIN32
+#ifdef _WIN32
     return InterlockedCompareExchange((volatile LONG*)flag, 0, 0) != 0;
 #else
     return __sync_val_compare_and_swap((volatile int*)flag, 0, 0) != 0;
@@ -280,14 +280,14 @@ int iENT_LogFastFlagGet(
 }
 
 void iENT_LogFastFlagSet(
-#ifdef WIN32
+#ifdef _WIN32
     volatile LONG* flag,
 #else
     volatile int* flag,
 #endif
     int value)
 {
-#ifdef WIN32
+#ifdef _WIN32
     InterlockedExchange(flag, value ? 1 : 0);
 #else
     __sync_lock_test_and_set(flag, value ? 1 : 0);
@@ -296,7 +296,7 @@ void iENT_LogFastFlagSet(
 
 long long iENT_LogNowMs(void)
 {
-#ifdef WIN32
+#ifdef _WIN32
     return (long long)GetTickCount64();
 #else
     struct timespec ts;
@@ -364,7 +364,7 @@ MSG_ID_T iENT_LogFormatPrefix(ENT_LOG_LEV_E logLevel,
                               time_t* rollTime)
 {
     int writeLen = 0;
-#ifdef WIN32
+#ifdef _WIN32
     struct _timeb nowTmb;
     struct tm nowTm;
 
@@ -424,7 +424,7 @@ MSG_ID_T iENT_LogFormatPrefix(ENT_LOG_LEV_E logLevel,
     return ENT_SYS_NORMAL;
 }
 
-#ifdef WIN32
+#ifdef _WIN32
 static DWORD WINAPI iENT_LogBufferThreadMain(LPVOID data)
 #else
 static void* iENT_LogBufferThreadMain(void* data)
@@ -440,7 +440,7 @@ static void* iENT_LogBufferThreadMain(void* data)
 
     for(;;)
     {
-#ifdef WIN32
+#ifdef _WIN32
         EnterCriticalSection(&log->cs);
         while(log->bufferHead == NULL && !log->bufferThreadStop)
         {
@@ -520,7 +520,7 @@ static void* iENT_LogBufferThreadMain(void* data)
         head = log->bufferHead;
         log->bufferHead = NULL;
         log->bufferTail = NULL;
-#ifdef WIN32
+#ifdef _WIN32
         LeaveCriticalSection(&log->cs);
 #else
         pthread_mutex_unlock(&log->cs);
@@ -543,7 +543,7 @@ static void* iENT_LogBufferThreadMain(void* data)
                 batchTail->next = NULL;
             }
 
-#ifdef WIN32
+#ifdef _WIN32
             EnterCriticalSection(&log->cs);
 #else
             pthread_mutex_lock(&log->cs);
@@ -575,7 +575,7 @@ static void* iENT_LogBufferThreadMain(void* data)
                 }
                 node = nextNode;
             }
-#ifdef WIN32
+#ifdef _WIN32
             LeaveCriticalSection(&log->cs);
 #else
             pthread_mutex_unlock(&log->cs);
@@ -590,7 +590,7 @@ static void* iENT_LogBufferThreadMain(void* data)
         }
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     return 0;
 #else
     return NULL;
@@ -601,14 +601,14 @@ MSG_ID_T iENT_LogStartBufferThread(ENT_LOG_CTX_INTERNAL* log)
 {
     MSG_ID_T sts = ENT_SYS_NORMAL;
 
-#ifdef WIN32
+#ifdef _WIN32
     EnterCriticalSection(&log->cs);
 #else
     pthread_mutex_lock(&log->cs);
 #endif
     if(log->bufferThreadStarted)
     {
-#ifdef WIN32
+#ifdef _WIN32
         LeaveCriticalSection(&log->cs);
 #else
         pthread_mutex_unlock(&log->cs);
@@ -616,13 +616,13 @@ MSG_ID_T iENT_LogStartBufferThread(ENT_LOG_CTX_INTERNAL* log)
         return ENT_SYS_NORMAL;
     }
     log->bufferThreadStop = false;
-#ifdef WIN32
+#ifdef _WIN32
     LeaveCriticalSection(&log->cs);
 #else
     pthread_mutex_unlock(&log->cs);
 #endif
 
-#ifdef WIN32
+#ifdef _WIN32
     log->bufferThread = CreateThread(NULL, 0, iENT_LogBufferThreadMain, log, 0, NULL);
     if(log->bufferThread == NULL)
     {
@@ -635,7 +635,7 @@ MSG_ID_T iENT_LogStartBufferThread(ENT_LOG_CTX_INTERNAL* log)
     }
 #endif
 
-#ifdef WIN32
+#ifdef _WIN32
     EnterCriticalSection(&log->cs);
 #else
     pthread_mutex_lock(&log->cs);
@@ -649,7 +649,7 @@ MSG_ID_T iENT_LogStartBufferThread(ENT_LOG_CTX_INTERNAL* log)
         log->isBuffer = false;
         iENT_LogFastFlagSet(&log->isBufferFast, 0);
     }
-#ifdef WIN32
+#ifdef _WIN32
     LeaveCriticalSection(&log->cs);
 #else
     pthread_mutex_unlock(&log->cs);
@@ -663,7 +663,7 @@ MSG_ID_T iENT_LogStopBufferThread(ENT_LOG_CTX_INTERNAL* log)
     bool shouldJoin = false;
     MSG_ID_T sts = ENT_SYS_NORMAL;
 
-#ifdef WIN32
+#ifdef _WIN32
     EnterCriticalSection(&log->cs);
 #else
     pthread_mutex_lock(&log->cs);
@@ -672,13 +672,13 @@ MSG_ID_T iENT_LogStopBufferThread(ENT_LOG_CTX_INTERNAL* log)
     {
         log->bufferThreadStop = true;
         shouldJoin = true;
-#ifdef WIN32
+#ifdef _WIN32
         WakeAllConditionVariable(&log->bufferCv);
 #else
         pthread_cond_broadcast(&log->bufferCv);
 #endif
     }
-#ifdef WIN32
+#ifdef _WIN32
     LeaveCriticalSection(&log->cs);
 #else
     pthread_mutex_unlock(&log->cs);
@@ -689,7 +689,7 @@ MSG_ID_T iENT_LogStopBufferThread(ENT_LOG_CTX_INTERNAL* log)
         return ENT_SYS_NORMAL;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     if(WaitForSingleObject(log->bufferThread, INFINITE) == WAIT_FAILED)
     {
         sts = ENT_LOG_THREAD_FAILED;
@@ -734,14 +734,14 @@ MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX_INTERNAL* log,
 
     usePool = msgLen <= 1024;
 
-#ifdef WIN32
+#ifdef _WIN32
     EnterCriticalSection(&log->cs);
 #else
     pthread_mutex_lock(&log->cs);
 #endif
     if(!iENT_LogBufferReady(log))
     {
-#ifdef WIN32
+#ifdef _WIN32
         LeaveCriticalSection(&log->cs);
 #else
         pthread_mutex_unlock(&log->cs);
@@ -759,7 +759,7 @@ MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX_INTERNAL* log,
         }
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     LeaveCriticalSection(&log->cs);
 #else
     pthread_mutex_unlock(&log->cs);
@@ -788,7 +788,7 @@ MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX_INTERNAL* log,
     memcpy(node->msg, msg, msgLen);
     node->msg[msgLen] = '\0';
 
-#ifdef WIN32
+#ifdef _WIN32
     EnterCriticalSection(&log->cs);
 #else
     pthread_mutex_lock(&log->cs);
@@ -803,7 +803,7 @@ MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX_INTERNAL* log,
             log->poolFreeCount++;
             recycled = true;
         }
-#ifdef WIN32
+#ifdef _WIN32
         LeaveCriticalSection(&log->cs);
 #else
         pthread_mutex_unlock(&log->cs);
@@ -824,7 +824,7 @@ MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX_INTERNAL* log,
         log->bufferHead = node;
     }
     log->bufferTail = node;
-#ifdef WIN32
+#ifdef _WIN32
     WakeConditionVariable(&log->bufferCv);
     LeaveCriticalSection(&log->cs);
 #else
@@ -860,7 +860,7 @@ MSG_ID_T iENT_LogVRaw(ENT_LOG_CTX_INTERNAL* log, const char* format, va_list va_
         return ENT_SYS_NORMAL;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     EnterCriticalSection(&log->cs);
 #else
     pthread_mutex_lock(&log->cs);
@@ -885,14 +885,14 @@ MSG_ID_T iENT_LogVRaw(ENT_LOG_CTX_INTERNAL* log, const char* format, va_list va_
     {
         goto END_OF_ROUTINE;
     }
-#ifdef WIN32
+#ifdef _WIN32
     LeaveCriticalSection(&log->cs);
 #else
     pthread_mutex_unlock(&log->cs);
 #endif
 
 END_OF_ROUTINE:
-#ifdef WIN32
+#ifdef _WIN32
     if(sts < 0)
     {
         LeaveCriticalSection(&log->cs);
@@ -981,7 +981,7 @@ MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_LEV_E logLevel, const
         }
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     EnterCriticalSection(&log->cs);
 #else
     pthread_mutex_lock(&log->cs);
@@ -1004,14 +1004,14 @@ MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_LEV_E logLevel, const
     {
         goto END_OF_ROUTINE;
     }
-#ifdef WIN32
+#ifdef _WIN32
     LeaveCriticalSection(&log->cs);
 #else
     pthread_mutex_unlock(&log->cs);
 #endif
 
 END_OF_ROUTINE:
-#ifdef WIN32
+#ifdef _WIN32
     if(sts < 0)
     {
         LeaveCriticalSection(&log->cs);

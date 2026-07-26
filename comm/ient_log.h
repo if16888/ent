@@ -21,7 +21,7 @@
 #include <stdio.h>
 #include <time.h>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <Windows.h>
 #else
 #include <pthread.h>
@@ -67,7 +67,7 @@ typedef struct ENT_LOG_CTX_INTERNAL_TAG
     bool             isBuffer;
     ENT_LOG_LEV_E    logLevel;
     FILE*            logFp;
-#ifdef WIN32
+#ifdef _WIN32
     CRITICAL_SECTION cs;
     CONDITION_VARIABLE closeCv;
     CONDITION_VARIABLE bufferCv;
@@ -112,7 +112,7 @@ typedef struct ENT_LOG_CTX_TAG
     unsigned int tag;
     bool         isInit;
     ENT_LOG      logHandle;
-#ifdef WIN32
+#ifdef _WIN32
     CONDITION_VARIABLE closeCv;
 #else
     pthread_cond_t closeCv;
@@ -147,14 +147,14 @@ MSG_ID_T      iENT_LogFormatMessage(const char* format,
                                     size_t* msgLen);
 MSG_ID_T      iENT_LogFlushMaybe(ENT_LOG_CTX_INTERNAL* log, FILE* fp, bool forceFlush);
 int           iENT_LogFastFlagGet(
-#ifdef WIN32
+#ifdef _WIN32
                                const volatile LONG* flag
 #else
                                const volatile int* flag
 #endif
                                );
 void          iENT_LogFastFlagSet(
-#ifdef WIN32
+#ifdef _WIN32
                                 volatile LONG* flag,
 #else
                                 volatile int* flag,

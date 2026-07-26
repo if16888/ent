@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #else
@@ -106,7 +106,7 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle, const char* format, ...)
 
 static void close_native_socket(UTL_D_SOCKET socketDesc)
 {
-#ifdef WIN32
+#ifdef _WIN32
     if(socketDesc != INVALID_SOCKET)
     {
         closesocket(socketDesc);
@@ -121,7 +121,7 @@ static void close_native_socket(UTL_D_SOCKET socketDesc)
 
 static int get_socket_name(UTL_D_SOCKET socketDesc, struct sockaddr* addr, int* addrLen)
 {
-#ifdef WIN32
+#ifdef _WIN32
     return getsockname(socketDesc, addr, addrLen);
 #else
     socklen_t nativeAddrLen = (socklen_t)*addrLen;
@@ -302,7 +302,7 @@ static int test_socket_local_roundtrip_send_and_recv(void)
         UTL_CloseSocket(server);
         return 1;
     }
-#ifdef WIN32
+#ifdef _WIN32
     if(expect_true(accepted != INVALID_SOCKET, "The server should accept the localhost client connection") != 0)
 #else
     if(expect_true(accepted >= 0, "The server should accept the localhost client connection") != 0)
@@ -441,7 +441,7 @@ static int setup_loopback_tcp_pair(UTL_D_SOCKET* server,
         *accepted = (UTL_D_SOCKET)-1;
         return 1;
     }
-#ifdef WIN32
+#ifdef _WIN32
     if(expect_true(*accepted != INVALID_SOCKET, "accept should succeed") != 0)
 #else
     if(expect_true(*accepted >= 0, "accept should succeed") != 0)

@@ -3,7 +3,7 @@
 #include <string.h>
 #include <time.h>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #else
 #include <pthread.h>
@@ -25,7 +25,7 @@ typedef struct
     int iterations;
     int worker_id;
     int failures;
-#ifdef WIN32
+#ifdef _WIN32
     HANDLE thread;
 #else
     pthread_t thread;
@@ -34,7 +34,7 @@ typedef struct
 
 static double now_ms(void)
 {
-#ifdef WIN32
+#ifdef _WIN32
     static LARGE_INTEGER frequency;
     static int frequency_initialized = 0;
     LARGE_INTEGER counter;
@@ -57,7 +57,7 @@ static double now_ms(void)
 
 static int build_temp_log_dir(char* path, size_t path_len)
 {
-#ifdef WIN32
+#ifdef _WIN32
     char temp_root[MAX_PATH];
     DWORD len = GetTempPathA((DWORD)sizeof(temp_root), temp_root);
 
@@ -95,7 +95,7 @@ static int build_temp_log_dir(char* path, size_t path_len)
     return 0;
 }
 
-#ifdef WIN32
+#ifdef _WIN32
 static DWORD WINAPI perf_log_worker_main(LPVOID data)
 #else
 static void* perf_log_worker_main(void* data)
@@ -111,7 +111,7 @@ static void* perf_log_worker_main(void* data)
         }
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     return 0;
 #else
     return NULL;
@@ -160,7 +160,7 @@ static int run_multi_thread_benchmark(ENT_LOG log_handle, int workers, int itera
         worker_ctx[i].iterations = iterations_per_worker;
         worker_ctx[i].worker_id = i;
 
-#ifdef WIN32
+#ifdef _WIN32
         {
             worker_ctx[i].thread = CreateThread(NULL, 0, perf_log_worker_main, &worker_ctx[i], 0, NULL);
             if(worker_ctx[i].thread == NULL)
@@ -182,7 +182,7 @@ static int run_multi_thread_benchmark(ENT_LOG log_handle, int workers, int itera
 
     for(int i = 0; i < workers; ++i)
     {
-#ifdef WIN32
+#ifdef _WIN32
         WaitForSingleObject(worker_ctx[i].thread, INFINITE);
         CloseHandle(worker_ctx[i].thread);
 #else
@@ -249,7 +249,7 @@ static int run_multi_thread_benchmark_named(ENT_LOG log_handle,
         worker_ctx[i].iterations = iterations_per_worker;
         worker_ctx[i].worker_id = i;
 
-#ifdef WIN32
+#ifdef _WIN32
         worker_ctx[i].thread = CreateThread(NULL, 0, perf_log_worker_main, &worker_ctx[i], 0, NULL);
         if(worker_ctx[i].thread == NULL)
         {
@@ -267,7 +267,7 @@ static int run_multi_thread_benchmark_named(ENT_LOG log_handle,
 
     for(int i = 0; i < workers; ++i)
     {
-#ifdef WIN32
+#ifdef _WIN32
         WaitForSingleObject(worker_ctx[i].thread, INFINITE);
         CloseHandle(worker_ctx[i].thread);
 #else
@@ -306,7 +306,7 @@ int main(void)
         return EXIT_FAILURE;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     if(snprintf(module_name, sizeof(module_name), "PerfLog%lu", (unsigned long)GetCurrentProcessId()) >= (int)sizeof(module_name))
     {
         return EXIT_FAILURE;

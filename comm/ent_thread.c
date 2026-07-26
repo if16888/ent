@@ -15,7 +15,7 @@
  *
  *-----------------------------------------------------------------------------
  */
-#ifdef WIN32
+#ifdef _WIN32
 #include "windows.h"
 #else
 #include <pthread.h>
@@ -33,7 +33,7 @@
 typedef struct THREAD_DB
 {
     DLL_D_HDR      dllLnk;
-#ifdef WIN32
+#ifdef _WIN32
     HANDLE         thHandle;
     DWORD          thId;
     PTHREAD_START_ROUTINE thProc;
@@ -62,7 +62,7 @@ enum
     ENT_THREAD_START_ABORT_E
 };
 
-#ifdef WIN32
+#ifdef _WIN32
 static DWORD WINAPI iENT_ThreadProc(void* data)
 {
     THREAD_DB* thDb = (THREAD_DB*)data;
@@ -160,7 +160,7 @@ static bool iENT_ThreadHasCurrentThread(ENT_TH_CTX* thCtx)
     while(current != &thCtx->dllHeader)
     {
         THREAD_DB* thDb = (THREAD_DB*)current;
-#ifdef WIN32
+#ifdef _WIN32
         if(thDb->thId == GetCurrentThreadId())
 #else
         if(pthread_equal(thDb->thId, pthread_self()) != 0)
@@ -174,7 +174,7 @@ static bool iENT_ThreadHasCurrentThread(ENT_TH_CTX* thCtx)
     return false;
 }
 
-#ifndef WIN32
+#ifndef _WIN32
 static clockid_t iENT_ThreadCondClockId(void)
 {
 #if defined(__linux__)
@@ -278,7 +278,7 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadInit(ENT_THREAD* pthHandle)
     *pthHandle = thCtx;
     return ENT_SYS_NORMAL;
 }
-#ifdef WIN32
+#ifdef _WIN32
 ENT_PUBLIC MSG_ID_T ENT_ThreadDetachCreate(ENT_THREAD handle,PTHREAD_START_ROUTINE thProc,void* thData)
 {
     MSG_ID_T     sts=0;
@@ -487,7 +487,7 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
     ENT_TH_CTX*  thCtx = NULL;
     THREAD_DB*   thDb  = NULL;
     DLL_D_HDR*   tmp;
-#ifdef WIN32
+#ifdef _WIN32
     DWORD        waitSts;
 #endif
     

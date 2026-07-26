@@ -20,7 +20,7 @@
 #include <memory.h>
 #include <time.h>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #else
 #include <pthread.h>
@@ -31,7 +31,7 @@
 #include "ient_comm.h"
 #include "ent_msg.h"
 
-#ifdef WIN32
+#ifdef _WIN32
 static SRWLOCK sDbMutex = SRWLOCK_INIT;
 #pragma warning(disable : 4996)
 #else
@@ -104,7 +104,7 @@ static const char* iENT_DbHandleStateName(DB_HANDLE_STATE_E state)
 
 static void iENT_DbGlobalLock(void)
 {
-#ifdef WIN32
+#ifdef _WIN32
     AcquireSRWLockExclusive(&sDbMutex);
 #else
     pthread_mutex_lock(&sDbMutex);
@@ -113,7 +113,7 @@ static void iENT_DbGlobalLock(void)
 
 static void iENT_DbGlobalUnlock(void)
 {
-#ifdef WIN32
+#ifdef _WIN32
     ReleaseSRWLockExclusive(&sDbMutex);
 #else
     pthread_mutex_unlock(&sDbMutex);
@@ -122,7 +122,7 @@ static void iENT_DbGlobalUnlock(void)
 
 static void iENT_DbHandleLock(DB_CFG* dbCfg)
 {
-#ifdef WIN32
+#ifdef _WIN32
     EnterCriticalSection(&dbCfg->cs);
 #else
     pthread_mutex_lock(&dbCfg->cs);
@@ -131,7 +131,7 @@ static void iENT_DbHandleLock(DB_CFG* dbCfg)
 
 static void iENT_DbHandleUnlock(DB_CFG* dbCfg)
 {
-#ifdef WIN32
+#ifdef _WIN32
     LeaveCriticalSection(&dbCfg->cs);
 #else
     pthread_mutex_unlock(&dbCfg->cs);
@@ -144,7 +144,7 @@ static MSG_ID_T iENT_DbLifecycleInit(DB_CFG* dbCfg)
     {
         return ENT_DBS_BAD_ARGUMENT;
     }
-#ifdef WIN32
+#ifdef _WIN32
     InitializeCriticalSection(&dbCfg->lifecycleCs);
     InitializeConditionVariable(&dbCfg->lifecycleCv);
     return ENT_SYS_NORMAL;
@@ -170,7 +170,7 @@ static void iENT_DbLifecycleDestroy(DB_CFG* dbCfg)
     {
         return;
     }
-#ifdef WIN32
+#ifdef _WIN32
     DeleteCriticalSection(&dbCfg->lifecycleCs);
 #else
     pthread_cond_destroy(&dbCfg->lifecycleCv);
@@ -180,7 +180,7 @@ static void iENT_DbLifecycleDestroy(DB_CFG* dbCfg)
 
 static void iENT_DbLifecycleLock(DB_CFG* dbCfg)
 {
-#ifdef WIN32
+#ifdef _WIN32
     EnterCriticalSection(&dbCfg->lifecycleCs);
 #else
     pthread_mutex_lock(&dbCfg->lifecycleCs);
@@ -189,7 +189,7 @@ static void iENT_DbLifecycleLock(DB_CFG* dbCfg)
 
 static void iENT_DbLifecycleUnlock(DB_CFG* dbCfg)
 {
-#ifdef WIN32
+#ifdef _WIN32
     LeaveCriticalSection(&dbCfg->lifecycleCs);
 #else
     pthread_mutex_unlock(&dbCfg->lifecycleCs);
@@ -198,7 +198,7 @@ static void iENT_DbLifecycleUnlock(DB_CFG* dbCfg)
 
 static void iENT_DbLifecycleWait(DB_CFG* dbCfg)
 {
-#ifdef WIN32
+#ifdef _WIN32
     SleepConditionVariableCS(&dbCfg->lifecycleCv, &dbCfg->lifecycleCs, INFINITE);
 #else
     pthread_cond_wait(&dbCfg->lifecycleCv, &dbCfg->lifecycleCs);
@@ -207,7 +207,7 @@ static void iENT_DbLifecycleWait(DB_CFG* dbCfg)
 
 static void iENT_DbLifecycleWakeAll(DB_CFG* dbCfg)
 {
-#ifdef WIN32
+#ifdef _WIN32
     WakeAllConditionVariable(&dbCfg->lifecycleCv);
 #else
     pthread_cond_broadcast(&dbCfg->lifecycleCv);
@@ -744,7 +744,7 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
         }
     }
     dbCfg->portNo = port;
-#ifdef WIN32
+#ifdef _WIN32
     InitializeCriticalSection(&dbCfg->cs);
 #else
     if(pthread_mutex_init(&dbCfg->cs,NULL) != 0)
@@ -756,7 +756,7 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
     sts = iENT_DbLifecycleInit(dbCfg);
     if(sts < 0)
     {
-#ifndef WIN32
+#ifndef _WIN32
         pthread_mutex_destroy(&dbCfg->cs);
 #else
         DeleteCriticalSection(&dbCfg->cs);
@@ -921,7 +921,7 @@ ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE* dbHandle)
     dbCfg->handleState = ENT_DB_HANDLE_CLOSED_E;
     iENT_DbLifecycleUnlock(dbCfg);
     iENT_DbFreeConfigStrings(dbCfg);
-#ifdef WIN32
+#ifdef _WIN32
     DeleteCriticalSection(&dbCfg->cs);
 #else
     pthread_mutex_destroy(&dbCfg->cs);

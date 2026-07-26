@@ -18,7 +18,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <stdlib.h>
-#ifndef WIN32
+#ifndef _WIN32
 #include <unistd.h>
 #else
 #include <tchar.h>
@@ -29,7 +29,7 @@
 #include "ent_db.h"
 #include "ent_utility.h"
 
-#ifdef WIN32
+#ifdef _WIN32
 DWORD WINAPI thread_func(void* data)
 {
     char* cfg = (char*)data;
@@ -223,7 +223,7 @@ MSG_ID_T  example_run()
     return sts;
 }
 
-#ifdef WIN32
+#ifdef _WIN32
 int _tmain(int argc,_TCHAR* argv[])
 #else
 int main(int argc,char* argv[])

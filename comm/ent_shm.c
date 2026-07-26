@@ -15,7 +15,7 @@
  *
  *-----------------------------------------------------------------------------
  */
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #else
 #ifndef _FILE_OFFSET_BITS
@@ -43,7 +43,7 @@ struct ENT_SharedMap
     ENT_SIZE           size;
     ENT_SharedMapMode  mode;
     int                memory_locked;
-#ifdef WIN32
+#ifdef _WIN32
     HANDLE             file_handle;
     HANDLE             mapping_handle;
 #else
@@ -55,7 +55,7 @@ static MSG_ID_T iENT_SharedMapValidateOptions(const ENT_SharedMapOptions* option
 static MSG_ID_T iENT_SharedMapValidateNativeSize(ENT_SIZE size, size_t* native_size);
 static MSG_ID_T iENT_SharedMapRelease(ENT_SharedMap* map);
 
-#ifdef WIN32
+#ifdef _WIN32
 static MSG_ID_T iENT_SharedMapOpenWindows(const ENT_SharedMapOptions* options,
                                            ENT_SharedMap** out_map);
 static MSG_ID_T iENT_SharedMapFlushWindows(ENT_SharedMap* map,
@@ -122,7 +122,7 @@ static MSG_ID_T iENT_SharedMapRelease(ENT_SharedMap* map)
 
     if(map->ptr != NULL)
     {
-#ifdef WIN32
+#ifdef _WIN32
         if(map->memory_locked && !VirtualUnlock(map->ptr, (SIZE_T)map->size))
         {
             sts = ENT_SHM_CLOSE_FAILED;
@@ -144,7 +144,7 @@ static MSG_ID_T iENT_SharedMapRelease(ENT_SharedMap* map)
         map->ptr = NULL;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     if(map->mapping_handle != NULL)
     {
         if(!CloseHandle(map->mapping_handle))
@@ -175,7 +175,7 @@ static MSG_ID_T iENT_SharedMapRelease(ENT_SharedMap* map)
     return sts;
 }
 
-#ifdef WIN32
+#ifdef _WIN32
 static int iENT_SharedMapWindowsHandleIsRegular(HANDLE file_handle)
 {
     BY_HANDLE_FILE_INFORMATION file_info;
@@ -653,7 +653,7 @@ ENT_PUBLIC MSG_ID_T ENT_SharedMapOpen(const ENT_SharedMapOptions* options,
         return ENT_SHM_BAD_ARGUMENT;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     return iENT_SharedMapOpenWindows(options, out_map);
 #else
     return iENT_SharedMapOpenPosix(options, out_map);
@@ -679,7 +679,7 @@ ENT_PUBLIC MSG_ID_T ENT_SharedMapFlush(ENT_SharedMap* map,
         return ENT_SHM_BAD_ARGUMENT;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     return iENT_SharedMapFlushWindows(map, offset, length);
 #else
     return iENT_SharedMapFlushPosix(map, offset, length);

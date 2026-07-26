@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <Windows.h>
 #else
 #include <pthread.h>
@@ -52,7 +52,7 @@ MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const voi
         return ENT_LOG_BAD_HANDLE;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     EnterCriticalSection(&log->cs);
 #else
     pthread_mutex_lock(&log->cs);
@@ -164,7 +164,7 @@ MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const voi
             break;
     }
 END_OF_ROUTINE:
-#ifdef WIN32
+#ifdef _WIN32
     LeaveCriticalSection(&log->cs);
 #else
     pthread_mutex_unlock(&log->cs);

@@ -39,7 +39,7 @@ typedef ENT_U64 ENT_OFFSET;
 
 typedef void *DB_HANDLE;
 
-#ifdef WIN32
+#ifdef _WIN32
 #define ENT_FILE_SEP "\\"
 #define ENT_FILE_SEP_C '\\'
 #else
@@ -47,7 +47,7 @@ typedef void *DB_HANDLE;
 #define ENT_FILE_SEP_C '/'
 #endif
 
-#ifndef WIN32
+#ifndef _WIN32
 typedef int BOOL;
 #define TRUE  1
 #define FALSE 0
