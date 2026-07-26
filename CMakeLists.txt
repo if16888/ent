@@ -127,6 +127,7 @@ install(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindEntLua.cmake"
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EntMsgCodegen.cmake"
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/gen_ent_msg.py"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/gen_ent_msg_symbols.py"
     DESTINATION ${INSTALL_CMAKEDIR}
     COMPONENT ${ENT_DEVEL_COMPONENT}
 )
