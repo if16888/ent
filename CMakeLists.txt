@@ -80,6 +80,7 @@ endif()
 if(BUILD_TESTING)
     add_subdirectory(test)
     add_subdirectory(test_optional)
+    add_subdirectory(test_codegen)
 endif()
 
 if(WIN32)
@@ -124,6 +125,8 @@ install(
         "${CMAKE_CURRENT_BINARY_DIR}/entConfigVersion.cmake"
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindMariaDB.cmake"
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindEntLua.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EntMsgCodegen.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/gen_ent_msg.py"
     DESTINATION ${INSTALL_CMAKEDIR}
     COMPONENT ${ENT_DEVEL_COMPONENT}
 )
