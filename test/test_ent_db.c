@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #else
 #include <pthread.h>
@@ -32,7 +32,7 @@ typedef struct DB_READ_CAPTURE {
 } DB_READ_CAPTURE;
 
 typedef struct TEST_EVENT {
-#ifdef WIN32
+#ifdef _WIN32
     CRITICAL_SECTION lock;
     CONDITION_VARIABLE cv;
 #else
@@ -149,7 +149,7 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle, const char* format, ...)
 
 static void test_sleep_ms(int ms)
 {
-#ifdef WIN32
+#ifdef _WIN32
     Sleep((DWORD)ms);
 #else
     usleep((useconds_t)ms * 1000U);
@@ -162,7 +162,7 @@ static int test_event_init(TEST_EVENT* ev)
     {
         return 1;
     }
-#ifdef WIN32
+#ifdef _WIN32
     InitializeCriticalSection(&ev->lock);
     InitializeConditionVariable(&ev->cv);
 #else
@@ -186,7 +186,7 @@ static void test_event_destroy(TEST_EVENT* ev)
     {
         return;
     }
-#ifdef WIN32
+#ifdef _WIN32
     DeleteCriticalSection(&ev->lock);
 #else
     pthread_cond_destroy(&ev->cv);
@@ -201,7 +201,7 @@ static void test_event_signal(TEST_EVENT* ev)
     {
         return;
     }
-#ifdef WIN32
+#ifdef _WIN32
     EnterCriticalSection(&ev->lock);
     ev->signaled = 1;
     WakeAllConditionVariable(&ev->cv);
@@ -220,7 +220,7 @@ static void test_event_wait(TEST_EVENT* ev)
     {
         return;
     }
-#ifdef WIN32
+#ifdef _WIN32
     EnterCriticalSection(&ev->lock);
     while(!ev->signaled)
     {
@@ -239,7 +239,7 @@ static void test_event_wait(TEST_EVENT* ev)
 
 static int prepare_temp_db_path(char* db_path, size_t db_path_len)
 {
-#ifdef WIN32
+#ifdef _WIN32
     char temp_dir[MAX_PATH];
     char temp_file[MAX_PATH];
 
@@ -291,7 +291,7 @@ static int prepare_temp_db_path(char* db_path, size_t db_path_len)
 
 static void cleanup_temp_db_path(const char* db_path)
 {
-#ifdef WIN32
+#ifdef _WIN32
     DeleteFileA(db_path);
 #else
     unlink(db_path);
@@ -337,7 +337,7 @@ static void blocking_read_callback(char** fields, char** row_res, long long row_
     test_event_wait(&probe->callback_release);
 }
 
-#ifdef WIN32
+#ifdef _WIN32
 static DWORD WINAPI db_read_thread_proc(LPVOID data)
 #else
 static void* db_read_thread_proc(void* data)
@@ -348,14 +348,14 @@ static void* db_read_thread_proc(void* data)
                              "SELECT name FROM test_user WHERE id = 1;",
                              blocking_read_callback,
                              ctx->probe);
-#ifdef WIN32
+#ifdef _WIN32
     return 0;
 #else
     return NULL;
 #endif
 }
 
-#ifdef WIN32
+#ifdef _WIN32
 static DWORD WINAPI db_close_thread_proc(LPVOID data)
 #else
 static void* db_close_thread_proc(void* data)
@@ -365,7 +365,7 @@ static void* db_close_thread_proc(void* data)
     test_event_signal(&ctx->probe->close_started);
     ctx->status = ENT_DbCloseHandle(&ctx->db_handle);
     ctx->probe->close_finished = 1;
-#ifdef WIN32
+#ifdef _WIN32
     return 0;
 #else
     return NULL;
@@ -662,7 +662,7 @@ static int test_db_close_handle_waits_for_active_read(void)
     close_ctx.probe = &probe;
     close_ctx.status = ENT_DBS_RESULT_FAILED;
 
-#ifdef WIN32
+#ifdef _WIN32
     {
         HANDLE read_thread = CreateThread(NULL, 0, db_read_thread_proc, &read_ctx, 0, NULL);
         HANDLE close_thread = NULL;
@@ -1050,7 +1050,7 @@ static int test_db_reinit_rejects_active_read(void)
     read_ctx.probe = &probe;
     read_ctx.status = ENT_DBS_RESULT_FAILED;
 
-#ifdef WIN32
+#ifdef _WIN32
     {
         HANDLE read_thread = CreateThread(NULL, 0, db_read_thread_proc, &read_ctx, 0, NULL);
         if(expect_true(read_thread != NULL,

@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #else
 #include <sys/time.h>
@@ -46,7 +46,7 @@ typedef struct
 
 static double now_ms(void)
 {
-#ifdef WIN32
+#ifdef _WIN32
     static LARGE_INTEGER frequency;
     static int frequency_initialized = 0;
     LARGE_INTEGER counter;
@@ -69,7 +69,7 @@ static double now_ms(void)
 
 static void perf_probe_mark_finished(PERF_TPOOL_PROBE* probe)
 {
-#ifdef WIN32
+#ifdef _WIN32
     InterlockedIncrement((volatile LONG*)&probe->finished);
 #else
     __sync_add_and_fetch(&probe->finished, 1);

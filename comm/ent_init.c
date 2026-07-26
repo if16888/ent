@@ -15,7 +15,7 @@
  *
  *-----------------------------------------------------------------------------
  */
-#ifdef WIN32
+#ifdef _WIN32
 #pragma warning(disable : 4996)
 #else
 #ifndef _GNU_SOURCE
@@ -54,7 +54,7 @@ extern void ENT_InitTestHandleCtxFreed(void);
 ENT_CTX gEntCtx;
 static ENT_THREAD_LOCAL ENT_CTX* sEntActiveCtx = NULL;
 
-#ifdef WIN32
+#ifdef _WIN32
 static SRWLOCK sEntRuntimeLock = SRWLOCK_INIT;
 static void iENT_RuntimeLock(void)
 {
@@ -573,7 +573,7 @@ static MSG_ID_T iENT_CTXApplyRtMode(ENT_CTX* ctx,
         return ENT_SYS_NORMAL;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     IENT_LOG_WARN("rt mode not supported on current platform,fallback to normal mode\n");
 #else
     iENT_RuntimeLock();
@@ -739,7 +739,7 @@ static MSG_ID_T iENT_CTXInit(ENT_CTX* ctx,
         iENT_CTXResetRuntime(ctx);
         return ENT_INIT_LOGPATH_ALLOCFAIL;
     }
-#ifdef WIN32
+#ifdef _WIN32
     if(workPath[len-1]=='\\'||workPath[len-1]=='/')
 #else
     if(workPath[len-1]=='/')
@@ -828,7 +828,7 @@ static MSG_ID_T iENT_CTXInit(ENT_CTX* ctx,
 
 static MSG_ID_T iENT_CTXReleaseRtMemory(ENT_CTX* ctx)
 {
-#ifndef WIN32
+#ifndef _WIN32
     if(ctx != NULL && ctx->rtMemoryOwner)
     {
         bool lastOwner;

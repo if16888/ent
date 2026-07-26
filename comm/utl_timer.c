@@ -15,7 +15,7 @@
  *
  *-----------------------------------------------------------------------------
  */
-#ifdef WIN32
+#ifdef _WIN32
 #include "windows.h"
 #else
 #include <pthread.h>
@@ -32,7 +32,7 @@
 #include "ent_msg.h"
 #include "ent_utility.h"
 
-#ifdef WIN32
+#ifdef _WIN32
 #define ENT_TMR_IMPL_WINDOWS 1
 #define ENT_TMR_IMPL_LINUX 0
 #define ENT_TMR_IMPL_POSIX_FALLBACK 0
@@ -89,7 +89,7 @@ typedef struct ENT_TH_CTX
 
 static bool          sUtilTimerInit;
 static TIMER_TH_CTX  sTimerCtx;
-#ifdef WIN32
+#ifdef _WIN32
 static SRWLOCK       sTimerLifecycleLock = SRWLOCK_INIT;
 #else
 static pthread_mutex_t sTimerLifecycleLock = PTHREAD_MUTEX_INITIALIZER;
@@ -98,13 +98,13 @@ static BOOL          sTimerClosing = FALSE;
 static unsigned int  sTimerLifecycleOps = 0;
 
 static MSG_ID_T iUTL_TimerDeleteTimer(UTL_TIMER_T* pTimer);
-#ifndef WIN32
+#ifndef _WIN32
 static void iUTL_TimerSleepMs(int ms);
 #endif
 
 static void iUTL_TimerLifecycleLockEnter(void)
 {
-#ifdef WIN32
+#ifdef _WIN32
     AcquireSRWLockExclusive(&sTimerLifecycleLock);
 #else
     pthread_mutex_lock(&sTimerLifecycleLock);
@@ -113,7 +113,7 @@ static void iUTL_TimerLifecycleLockEnter(void)
 
 static void iUTL_TimerLifecycleLockLeave(void)
 {
-#ifdef WIN32
+#ifdef _WIN32
     ReleaseSRWLockExclusive(&sTimerLifecycleLock);
 #else
     pthread_mutex_unlock(&sTimerLifecycleLock);
@@ -157,7 +157,7 @@ static void iUTL_TimerLifecycleWaitOps(void)
         {
             return;
         }
-#ifdef WIN32
+#ifdef _WIN32
         Sleep(1);
 #else
         iUTL_TimerSleepMs(1);
@@ -178,7 +178,7 @@ static void* iUTL_TimerThread(void* data);
 static void iUTL_TimerCleanupSelfDeletedThreadTimer(PTIMER_CTX_T timerCtx);
 #endif
 
-#ifndef WIN32
+#ifndef _WIN32
 static void iUTL_TimerSleepMs(int ms)
 {
     struct timespec tv;
@@ -1341,7 +1341,7 @@ ENT_PUBLIC MSG_ID_T UTL_TimerDelete(UTL_TIMER_T* pTimer)
 
 ENT_PUBLIC MSG_ID_T  UTL_Sleep(int ms)
 {
-#ifdef WIN32
+#ifdef _WIN32
     Sleep(ms);
 #else
     iUTL_TimerSleepMs(ms);

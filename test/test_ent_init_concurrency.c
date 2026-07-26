@@ -1,7 +1,7 @@
 #include "ent_init.h"
 #include <stdio.h>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 static DWORD WINAPI run_worker(void* data)
 {
@@ -25,7 +25,7 @@ int main(void)
         return 1;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     {
         HANDLE thread = CreateThread(NULL, 0, run_worker, handle, 0, NULL);
         if(thread == NULL)

@@ -3,7 +3,7 @@
 #include <string.h>
 #include <time.h>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <Windows.h>
 #include <direct.h>
 #else
@@ -37,7 +37,7 @@ static int expect_true(int condition, const char* message)
 
 static long long now_ms(void)
 {
-#ifdef WIN32
+#ifdef _WIN32
     return (long long)GetTickCount64();
 #else
     struct timeval tv;
@@ -48,7 +48,7 @@ static long long now_ms(void)
 
 static void sleep_ms(int ms)
 {
-#ifdef WIN32
+#ifdef _WIN32
     Sleep((DWORD)ms);
 #else
     usleep((useconds_t)ms * 1000U);
@@ -57,7 +57,7 @@ static void sleep_ms(int ms)
 
 static void remove_dir_contents(const char* path)
 {
-#ifdef WIN32
+#ifdef _WIN32
     WIN32_FIND_DATAA findData;
     HANDLE findHandle = INVALID_HANDLE_VALUE;
     char pattern[512];
@@ -117,7 +117,7 @@ static void remove_dir_contents(const char* path)
 
 static int make_temp_dir(char* buffer, size_t size)
 {
-#ifdef WIN32
+#ifdef _WIN32
     char tempPath[MAX_PATH];
     char tempFile[MAX_PATH];
 
@@ -156,7 +156,7 @@ static void format_log_file_path(char* buffer, size_t size, const char* dir, con
 {
     time_t now = time(NULL);
     struct tm nowTm;
-#ifdef WIN32
+#ifdef _WIN32
     localtime_s(&nowTm, &now);
     snprintf(buffer,
              size,
@@ -199,7 +199,7 @@ static int file_contains(const char* filePath, const char* needle)
 
 static int path_exists(const char* filePath)
 {
-#ifdef WIN32
+#ifdef _WIN32
     DWORD attrs = GetFileAttributesA(filePath);
     return attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY);
 #else
@@ -283,7 +283,7 @@ int main(void)
             found = 1;
             break;
         }
-#ifdef WIN32
+#ifdef _WIN32
         if(path_exists(logFilePath))
         {
             found = 1;

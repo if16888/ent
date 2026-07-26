@@ -3,7 +3,7 @@
 #include <string.h>
 #include <errno.h>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
@@ -58,7 +58,7 @@ typedef struct
     UTL_D_SOCKET socket_desc;
     int total_bytes;
     int received_bytes;
-#ifdef WIN32
+#ifdef _WIN32
     HANDLE thread;
 #else
     pthread_t thread;
@@ -67,7 +67,7 @@ typedef struct
 
 static double now_ms(void)
 {
-#ifdef WIN32
+#ifdef _WIN32
     static LARGE_INTEGER frequency;
     static int frequency_initialized = 0;
     LARGE_INTEGER counter;
@@ -90,7 +90,7 @@ static double now_ms(void)
 
 static void close_native_socket(UTL_D_SOCKET socket_desc)
 {
-#ifdef WIN32
+#ifdef _WIN32
     if(socket_desc != INVALID_SOCKET)
     {
         closesocket(socket_desc);
@@ -107,7 +107,7 @@ static UTL_D_SOCKET accept_native_socket(UTL_D_SOCKET listen_socket,
                                          struct sockaddr* addr,
                                          int* addr_len)
 {
-#ifdef WIN32
+#ifdef _WIN32
     return accept(listen_socket, addr, addr_len);
 #else
     socklen_t native_addr_len = (addr_len != NULL) ? (socklen_t)*addr_len : 0;
@@ -122,7 +122,7 @@ static UTL_D_SOCKET accept_native_socket(UTL_D_SOCKET listen_socket,
 
 static int get_socket_name(UTL_D_SOCKET socket_desc, struct sockaddr* addr, int* addr_len)
 {
-#ifdef WIN32
+#ifdef _WIN32
     return getsockname(socket_desc, addr, addr_len);
 #else
     socklen_t native_addr_len = (socklen_t)*addr_len;
@@ -181,7 +181,7 @@ static int recv_all_in_chunks(UTL_D_SOCKET socket_desc, int total_bytes)
     return 0;
 }
 
-#ifdef WIN32
+#ifdef _WIN32
 static DWORD WINAPI recv_worker_main(LPVOID data)
 #else
 static void* recv_worker_main(void* data)
@@ -198,7 +198,7 @@ static void* recv_worker_main(void* data)
         ctx->received_bytes = ctx->total_bytes;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     return 0;
 #else
     return NULL;
@@ -262,7 +262,7 @@ static int setup_loopback_tcp_pair(UTL_D_SOCKET* server,
     }
 
     *accepted = accept_native_socket(*server, NULL, NULL);
-#ifdef WIN32
+#ifdef _WIN32
     if(*accepted == INVALID_SOCKET)
     {
         fprintf(stderr, "setup_loopback_tcp_pair: accept failed\n");
@@ -303,7 +303,7 @@ int main(void)
     recv_ctx.socket_desc = accepted;
     recv_ctx.total_bytes = PAYLOAD_SIZE;
 
-#ifdef WIN32
+#ifdef _WIN32
     recv_ctx.thread = CreateThread(NULL, 0, recv_worker_main, &recv_ctx, 0, NULL);
     if(recv_ctx.thread == NULL) FAIL_STEP("CreateThread");
 #else
@@ -313,7 +313,7 @@ int main(void)
     start_ms = now_ms();
     if(send_all_in_chunks(client, send_buf, PAYLOAD_SIZE) != 0) FAIL_STEP("send_all_in_chunks");
 
-#ifdef WIN32
+#ifdef _WIN32
     WaitForSingleObject(recv_ctx.thread, INFINITE);
     CloseHandle(recv_ctx.thread);
 #else

@@ -20,14 +20,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef WIN32
+#ifdef _WIN32
 #include <sys/timeb.h>
 #endif
 #include "ient_runtime.h"
 #include "ent_log.h"
 #include "ent_utility.h"
 
-#ifdef WIN32
+#ifdef _WIN32
 
 #define IENT_LOG_FATAL(format,...) \
  do { \
@@ -97,7 +97,7 @@ static inline char* ENT_StrDup(const char* text)
     {
         return NULL;
     }
-#ifdef WIN32
+#ifdef _WIN32
     return _strdup(text);
 #else
     return strdup(text);
@@ -110,7 +110,7 @@ static inline FILE* ENT_FOpen(const char* fileName, const char* mode)
     {
         return NULL;
     }
-#ifdef WIN32
+#ifdef _WIN32
     FILE* fp = NULL;
     if(fopen_s(&fp, fileName, mode) != 0)
     {
@@ -122,7 +122,7 @@ static inline FILE* ENT_FOpen(const char* fileName, const char* mode)
 #endif
 }
 
-#ifdef WIN32
+#ifdef _WIN32
 static inline int ENT_FTime64(struct _timeb* timeBuf)
 {
     return _ftime64_s(timeBuf);
@@ -136,7 +136,7 @@ static inline char* ENT_GetEnvDup(const char* name)
         return NULL;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     char* value = NULL;
     size_t valueLen = 0;
 

@@ -3,7 +3,7 @@
 #include <string.h>
 #include <time.h>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <Windows.h>
 #include <direct.h>
 #else
@@ -49,7 +49,7 @@ static int expect_true(int condition, const char* message)
 
 static int path_exists(const char* path)
 {
-#ifdef WIN32
+#ifdef _WIN32
     DWORD attrs = GetFileAttributesA(path);
     return attrs != INVALID_FILE_ATTRIBUTES;
 #else
@@ -77,7 +77,7 @@ static int file_contains(const char* path, const char* needle)
 
 static void remove_dir_contents(const char* path)
 {
-#ifdef WIN32
+#ifdef _WIN32
     WIN32_FIND_DATAA findData;
     HANDLE findHandle = INVALID_HANDLE_VALUE;
     char pattern[512];
@@ -138,7 +138,7 @@ static void remove_dir_contents(const char* path)
 
 static int make_temp_dir(char* buffer, size_t size)
 {
-#ifdef WIN32
+#ifdef _WIN32
     char tempPath[MAX_PATH];
     char tempFile[MAX_PATH];
 
@@ -177,7 +177,7 @@ static int make_temp_dir(char* buffer, size_t size)
 
 typedef struct TEST_EVENT_TAG
 {
-#ifdef WIN32
+#ifdef _WIN32
     HANDLE event;
 #else
     pthread_mutex_t mutex;
@@ -188,7 +188,7 @@ typedef struct TEST_EVENT_TAG
 
 static int test_event_init(TEST_EVENT* e)
 {
-#ifdef WIN32
+#ifdef _WIN32
     e->event = CreateEventA(NULL, TRUE, FALSE, NULL);
     return e->event == NULL ? -1 : 0;
 #else
@@ -208,7 +208,7 @@ static int test_event_init(TEST_EVENT* e)
 
 static void test_event_signal(TEST_EVENT* e)
 {
-#ifdef WIN32
+#ifdef _WIN32
     SetEvent(e->event);
 #else
     pthread_mutex_lock(&e->mutex);
@@ -220,7 +220,7 @@ static void test_event_signal(TEST_EVENT* e)
 
 static int test_event_wait(TEST_EVENT* e, int timeoutMs)
 {
-#ifdef WIN32
+#ifdef _WIN32
     DWORD rc = WaitForSingleObject(e->event, timeoutMs < 0 ? INFINITE : (DWORD)timeoutMs);
     return rc == WAIT_OBJECT_0 ? 0 : -1;
 #else
@@ -262,7 +262,7 @@ static int test_event_wait(TEST_EVENT* e, int timeoutMs)
 
 static void test_event_destroy(TEST_EVENT* e)
 {
-#ifdef WIN32
+#ifdef _WIN32
     if(e->event != NULL)
     {
         CloseHandle(e->event);
@@ -276,7 +276,7 @@ static void test_event_destroy(TEST_EVENT* e)
 
 static void test_sleep_ms(int ms)
 {
-#ifdef WIN32
+#ifdef _WIN32
     Sleep((DWORD)ms);
 #else
     usleep((useconds_t)ms * 1000);
@@ -288,7 +288,7 @@ static void format_log_file_path(char* buffer, size_t size, const char* dir, con
     time_t now = time(NULL);
     struct tm nowTm;
 
-#ifdef WIN32
+#ifdef _WIN32
     localtime_s(&nowTm, &now);
 #else
     localtime_r(&now, &nowTm);
@@ -305,7 +305,7 @@ static void format_log_file_path(char* buffer, size_t size, const char* dir, con
              nowTm.tm_mday);
 }
 
-#ifndef WIN32
+#ifndef _WIN32
 typedef struct TEST_LOG_RACE_CTX
 {
     pthread_mutex_t mutex;
@@ -1183,7 +1183,7 @@ typedef struct TEST_CLOSE_THREAD_CTX_TAG
     MSG_ID_T closeRc;
 } TEST_CLOSE_THREAD_CTX;
 
-#ifdef WIN32
+#ifdef _WIN32
 static DWORD WINAPI close_handle_thread_proc(LPVOID data)
 #else
 static void* close_handle_thread_proc(void* data)
@@ -1192,7 +1192,7 @@ static void* close_handle_thread_proc(void* data)
     TEST_CLOSE_THREAD_CTX* ctx = (TEST_CLOSE_THREAD_CTX*)data;
     ctx->closeRc = ENT_LogCloseHandle(ctx->logHandle);
     test_event_signal(&ctx->done);
-#ifdef WIN32
+#ifdef _WIN32
     return 0;
 #else
     return NULL;
@@ -1207,7 +1207,7 @@ static int test_log_close_handle_blocks_until_active_writer_released(void)
     ENT_LOG_LEV_E level = LOG_LEV_INFO_E;
     MSG_ID_T sts = 0;
     int rc = 1;
-#ifdef WIN32
+#ifdef _WIN32
     HANDLE th = NULL;
 #else
     pthread_t th;
@@ -1247,7 +1247,7 @@ static int test_log_close_handle_blocks_until_active_writer_released(void)
         return 1;
     }
     closeCtx.logHandle = logHandle;
-#ifdef WIN32
+#ifdef _WIN32
     th = CreateThread(NULL, 0, close_handle_thread_proc, &closeCtx, 0, NULL);
     if(expect_true(th != NULL, "CreateThread should start close worker") != 0)
 #else
@@ -1306,7 +1306,7 @@ static int test_log_close_handle_blocks_until_active_writer_released(void)
     rc = 0;
 
 join_cleanup:
-#ifdef WIN32
+#ifdef _WIN32
     if(th != NULL)
     {
         WaitForSingleObject(th, INFINITE);
@@ -1335,7 +1335,7 @@ typedef struct TEST_CTX_CLOSE_THREAD_CTX_TAG
     MSG_ID_T closeRc;
 } TEST_CTX_CLOSE_THREAD_CTX;
 
-#ifdef WIN32
+#ifdef _WIN32
 static DWORD WINAPI close_ctx_thread_proc(LPVOID data)
 #else
 static void* close_ctx_thread_proc(void* data)
@@ -1344,7 +1344,7 @@ static void* close_ctx_thread_proc(void* data)
     TEST_CTX_CLOSE_THREAD_CTX* ctx = (TEST_CTX_CLOSE_THREAD_CTX*)data;
     ctx->closeRc = ENT_LogCtxClose(ctx->ctx);
     test_event_signal(&ctx->done);
-#ifdef WIN32
+#ifdef _WIN32
     return 0;
 #else
     return NULL;
@@ -1361,7 +1361,7 @@ static int test_log_ctx_close_rejects_concurrent_second_close(void)
     int serviceOpen = 0;
     int tempDirCreated = 0;
     int rc = 1;
-#ifdef WIN32
+#ifdef _WIN32
     HANDLE th = NULL;
 #else
     pthread_t th;
@@ -1402,7 +1402,7 @@ static int test_log_ctx_close_rejects_concurrent_second_close(void)
         goto cleanup;
     }
     closeCtx.ctx = ctx;
-#ifdef WIN32
+#ifdef _WIN32
     th = CreateThread(NULL, 0, close_ctx_thread_proc, &closeCtx, 0, NULL);
     if(expect_true(th != NULL, "CreateThread should start the context close worker") != 0)
 #else
@@ -1445,7 +1445,7 @@ static int test_log_ctx_close_rejects_concurrent_second_close(void)
     rc = 0;
 
 join_cleanup:
-#ifdef WIN32
+#ifdef _WIN32
     if(th != NULL)
     {
         WaitForSingleObject(th, INFINITE);
@@ -1487,7 +1487,7 @@ typedef struct TEST_CTX_CLOSE_RACE_ARG_TAG
     MSG_ID_T closeRc;
 } TEST_CTX_CLOSE_RACE_ARG;
 
-#ifdef WIN32
+#ifdef _WIN32
 static DWORD WINAPI close_ctx_race_thread_proc(LPVOID data)
 #else
 static void* close_ctx_race_thread_proc(void* data)
@@ -1496,7 +1496,7 @@ static void* close_ctx_race_thread_proc(void* data)
     TEST_CTX_CLOSE_RACE_ARG* arg = (TEST_CTX_CLOSE_RACE_ARG*)data;
     test_event_wait(arg->start, -1);
     arg->closeRc = ENT_LogCtxClose(arg->ctx);
-#ifdef WIN32
+#ifdef _WIN32
     return 0;
 #else
     return NULL;
@@ -1518,7 +1518,7 @@ static int test_log_ctx_close_race_after_reclamation(void)
         ENT_LOG_CTX ctx = NULL;
         TEST_EVENT start;
         TEST_CTX_CLOSE_RACE_ARG args[2];
-#ifdef WIN32
+#ifdef _WIN32
         HANDLE threads[2] = {NULL, NULL};
 #else
         pthread_t threads[2];
@@ -1540,7 +1540,7 @@ static int test_log_ctx_close_race_after_reclamation(void)
         {
             args[i].ctx = ctx;
             args[i].start = &start;
-#ifdef WIN32
+#ifdef _WIN32
             threads[i] = CreateThread(NULL, 0, close_ctx_race_thread_proc, &args[i], 0, NULL);
             if(threads[i] == NULL)
 #else
@@ -1548,7 +1548,7 @@ static int test_log_ctx_close_race_after_reclamation(void)
 #endif
             {
                 test_event_signal(&start);
-#ifdef WIN32
+#ifdef _WIN32
                 for(; i >= 0; i--) if(threads[i] != NULL) { WaitForSingleObject(threads[i], INFINITE); CloseHandle(threads[i]); }
 #else
                 for(; i > 0; i--) pthread_join(threads[i - 1], NULL);
@@ -1559,7 +1559,7 @@ static int test_log_ctx_close_race_after_reclamation(void)
             }
         }
         test_event_signal(&start);
-#ifdef WIN32
+#ifdef _WIN32
         for(i = 0; i < 2; i++) { WaitForSingleObject(threads[i], INFINITE); CloseHandle(threads[i]); }
 #else
         for(i = 0; i < 2; i++) pthread_join(threads[i], NULL);
@@ -1876,7 +1876,7 @@ static int test_log_level_filters_debug_messages(void)
 
 static int test_log_close_handle_waits_for_active_writers(void)
 {
-#ifdef WIN32
+#ifdef _WIN32
     return test_log_close_handle_blocks_until_active_writer_released();
 #else
     ENT_LOG logHandle = NULL;
@@ -2356,7 +2356,7 @@ static int test_buffered_log_flush_interval_writes_without_close(void)
                 break;
             }
         }
-#ifdef WIN32
+#ifdef _WIN32
         if(path_exists(logFilePath))
         {
             found = 1;

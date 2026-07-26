@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #else
 #include <pthread.h>
@@ -36,7 +36,7 @@ static int expect_true(int condition, const char* message)
 
 static void sleep_ms(int ms)
 {
-#ifdef WIN32
+#ifdef _WIN32
     Sleep((DWORD)ms);
 #else
     struct timespec ts;
@@ -58,7 +58,7 @@ MSG_ID_T ENT_LogWarn(ENT_LOG logHandle, const char* format, ...){(void)logHandle
 MSG_ID_T ENT_LogPrint(ENT_LOG logHandle, const char* format, ...){(void)logHandle;(void)format;return 0;}
 MSG_ID_T ENT_LogDebug(ENT_LOG logHandle, const char* format, ...){(void)logHandle;(void)format;return 0;}
 
-#ifdef WIN32
+#ifdef _WIN32
 static DWORD WINAPI cv_wait_thread(LPVOID data)
 #else
 static void* cv_wait_thread(void* data)
@@ -68,7 +68,7 @@ static void* cv_wait_thread(void* data)
     probe->wait_status = UTL_LockEnter(probe->lock);
     if(probe->wait_status != ENT_SYS_NORMAL)
     {
-#ifdef WIN32
+#ifdef _WIN32
         return 0;
 #else
         return NULL;
@@ -80,7 +80,7 @@ static void* cv_wait_thread(void* data)
         if(probe->wait_status != ENT_SYS_NORMAL)
         {
             UTL_LockLeave(probe->lock);
-#ifdef WIN32
+#ifdef _WIN32
             return 0;
 #else
             return NULL;
@@ -88,7 +88,7 @@ static void* cv_wait_thread(void* data)
         }
     }
     probe->wait_status = UTL_LockLeave(probe->lock);
-#ifdef WIN32
+#ifdef _WIN32
     return 0;
 #else
     return NULL;
@@ -204,7 +204,7 @@ static int test_cv_wait_and_wake_roundtrip(void)
     }
     probe.lock = lock;
     probe.cv = cv;
-#ifdef WIN32
+#ifdef _WIN32
     {
         HANDLE th = CreateThread(NULL, 0, cv_wait_thread, &probe, 0, NULL);
         if(expect_true(th != NULL, "cv wait helper thread should start on Windows") != 0)

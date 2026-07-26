@@ -21,7 +21,7 @@
 #include "ent_comm.h"
 #include "ent_types.h"
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #else
 #include <pthread.h>
@@ -113,7 +113,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerCreateUs(UTL_TIMER_T* pTimer,unsigned int type, in
 ENT_PUBLIC MSG_ID_T  UTL_TimerDelete(UTL_TIMER_T* pTimer);
 ENT_PUBLIC MSG_ID_T  UTL_TimerClose();
 
-#ifdef WIN32
+#ifdef _WIN32
 typedef SOCKET  UTL_D_SOCKET;
 #else
 typedef int     UTL_D_SOCKET;

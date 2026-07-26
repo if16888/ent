@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <time.h>
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #else
 #include <dlfcn.h>
@@ -16,7 +16,7 @@
 
 ENT_CTX gEntCtx;
 
-#ifndef WIN32
+#ifndef _WIN32
 static int s_clock_gettime_call_count = 0;
 static struct timespec s_last_timedwait_deadline;
 static int s_timedwait_call_count = 0;
@@ -37,7 +37,7 @@ static int expect_true(int condition, const char* message)
 
 static void reset_cv_wait_probes(void)
 {
-#ifndef WIN32
+#ifndef _WIN32
     s_clock_gettime_call_count = 0;
     memset(&s_last_timedwait_deadline, 0, sizeof(s_last_timedwait_deadline));
     s_timedwait_call_count = 0;
@@ -118,7 +118,7 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle, const char* format, ...)
     return 0;
 }
 
-#ifndef WIN32
+#ifndef _WIN32
 int clock_gettime(clockid_t clk_id, struct timespec* tp)
 {
     (void)clk_id;
@@ -203,7 +203,7 @@ static int test_lock_init_ex_rejects_unknown_type(void)
 
 static int test_lock_init_propagates_mutex_init_failure(void)
 {
-#ifdef WIN32
+#ifdef _WIN32
     return 0;
 #else
     UTL_LOCK lock = (UTL_LOCK)0x1;
@@ -221,7 +221,7 @@ static int test_lock_init_propagates_mutex_init_failure(void)
 
 static int test_rw_lock_init_propagates_rwlock_init_failure(void)
 {
-#ifdef WIN32
+#ifdef _WIN32
     return 0;
 #else
     UTL_LOCK lock = (UTL_LOCK)0x1;
@@ -416,7 +416,7 @@ static int test_cv_wake_and_wake_all_reject_null(void)
 
 static int test_cv_wait_uses_monotonic_deadline_and_normalized_timespec(void)
 {
-#ifdef WIN32
+#ifdef _WIN32
     UTL_LOCK lock = NULL;
     UTL_CV cv = NULL;
 

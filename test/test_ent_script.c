@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef WIN32
+#ifndef _WIN32
 #include <pthread.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -21,7 +21,7 @@ static int expect_true(int condition, const char* message)
     return 0;
 }
 
-#ifndef WIN32
+#ifndef _WIN32
 typedef struct
 {
     pthread_mutex_t mutex;
@@ -109,14 +109,14 @@ int main(void)
 {
     ENT_SCRIPT_RET_T out;
     MSG_ID_T sts = ENT_SYS_NORMAL;
-#ifdef WIN32
+#ifdef _WIN32
     const char* scriptRoot = ".";
 #else
     const char* scriptRoot = "/tmp";
 #endif
 #if ENT_ENABLE_LUA
     const char* scriptFile = "ent_script_case.lua";
-#ifdef WIN32
+#ifdef _WIN32
     const char* scriptPath = "ent_script_case.lua";
 #else
     const char* scriptPath = "/tmp/ent_script_case.lua";
@@ -183,7 +183,7 @@ int main(void)
         return EXIT_FAILURE;
     }
 
-#ifndef WIN32
+#ifndef _WIN32
     {
         const char* outsidePath = "/etc/hosts";
         const char* symlinkPath = "/tmp/ent_script_symlink.lua";
@@ -203,7 +203,7 @@ int main(void)
     }
 #endif
 
-#ifndef WIN32
+#ifndef _WIN32
     {
         const char* nestedRoot = "/tmp/ent_script_root";
         const char* backslashTarget = "/tmp/ent_script_root\\outside.lua";
@@ -419,7 +419,7 @@ int main(void)
         return EXIT_FAILURE;
     }
 
-#ifndef WIN32
+#ifndef _WIN32
     {
         pthread_t raceThread;
         TEST_SCRIPT_RACE_CTX raceCtx;

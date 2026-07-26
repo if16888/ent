@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #else
 #include <pthread.h>
@@ -20,7 +20,7 @@ static int s_use_real_threads = 0;
 
 typedef struct
 {
-#ifdef WIN32
+#ifdef _WIN32
     HANDLE thread;
 #else
     pthread_t thread;
@@ -28,7 +28,7 @@ typedef struct
     int joined;
 } TEST_THREAD_ID;
 
-#ifdef WIN32
+#ifdef _WIN32
 typedef struct
 {
     PTHREAD_START_ROUTINE thProc;
@@ -118,7 +118,7 @@ MSG_ID_T ENT_ThreadCreate(ENT_THREAD_ID* tid, ENT_THREAD handle, PTHREAD_START_R
     {
         return -6;
     }
-#ifdef WIN32
+#ifdef _WIN32
     {
         TEST_THREAD_START_DATA* startData = (TEST_THREAD_START_DATA*)calloc(1, sizeof(TEST_THREAD_START_DATA));
         if(startData == NULL)
@@ -163,7 +163,7 @@ MSG_ID_T ENT_ThreadWaitById(ENT_THREAD_ID* tid, ENT_THREAD handle, int ms)
             threadId = (TEST_THREAD_ID*)(*tid);
             if(!threadId->joined)
             {
-#ifdef WIN32
+#ifdef _WIN32
                 WaitForSingleObject(threadId->thread, INFINITE);
                 CloseHandle(threadId->thread);
 #else
@@ -188,7 +188,7 @@ MSG_ID_T UTL_Sleep(int ms)
 {
     if(ms > 0)
     {
-#ifdef WIN32
+#ifdef _WIN32
         Sleep((DWORD)ms);
 #else
         usleep((useconds_t)ms * 1000U);
@@ -206,7 +206,7 @@ static MSG_ID_T slow_task_cb(void* data)
     return 9;
 }
 
-#ifdef WIN32
+#ifdef _WIN32
 static DWORD WINAPI close_pool_thread(LPVOID data)
 #else
 static void* close_pool_thread(void* data)
@@ -214,7 +214,7 @@ static void* close_pool_thread(void* data)
 {
     UTL_TPOOL pool = (UTL_TPOOL)data;
     (void)UTL_TPoolClose(&pool);
-#ifdef WIN32
+#ifdef _WIN32
     return 0;
 #else
     return NULL;
@@ -261,7 +261,7 @@ static int test_tpool_add_task_is_rejected_once_close_starts(void)
         return 1;
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     {
         HANDLE th = CreateThread(NULL, 0, close_pool_thread, pool, 0, NULL);
         if(expect_true(th != NULL, "close helper thread should start on Windows") != 0)

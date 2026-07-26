@@ -21,7 +21,7 @@
 #include <stdlib.h>
 #include <stddef.h>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #else
 #include <pthread.h>
@@ -85,7 +85,7 @@ typedef struct DB_CFG
     char* database;
     int portNo;
     bool isInit;
-#ifdef WIN32
+#ifdef _WIN32
     CRITICAL_SECTION cs;
     CRITICAL_SECTION lifecycleCs;
     CONDITION_VARIABLE lifecycleCv;

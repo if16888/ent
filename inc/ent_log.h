@@ -106,7 +106,7 @@ ENT_PUBLIC MSG_ID_T  ENT_LogDebug(ENT_LOG logHandle,const char* format,...);
 }
 #endif
 
-#ifdef WIN32
+#ifdef _WIN32
 
 #define ENT_LOG_FATAL(format,...) \
  do { \

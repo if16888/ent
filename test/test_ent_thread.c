@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #else
 #include <pthread.h>
@@ -46,7 +46,7 @@ static void reset_thread_probes(void)
  * --------------------------------------------------------------------------- */
 typedef struct TEST_RESULT_EVENT
 {
-#ifdef WIN32
+#ifdef _WIN32
     CRITICAL_SECTION lock;
     CONDITION_VARIABLE cv;
 #else
@@ -63,7 +63,7 @@ static int test_result_event_init(TEST_RESULT_EVENT* ev)
         return -1;
     ev->completed = 0;
     ev->result    = 0;
-#ifdef WIN32
+#ifdef _WIN32
     InitializeCriticalSection(&ev->lock);
     InitializeConditionVariable(&ev->cv);
     return 0;
@@ -87,7 +87,7 @@ static void test_result_event_destroy(TEST_RESULT_EVENT* ev)
 {
     if(ev == NULL)
         return;
-#ifdef WIN32
+#ifdef _WIN32
     DeleteCriticalSection(&ev->lock);
 #else
     pthread_cond_destroy(&ev->cv);
@@ -97,7 +97,7 @@ static void test_result_event_destroy(TEST_RESULT_EVENT* ev)
 
 static void test_result_event_publish(TEST_RESULT_EVENT* ev, MSG_ID_T result)
 {
-#ifdef WIN32
+#ifdef _WIN32
     EnterCriticalSection(&ev->lock);
     ev->result    = result;
     ev->completed = 1;
@@ -115,7 +115,7 @@ static void test_result_event_publish(TEST_RESULT_EVENT* ev, MSG_ID_T result)
 static MSG_ID_T test_result_event_wait(TEST_RESULT_EVENT* ev)
 {
     MSG_ID_T r;
-#ifdef WIN32
+#ifdef _WIN32
     EnterCriticalSection(&ev->lock);
     while(!ev->completed)
         SleepConditionVariableCS(&ev->cv, &ev->lock, INFINITE);
@@ -151,7 +151,7 @@ typedef struct TEST_TID_PUBLICATION_CTX
     TEST_RESULT_EVENT completed;
 } TEST_TID_PUBLICATION_CTX;
 
-#ifdef WIN32
+#ifdef _WIN32
 static DWORD WINAPI tid_publication_thread(void* data)
 #else
 static void* tid_publication_thread(void* data)
@@ -161,14 +161,14 @@ static void* tid_publication_thread(void* data)
 
     ctx->sawPublishedTid = (ctx->tid != NULL && *ctx->tid != NULL);
     test_result_event_publish(&ctx->completed, ctx->sawPublishedTid);
-#ifdef WIN32
+#ifdef _WIN32
     return 0;
 #else
     return NULL;
 #endif
 }
 
-#ifdef WIN32
+#ifdef _WIN32
 static DWORD WINAPI self_close_thread(void* data)
 #else
 static void* self_close_thread(void* data)
@@ -177,14 +177,14 @@ static void* self_close_thread(void* data)
     TEST_SELF_CLOSE_CTX* ctx = (TEST_SELF_CLOSE_CTX*)data;
     MSG_ID_T rc = ENT_ThreadClose(ctx->handle);
     test_result_event_publish(&ctx->completed, rc);
-#ifdef WIN32
+#ifdef _WIN32
     return 0;
 #else
     return NULL;
 #endif
 }
 
-#ifdef WIN32
+#ifdef _WIN32
 static DWORD WINAPI self_wait_thread(void* data)
 #else
 static void* self_wait_thread(void* data)
@@ -197,7 +197,7 @@ static void* self_wait_thread(void* data)
      * (Linux) and CREATE_SUSPENDED + ResumeThread (Windows). */
     MSG_ID_T rc = ENT_ThreadWaitById(&ctx->tid, ctx->handle, 0);
     test_result_event_publish(&ctx->completed, rc);
-#ifdef WIN32
+#ifdef _WIN32
     return 0;
 #else
     return NULL;
@@ -278,7 +278,7 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle, const char* format, ...)
     return 0;
 }
 
-#ifndef WIN32
+#ifndef _WIN32
 int pthread_cancel(pthread_t thread)
 {
     (void)thread;
@@ -287,20 +287,20 @@ int pthread_cancel(pthread_t thread)
 }
 #endif
 
-#ifdef WIN32
+#ifdef _WIN32
 static DWORD WINAPI quick_thread(void* data)
 #else
 static void* quick_thread(void* data)
 #endif
 {
-#ifdef WIN32
+#ifdef _WIN32
     return (DWORD)(ULONG_PTR)data;
 #else
     return data;
 #endif
 }
 
-#ifdef WIN32
+#ifdef _WIN32
 static DWORD WINAPI sleepy_thread(void* data)
 {
     Sleep(50);
@@ -556,7 +556,7 @@ static int test_thread_close_releases_thread_context(void)
 
 static int test_thread_close_does_not_call_pthread_cancel(void)
 {
-#ifdef WIN32
+#ifdef _WIN32
     return 0;
 #else
     ENT_THREAD handle = NULL;
