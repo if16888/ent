@@ -41,3 +41,11 @@ add_test(
     "${CMAKE_SOURCE_DIR}/scripts/gen_ent_msg.py"
     "${CMAKE_SOURCE_DIR}/msg/ent.msg"
 )
+
+add_test(
+  NAME test_gen_ent_msg_symbols
+  COMMAND
+    "${_ent_codegen_python}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_gen_ent_msg_symbols.py"
+    "${CMAKE_SOURCE_DIR}/scripts/gen_ent_msg_symbols.py"
+)
