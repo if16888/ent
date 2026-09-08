@@ -695,7 +695,7 @@ static int iENT_ScriptProtectedCall(lua_State* state)
             lua_pop(state, 1);
 
             lua_getfield(state, -1, "message");
-            if(lua_type(state, -1) == LUA_TSTRING)
+            if(lua_isstring(state, -1))
             {
                 iENT_ScriptCopyPath(callCtx->out->message,
                                     sizeof(callCtx->out->message),
