@@ -125,6 +125,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         known.symbol_prefix, "symbol prefix"
     ).upper()
     replacements: Dict[str, str] = {}
+    final_symbol_owners: Dict[str, str] = {}
     source_inputs = [Path(raw_path) for raw_path in known.input]
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -139,7 +140,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     raise ValueError(
                         f"conflicting replacement for '{old_symbol}'"
                     )
+                previous_owner = final_symbol_owners.get(new_symbol)
+                if previous_owner is not None and previous_owner != old_symbol:
+                    raise ValueError(
+                        f"conflicting generated symbol '{new_symbol}' from "
+                        f"'{previous_owner}' and '{old_symbol}'"
+                    )
                 replacements[old_symbol] = new_symbol
+                final_symbol_owners[new_symbol] = old_symbol
             transformed_inputs.append(transformed)
 
         base_args: List[str] = []

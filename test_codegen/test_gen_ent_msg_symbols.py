@@ -94,6 +94,36 @@ def main() -> int:
         if completed.returncode == 0 or "submodule line must be" not in completed.stderr:
             raise AssertionError("invalid symbol-prefix syntax was accepted")
 
+        collision_spec = root / "collision.msg"
+        collision_spec.write_text(
+            "module DATA 17\n"
+            "submodule QUE 5 symbol ACME_COMMON\n"
+            "BAD err 1 queue failure\n"
+            "submodule NET 6 symbol ACME_COMMON\n"
+            "BAD err 1 network failure\n",
+            encoding="utf-8",
+        )
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(generator),
+                "--input",
+                str(collision_spec),
+                "--header",
+                str(root / "collision.h"),
+                "--source",
+                str(root / "collision.c"),
+                "--symbol-prefix",
+                "ACME",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if completed.returncode == 0 or "conflicting generated symbol 'ACME_COMMON_BAD'" not in completed.stderr:
+            raise AssertionError("final generated-symbol collision was accepted")
+
     return 0
 
 
