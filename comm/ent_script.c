@@ -688,7 +688,7 @@ static int iENT_ScriptProtectedCall(lua_State* state)
     {
         case LUA_TTABLE:
             lua_getfield(state, -1, "code");
-            if(lua_type(state, -1) == LUA_TNUMBER)
+            if(lua_isnumber(state, -1))
             {
                 callCtx->out->code = (int)lua_tointeger(state, -1);
             }
