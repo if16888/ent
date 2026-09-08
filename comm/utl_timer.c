@@ -91,8 +91,10 @@ static bool          sUtilTimerInit;
 static TIMER_TH_CTX  sTimerCtx;
 #ifdef _WIN32
 static SRWLOCK       sTimerLifecycleLock = SRWLOCK_INIT;
+static __declspec(thread) unsigned int sTimerCallbackDepth = 0;
 #else
 static pthread_mutex_t sTimerLifecycleLock = PTHREAD_MUTEX_INITIALIZER;
+static __thread unsigned int sTimerCallbackDepth = 0;
 #endif
 static BOOL          sTimerClosing = FALSE;
 static unsigned int  sTimerLifecycleOps = 0;
@@ -104,6 +106,18 @@ static MSG_ID_T iUTL_TimerDeleteTimer(UTL_TIMER_T* pTimer);
 #ifndef _WIN32
 static void iUTL_TimerSleepMs(int ms);
 #endif
+
+static void iUTL_TimerInvokeCallback(UTL_TIMER_EV_F callback, void* data)
+{
+    if(callback == NULL)
+    {
+        return;
+    }
+
+    sTimerCallbackDepth++;
+    (void)callback(data);
+    sTimerCallbackDepth--;
+}
 
 static void iUTL_TimerLifecycleLockEnter(void)
 {
@@ -303,7 +317,7 @@ static void* iUTL_TimerThread(void* data)
 
         if(timerCb)
         {
-            timerCb(timerData);
+            iUTL_TimerInvokeCallback(timerCb, timerData);
         }
 
         if(timerCtx->selfDeleteRequested)
@@ -346,6 +360,12 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerClose()
 {
     MSG_ID_T     sts = ENT_SYS_NORMAL;
     DLL_D_HDR*   tmpDll = NULL;
+
+    if(sTimerCallbackDepth > 0)
+    {
+        IENT_LOG_ERROR("UTL_TimerClose cannot be called from a timer callback\n");
+        return ENT_TMR_THREAD_FAILED;
+    }
 
     iUTL_TimerLifecycleLockEnter();
     if(!sUtilTimerInit)
@@ -407,7 +427,7 @@ static void CALLBACK iUTL_TimerWinCb(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser,
 
     if(timerCtx->timer_ev_cb)
     {
-        timerCtx->timer_ev_cb(timerCtx->data);
+        iUTL_TimerInvokeCallback(timerCtx->timer_ev_cb, timerCtx->data);
     }
 }
 
@@ -754,7 +774,7 @@ static void* iUTL_TimerCallbackWorker(void* data)
 
             if(timerCb)
             {
-                timerCb(timerData);
+                iUTL_TimerInvokeCallback(timerCb, timerData);
             }
             callbackBatch--;
 
