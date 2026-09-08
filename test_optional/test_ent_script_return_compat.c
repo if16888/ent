@@ -38,6 +38,7 @@ int main(void)
         return EXIT_FAILURE;
     }
     fprintf(fp, "function table_string_code(args) return {code=\"-7\", message=\"denied\"} end\n");
+    fprintf(fp, "function table_numeric_message(args) return {code=0, message=123} end\n");
     fprintf(fp, "function scalar_number_code(args) return -7 end\n");
     fclose(fp);
 
@@ -59,6 +60,17 @@ int main(void)
                    "numeric string table code should preserve legacy numeric conversion") != 0 ||
        expect_true(strcmp(out.message, "denied") == 0,
                    "table message should remain intact when code is a numeric string") != 0)
+    {
+        goto CLEANUP_ENGINE;
+    }
+
+    memset(&out, 0, sizeof(out));
+    if(expect_true(ENT_ScriptCall("table_numeric_message", NULL, &out) == ENT_SYS_NORMAL,
+                   "table numeric message call should succeed") != 0 ||
+       expect_true(out.code == 0,
+                   "table numeric message should not alter code") != 0 ||
+       expect_true(strcmp(out.message, "123") == 0,
+                   "numeric table message should preserve legacy string conversion") != 0)
     {
         goto CLEANUP_ENGINE;
     }
