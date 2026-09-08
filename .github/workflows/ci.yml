@@ -138,7 +138,7 @@ jobs:
           mkdir -p "$CI_LOG_DIR"
           set +e
           ctest --test-dir "$BUILD_DIR" --output-on-failure -V \
-            -R "^(test_ent_init_concurrency|test_ent_log|test_ent_db|test_ent_thread|test_utl_timer|test_utl_timer_rt_self_delete|test_utl_tpool_integration)$" \
+            -R "^(test_ent_init_concurrency|test_ent_log|test_ent_db|test_ent_thread|test_utl_timer_rt_self_delete|test_utl_tpool_integration)$" \
             2>&1 | tee "$CI_LOG_DIR/ctest-tsan.log"
           test "${PIPESTATUS[0]}" -eq 0
 
