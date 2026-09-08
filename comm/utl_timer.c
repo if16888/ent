@@ -690,13 +690,17 @@ static void* iUTL_TimerCallbackWorker(void* data)
                 timerCb(timerData);
             }
             callbackBatch--;
+            if(timerCtx->selfDeleteRequested || timerCtx->stopCallbackWorker)
+            {
+                break;
+            }
             if(oneshot)
             {
                 break;
             }
         }
 
-        if(oneshot)
+        if(timerCtx->selfDeleteRequested || oneshot)
         {
             break;
         }
@@ -840,6 +844,12 @@ static MSG_ID_T iUTL_TimerDeleteRt(PTIMER_CTX_T timerCtx)
     timerCtx->stopWorker = TRUE;
     timerCtx->stopCallbackWorker = TRUE;
     UTL_CVWakeAll(timerCtx->cbCv);
+
+    if(pthread_equal(pthread_self(), timerCtx->cbWorker))
+    {
+        timerCtx->selfDeleteRequested = TRUE;
+        return ENT_SYS_NORMAL;
+    }
 
     pthread_join(timerCtx->rtWorker, NULL);
     pthread_join(timerCtx->cbWorker, NULL);

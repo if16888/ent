@@ -580,6 +580,57 @@ static int test_timer_create_us_periodic_timer_fires_on_linux(void)
 #endif
 }
 
+static int test_timer_create_us_callback_can_self_delete_safely(void)
+{
+#ifdef __linux__
+    TIMER_SELF_DELETE_PROBE probe;
+
+    memset(&probe, 0, sizeof(probe));
+    probe.delete_status = -999;
+
+    if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before RT self-delete callback test") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(UTL_TimerCreateUs(&probe.timer,
+                                     UTL_TIMER_E_PERIOD,
+                                     5000,
+                                     self_delete_timer_cb,
+                                     &probe) == 0,
+                   "UTL_TimerCreateUs should create a Linux RT timer for self-delete callback test") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    UTL_Sleep(80);
+
+    if(expect_true(probe.hits == 1, "RT self-delete callback timer should fire exactly once") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    if(expect_true(probe.delete_status == 0, "RT self-delete callback should be able to delete its own timer") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    if(expect_true(probe.timer == NULL, "RT self-delete callback should clear the timer handle") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    return expect_true(UTL_TimerClose() == 0,
+                       "UTL_TimerClose should reclaim a self-deleted Linux RT timer");
+#else
+    return 0;
+#endif
+}
+
 #ifndef _WIN32
 static int test_timer_callback_can_self_delete_safely(void)
 {
@@ -701,6 +752,7 @@ int main(void)
     failures += test_timer_create_us_has_consistent_failure_contract();
     failures += test_timer_create_us_delete_does_not_wait_full_period();
     failures += test_timer_create_us_periodic_timer_fires_on_linux();
+    failures += test_timer_create_us_callback_can_self_delete_safely();
 #ifndef _WIN32
     failures += test_timer_callback_can_self_delete_safely();
     failures += test_timer_create_is_rejected_while_close_progresses();
