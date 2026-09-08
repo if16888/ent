@@ -654,6 +654,7 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
         {
             return sts;
         }
+        dbCfg = NULL;
     }
 
     iENT_DbGlobalLock();
