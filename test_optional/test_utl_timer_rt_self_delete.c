@@ -46,6 +46,7 @@ typedef struct
     int hits;
     int done;
     MSG_ID_T delete_status;
+    MSG_ID_T close_status;
 } RT_SELF_DELETE_PROBE;
 
 static int expect_true(int condition, const char* message)
@@ -72,11 +73,13 @@ static void add_ms(struct timespec* ts, long ms)
 static void* self_delete_cb(void* data)
 {
     RT_SELF_DELETE_PROBE* probe = (RT_SELF_DELETE_PROBE*)data;
-    MSG_ID_T sts = UTL_TimerDelete(&probe->timer);
+    MSG_ID_T delete_sts = UTL_TimerDelete(&probe->timer);
+    MSG_ID_T close_sts = UTL_TimerClose();
 
     pthread_mutex_lock(&probe->lock);
     probe->hits++;
-    probe->delete_status = sts;
+    probe->delete_status = delete_sts;
+    probe->close_status = close_sts;
     probe->done = 1;
     pthread_cond_broadcast(&probe->cv);
     pthread_mutex_unlock(&probe->lock);
@@ -123,6 +126,7 @@ int main(void)
 
         memset(&probe, 0, sizeof(probe));
         probe.delete_status = -999;
+        probe.close_status = -999;
         if(pthread_mutex_init(&probe.lock, NULL) != 0 ||
            pthread_cond_init(&probe.cv, NULL) != 0)
         {
@@ -138,7 +142,7 @@ int main(void)
         if(expect_true(create_sts == ENT_SYS_NORMAL,
                        "UTL_TimerCreateUs should create each self-delete timer") != 0 ||
            expect_true(wait_done(&probe),
-                       "RT self-delete callback should complete within timeout") != 0)
+                       "RT self-delete/delete-then-close callback should complete within timeout") != 0)
         {
             if(probe.timer != NULL)
             {
@@ -155,6 +159,8 @@ int main(void)
                        "each RT self-delete timer should fire exactly once") != 0 ||
            expect_true(probe.delete_status == ENT_SYS_NORMAL,
                        "RT callback self-delete should succeed") != 0 ||
+           expect_true(probe.close_status == ENT_TMR_THREAD_FAILED,
+                       "UTL_TimerClose should reject timer callback context without closing the subsystem") != 0 ||
            expect_true(probe.timer == NULL,
                        "RT callback self-delete should clear its handle") != 0)
         {
@@ -188,7 +194,7 @@ int main(void)
     }
 
     return expect_true(UTL_TimerClose() == ENT_SYS_NORMAL,
-                       "UTL_TimerClose should succeed after already-reclaimed RT timers") == 0
+                       "UTL_TimerClose should succeed from the owning thread after callback cleanup") == 0
                ? EXIT_SUCCESS
                : EXIT_FAILURE;
 #else
