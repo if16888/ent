@@ -82,7 +82,11 @@ if(UNIX AND NOT APPLE)
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/../inc
             ${CMAKE_CURRENT_SOURCE_DIR}/../comm
+            ${ENT_MSG_GENERATED_DIR}
     )
+    if(TARGET ent_msg_codegen)
+        add_dependencies(test_utl_timer_rt_self_delete ent_msg_codegen)
+    endif()
     target_link_libraries(test_utl_timer_rt_self_delete PRIVATE pthread rt)
     add_test(NAME test_utl_timer_rt_self_delete COMMAND test_utl_timer_rt_self_delete)
 endif()
