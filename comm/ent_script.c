@@ -613,6 +613,115 @@ static void iENT_ScriptOpenAllowedLibraries(lua_State* state)
     lua_pushnil(state);
     lua_setglobal(state, "collectgarbage");
 }
+
+typedef struct
+{
+    const char* fn;
+    const ENT_SCRIPT_ARG_T* in;
+    ENT_SCRIPT_RET_T* out;
+    MSG_ID_T result;
+} ENT_SCRIPT_CALL_CTX_T;
+
+static int iENT_ScriptProtectedCall(lua_State* state)
+{
+    ENT_SCRIPT_CALL_CTX_T* callCtx = (ENT_SCRIPT_CALL_CTX_T*)lua_touserdata(state, 1);
+    size_t i = 0;
+
+    if(callCtx == NULL || callCtx->fn == NULL || callCtx->out == NULL)
+    {
+        return luaL_error(state, "invalid protected script-call context");
+    }
+
+    lua_getglobal(state, callCtx->fn);
+    if(!lua_isfunction(state, -1))
+    {
+        lua_pop(state, 1);
+        callCtx->result = ENT_SCR_FUNC_NOTFOUND;
+        return 0;
+    }
+
+    lua_newtable(state);
+    if(callCtx->in != NULL && callCtx->in->items != NULL)
+    {
+        for(i = 0; i < callCtx->in->count; ++i)
+        {
+            ENT_SCRIPT_ARG_TYPE_E argType = ENT_SCRIPT_ARG_STRING_E;
+
+            if(callCtx->in->items[i].key == NULL)
+            {
+                continue;
+            }
+
+            argType = iENT_ScriptResolveArgType(callCtx->in->items[i].type);
+            switch(argType)
+            {
+                case ENT_SCRIPT_ARG_STRING_E:
+                    lua_pushstring(state,
+                                   (callCtx->in->items[i].value == NULL) ? "" : callCtx->in->items[i].value);
+                    break;
+                case ENT_SCRIPT_ARG_INT_E:
+                    lua_pushinteger(state, (lua_Integer)callCtx->in->items[i].intValue);
+                    break;
+                case ENT_SCRIPT_ARG_DOUBLE_E:
+                    lua_pushnumber(state, (lua_Number)callCtx->in->items[i].numValue);
+                    break;
+                case ENT_SCRIPT_ARG_BOOL_E:
+                    lua_pushboolean(state, callCtx->in->items[i].boolValue ? 1 : 0);
+                    break;
+                case ENT_SCRIPT_ARG_NULL_E:
+                    lua_pushnil(state);
+                    break;
+                default:
+                    lua_pushstring(state,
+                                   (callCtx->in->items[i].value == NULL) ? "" : callCtx->in->items[i].value);
+                    break;
+            }
+            lua_setfield(state, -2, callCtx->in->items[i].key);
+        }
+    }
+
+    lua_call(state, 1, 1);
+
+    callCtx->out->code = 0;
+    callCtx->out->message[0] = '\0';
+    switch(lua_type(state, -1))
+    {
+        case LUA_TTABLE:
+            lua_getfield(state, -1, "code");
+            if(lua_isnumber(state, -1))
+            {
+                callCtx->out->code = (int)lua_tointeger(state, -1);
+            }
+            lua_pop(state, 1);
+
+            lua_getfield(state, -1, "message");
+            if(lua_isstring(state, -1))
+            {
+                iENT_ScriptCopyPath(callCtx->out->message,
+                                    sizeof(callCtx->out->message),
+                                    lua_tostring(state, -1));
+            }
+            lua_pop(state, 1);
+            break;
+
+        case LUA_TNUMBER:
+            callCtx->out->code = (int)lua_tointeger(state, -1);
+            break;
+
+        case LUA_TSTRING:
+            iENT_ScriptCopyPath(callCtx->out->message,
+                                sizeof(callCtx->out->message),
+                                lua_tostring(state, -1));
+            break;
+
+        default:
+            break;
+    }
+
+    lua_pop(state, 1);
+    callCtx->result = ENT_SYS_NORMAL;
+    return 0;
+}
 #endif
 
 ENT_PUBLIC MSG_ID_T ENT_ScriptInit(const char* scriptRoot)
@@ -756,107 +865,37 @@ ENT_PUBLIC MSG_ID_T ENT_ScriptCall(const char* fn,
 
 #if ENT_ENABLE_LUA
     {
-        size_t i = 0;
+        ENT_SCRIPT_CALL_CTX_T callCtx;
+        const char* reason = "lua runtime error";
         int rc = 0;
 
-        lua_getglobal(gEntScriptCtx.state, fn);
-        if(!lua_isfunction(gEntScriptCtx.state, -1))
-        {
-            lua_pop(gEntScriptCtx.state, 1);
-            ret = ENT_SCR_FUNC_NOTFOUND;
-            goto END_OF_ROUTINE;
-        }
+        memset(&callCtx, 0, sizeof(callCtx));
+        out->code = 0;
+        out->message[0] = '\0';
+        callCtx.fn = fn;
+        callCtx.in = in;
+        callCtx.out = out;
+        callCtx.result = ENT_SYS_NORMAL;
 
-        lua_newtable(gEntScriptCtx.state);
-        if(in != NULL && in->items != NULL)
-        {
-            for(i = 0; i < in->count; ++i)
-            {
-                ENT_SCRIPT_ARG_TYPE_E argType = ENT_SCRIPT_ARG_STRING_E;
-
-                if(in->items[i].key == NULL)
-                {
-                    continue;
-                }
-
-                argType = iENT_ScriptResolveArgType(in->items[i].type);
-                switch(argType)
-                {
-                    case ENT_SCRIPT_ARG_STRING_E:
-                        lua_pushstring(gEntScriptCtx.state,
-                                       (in->items[i].value == NULL) ? "" : in->items[i].value);
-                        break;
-
-                    case ENT_SCRIPT_ARG_INT_E:
-                        lua_pushinteger(gEntScriptCtx.state, (lua_Integer)in->items[i].intValue);
-                        break;
-
-                    case ENT_SCRIPT_ARG_DOUBLE_E:
-                        lua_pushnumber(gEntScriptCtx.state, (lua_Number)in->items[i].numValue);
-                        break;
-
-                    case ENT_SCRIPT_ARG_BOOL_E:
-                        lua_pushboolean(gEntScriptCtx.state, in->items[i].boolValue ? 1 : 0);
-                        break;
-
-                    case ENT_SCRIPT_ARG_NULL_E:
-                        lua_pushnil(gEntScriptCtx.state);
-                        break;
-
-                    default:
-                        lua_pushstring(gEntScriptCtx.state,
-                                       (in->items[i].value == NULL) ? "" : in->items[i].value);
-                        break;
-                }
-                lua_setfield(gEntScriptCtx.state, -2, in->items[i].key);
-            }
-        }
-
+        lua_pushcfunction(gEntScriptCtx.state, iENT_ScriptProtectedCall);
+        lua_pushlightuserdata(gEntScriptCtx.state, &callCtx);
         iENT_ScriptBeginExecution(gEntScriptCtx.state);
-        rc = lua_pcall(gEntScriptCtx.state, 1, 1, 0);
+        rc = lua_pcall(gEntScriptCtx.state, 1, 0, 0);
         iENT_ScriptEndExecution(gEntScriptCtx.state);
         if(rc != LUA_OK)
         {
+            if(lua_type(gEntScriptCtx.state, -1) == LUA_TSTRING)
+            {
+                reason = lua_tostring(gEntScriptCtx.state, -1);
+            }
             fprintf(stderr, "ENT_ScriptCall runtime failed,fn[%s],reason[%s]\n",
-                    fn, lua_tostring(gEntScriptCtx.state, -1));
+                    fn, reason);
             lua_pop(gEntScriptCtx.state, 1);
             ret = ENT_SCR_RUNTIME_FAILED;
             goto END_OF_ROUTINE;
         }
 
-        out->code = 0;
-        out->message[0] = '\0';
-        if(lua_istable(gEntScriptCtx.state, -1))
-        {
-            lua_getfield(gEntScriptCtx.state, -1, "code");
-            if(lua_isnumber(gEntScriptCtx.state, -1))
-            {
-                out->code = (int)lua_tointeger(gEntScriptCtx.state, -1);
-            }
-            lua_pop(gEntScriptCtx.state, 1);
-
-            lua_getfield(gEntScriptCtx.state, -1, "message");
-            if(lua_isstring(gEntScriptCtx.state, -1))
-            {
-                iENT_ScriptCopyPath(out->message,
-                                    sizeof(out->message),
-                                    lua_tostring(gEntScriptCtx.state, -1));
-            }
-            lua_pop(gEntScriptCtx.state, 1);
-        }
-        else if(lua_isstring(gEntScriptCtx.state, -1))
-        {
-            iENT_ScriptCopyPath(out->message,
-                                sizeof(out->message),
-                                lua_tostring(gEntScriptCtx.state, -1));
-        }
-        else if(lua_isnumber(gEntScriptCtx.state, -1))
-        {
-            out->code = (int)lua_tointeger(gEntScriptCtx.state, -1);
-        }
-
-        lua_pop(gEntScriptCtx.state, 1);
-        ret = ENT_SYS_NORMAL;
+        ret = callCtx.result;
 END_OF_ROUTINE:
         iENT_ScriptUnlock();
         return ret;

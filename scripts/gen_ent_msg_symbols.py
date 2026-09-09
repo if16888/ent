@@ -12,6 +12,7 @@ the base generator.
 """
 
 import argparse
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -25,7 +26,7 @@ def _parse_spec(
     output: Path,
     symbol_prefix: str,
 ) -> Dict[str, str]:
-    replacements: Dict[str, str] = {}
+    symbols: Dict[str, str] = {}
     transformed: List[str] = []
     module_name: Optional[str] = None
     submodule_name: Optional[str] = None
@@ -71,37 +72,56 @@ def _parse_spec(
             transformed.append(f"submodule {parts[1]} {parts[2]}{comment}")
             continue
 
-        if explicit_prefix is not None:
-            if module_name is None or submodule_name is None or len(parts) < 4:
-                raise ValueError(
-                    f"{source}:{line_no}: message requires module and submodule"
-                )
-            message_name = parts[0].upper()
-            old_symbol = gen_ent_msg._symbol_name(
-                symbol_prefix, module_name, submodule_name, message_name
+        if module_name is None or submodule_name is None or len(parts) < 4:
+            raise ValueError(
+                f"{source}:{line_no}: message requires module and submodule"
             )
-            new_symbol = f"{explicit_prefix}_{message_name}"
-            old_replacement = replacements.get(old_symbol)
-            if old_replacement is not None and old_replacement != new_symbol:
-                raise ValueError(
-                    f"{source}:{line_no}: conflicting replacement for '{old_symbol}'"
-                )
-            replacements[old_symbol] = new_symbol
+
+        message_name = parts[0].upper()
+        old_symbol = gen_ent_msg._symbol_name(
+            symbol_prefix, module_name, submodule_name, message_name
+        )
+        if explicit_prefix is None:
+            final_symbol = old_symbol
+        else:
+            final_symbol = f"{explicit_prefix}_{message_name}"
+
+        previous = symbols.get(old_symbol)
+        if previous is not None and previous != final_symbol:
+            raise ValueError(
+                f"{source}:{line_no}: conflicting replacement for '{old_symbol}'"
+            )
+        symbols[old_symbol] = final_symbol
         transformed.append(raw_line)
 
     output.write_text("\n".join(transformed) + "\n", encoding="utf-8")
-    return replacements
+    return symbols
 
 
 def _rewrite_generated(
     path: Path,
-    replacements: Dict[str, str],
+    symbols: Dict[str, str],
     temporary_inputs: Sequence[Path],
     source_inputs: Sequence[Path],
 ) -> None:
     text = path.read_text(encoding="utf-8")
-    for old_symbol in sorted(replacements, key=len, reverse=True):
-        text = text.replace(old_symbol, replacements[old_symbol])
+    changed_symbols = {
+        old_symbol: final_symbol
+        for old_symbol, final_symbol in symbols.items()
+        if old_symbol != final_symbol
+    }
+    if changed_symbols:
+        alternatives = "|".join(
+            re.escape(symbol)
+            for symbol in sorted(changed_symbols, key=len, reverse=True)
+        )
+        token_pattern = re.compile(
+            rf"(?<![A-Za-z0-9_])(?:{alternatives})(?![A-Za-z0-9_])"
+        )
+        text = token_pattern.sub(
+            lambda match: changed_symbols[match.group(0)],
+            text,
+        )
 
     temporary_notice = ", ".join(item.name for item in temporary_inputs)
     source_notice = ", ".join(item.name for item in source_inputs)
@@ -124,7 +144,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     symbol_prefix = gen_ent_msg._validate_prefix(
         known.symbol_prefix, "symbol prefix"
     ).upper()
-    replacements: Dict[str, str] = {}
+    symbols: Dict[str, str] = {}
+    final_symbol_owners: Dict[str, str] = {}
     source_inputs = [Path(raw_path) for raw_path in known.input]
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -133,13 +154,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         for index, source in enumerate(source_inputs):
             transformed = temp_root / f"spec-{index}.msg"
             current = _parse_spec(source, transformed, symbol_prefix)
-            for old_symbol, new_symbol in current.items():
-                previous = replacements.get(old_symbol)
-                if previous is not None and previous != new_symbol:
+            for old_symbol, final_symbol in current.items():
+                previous = symbols.get(old_symbol)
+                if previous is not None and previous != final_symbol:
                     raise ValueError(
                         f"conflicting replacement for '{old_symbol}'"
                     )
-                replacements[old_symbol] = new_symbol
+                previous_owner = final_symbol_owners.get(final_symbol)
+                if previous_owner is not None and previous_owner != old_symbol:
+                    raise ValueError(
+                        f"conflicting generated symbol '{final_symbol}' from "
+                        f"'{previous_owner}' and '{old_symbol}'"
+                    )
+                symbols[old_symbol] = final_symbol
+                final_symbol_owners[final_symbol] = old_symbol
             transformed_inputs.append(transformed)
 
         base_args: List[str] = []
@@ -157,16 +185,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             ]
         )
         result = gen_ent_msg.main(base_args)
+        if result != 0:
+            return result
 
         _rewrite_generated(
             Path(known.header),
-            replacements,
+            symbols,
             transformed_inputs,
             source_inputs,
         )
         _rewrite_generated(
             Path(known.source),
-            replacements,
+            symbols,
             transformed_inputs,
             source_inputs,
         )

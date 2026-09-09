@@ -5,6 +5,27 @@ import tempfile
 from pathlib import Path
 
 
+def run_generator(generator: Path, spec: Path, header: Path, source: Path):
+    return subprocess.run(
+        [
+            sys.executable,
+            str(generator),
+            "--input",
+            str(spec),
+            "--header",
+            str(header),
+            "--source",
+            str(source),
+            "--symbol-prefix",
+            "ACME",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         raise SystemExit("usage: test_gen_ent_msg_symbols.py GENERATOR")
@@ -75,24 +96,68 @@ def main() -> int:
             "BAD err 1 queue failure\n",
             encoding="utf-8",
         )
-        completed = subprocess.run(
-            [
-                sys.executable,
-                str(generator),
-                "--input",
-                str(bad_spec),
-                "--header",
-                str(root / "bad.h"),
-                "--source",
-                str(root / "bad.c"),
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
+        completed = run_generator(
+            generator, bad_spec, root / "bad.h", root / "bad.c"
         )
         if completed.returncode == 0 or "submodule line must be" not in completed.stderr:
             raise AssertionError("invalid symbol-prefix syntax was accepted")
+
+        collision_spec = root / "collision.msg"
+        collision_spec.write_text(
+            "module DATA 17\n"
+            "submodule QUE 5 symbol ACME_COMMON\n"
+            "BAD err 1 queue failure\n"
+            "submodule NET 6 symbol ACME_COMMON\n"
+            "BAD err 1 network failure\n",
+            encoding="utf-8",
+        )
+        completed = run_generator(
+            generator, collision_spec, root / "collision.h", root / "collision.c"
+        )
+        if completed.returncode == 0 or "conflicting generated symbol 'ACME_COMMON_BAD'" not in completed.stderr:
+            raise AssertionError("final generated-symbol collision was accepted")
+
+        default_collision_spec = root / "default-collision.msg"
+        default_collision_spec.write_text(
+            "module DATA 17\n"
+            "submodule QUE 5 symbol ACME_DATA_NET\n"
+            "DOWN err 1 aliased queue failure\n"
+            "submodule NET 6\n"
+            "DOWN err 1 default network failure\n",
+            encoding="utf-8",
+        )
+        completed = run_generator(
+            generator,
+            default_collision_spec,
+            root / "default-collision.h",
+            root / "default-collision.c",
+        )
+        if completed.returncode == 0 or "conflicting generated symbol 'ACME_DATA_NET_DOWN'" not in completed.stderr:
+            raise AssertionError("explicit alias collision with a default symbol was accepted")
+
+        chain_spec = root / "chain.msg"
+        chain_spec.write_text(
+            "module DATA 17\n"
+            "submodule ONE 5 symbol ACME_DATA_TWO\n"
+            "BAD err 1 first failure\n"
+            "submodule TWO 6 symbol ACME_FINAL\n"
+            "BAD err 1 second failure\n",
+            encoding="utf-8",
+        )
+        chain_header = root / "chain.h"
+        chain_source = root / "chain.c"
+        completed = run_generator(generator, chain_spec, chain_header, chain_source)
+        if completed.returncode != 0:
+            raise AssertionError(completed.stderr)
+        chain_header_text = chain_header.read_text(encoding="utf-8")
+        chain_source_text = chain_source.read_text(encoding="utf-8")
+        for expected in ("ACME_DATA_TWO_BAD", "ACME_FINAL_BAD"):
+            if expected not in chain_header_text or expected not in chain_source_text:
+                raise AssertionError(
+                    f"single-pass replacement lost generated symbol: {expected}"
+                )
+        if chain_header_text.count("ACME_FINAL_BAD") != 1:
+            raise AssertionError("replacement chaining collapsed distinct header symbols")
 
     return 0
 

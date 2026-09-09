@@ -311,6 +311,9 @@ int main(void)
     fprintf(fp, "  end\n");
     fprintf(fp, "  return {code = 0, message = string.format(\"discount=%%.2f;tier=%%s\", ratio, tier)}\n");
     fprintf(fp, "end\n");
+    fprintf(fp, "function numeric_error(args) return -7 end\n");
+    fprintf(fp, "function throwing_result(args) return setmetatable({}, {__index = function() error('result index failure') end}) end\n");
+    fprintf(fp, "function accept_large_input(args) return {code = 0, message = 'ok'} end\n");
     fclose(fp);
 
     sts = ENT_ScriptReload(scriptFile);
@@ -355,6 +358,51 @@ int main(void)
     {
         remove(scriptPath);
         return EXIT_FAILURE;
+    }
+
+    sts = ENT_ScriptCall("numeric_error", NULL, &out);
+    if(expect_true(sts == ENT_SYS_NORMAL && out.code == -7 && out.message[0] == '\0',
+                   "numeric Lua results should remain numeric error codes") != 0)
+    {
+        remove(scriptPath);
+        return EXIT_FAILURE;
+    }
+
+    if(expect_true(ENT_ScriptCall("throwing_result", NULL, &out) == ENT_SCR_RUNTIME_FAILED,
+                   "errors raised while reading a returned table should stay inside the protected call") != 0)
+    {
+        remove(scriptPath);
+        return EXIT_FAILURE;
+    }
+
+    {
+        const size_t largeValueSize = (size_t)20u * 1024u * 1024u;
+        char* largeValue = (char*)malloc(largeValueSize + 1u);
+        ENT_SCRIPT_KV_T largeKv;
+        ENT_SCRIPT_ARG_T largeIn;
+
+        if(expect_true(largeValue != NULL, "test should allocate a large host-side script argument") != 0)
+        {
+            remove(scriptPath);
+            return EXIT_FAILURE;
+        }
+        memset(largeValue, 'x', largeValueSize);
+        largeValue[largeValueSize] = '\0';
+        memset(&largeKv, 0, sizeof(largeKv));
+        largeKv.key = "blob";
+        largeKv.type = ENT_SCRIPT_ARG_STRING_E;
+        largeKv.value = largeValue;
+        largeIn.items = &largeKv;
+        largeIn.count = 1u;
+
+        sts = ENT_ScriptCall("accept_large_input", &largeIn, &out);
+        free(largeValue);
+        if(expect_true(sts == ENT_SCR_RUNTIME_FAILED,
+                       "oversized input strings should return a runtime error instead of aborting the host") != 0)
+        {
+            remove(scriptPath);
+            return EXIT_FAILURE;
+        }
     }
 
     if(expect_true(ENT_ScriptCall("missing_fn", &in, &out) == ENT_SCR_FUNC_NOTFOUND,

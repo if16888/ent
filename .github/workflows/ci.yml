@@ -74,6 +74,7 @@ jobs:
         run: >-
           cmake -S . -B "$BUILD_DIR" -G Ninja
           -DCMAKE_BUILD_TYPE=Debug
+          -DENT_ENABLE_LUA=ON
           -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g"
           -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
           -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address,undefined"
@@ -90,7 +91,7 @@ jobs:
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1:log_path=${{ github.workspace }}/ci-logs/asan-ubsan/ubsan
         run: >-
           ctest --test-dir "$BUILD_DIR" --output-on-failure
-          -R "^(test_ent_init|test_ent_init_concurrency|test_ent_log|test_ent_db|test_ent_thread|test_security)$"
+          -R "^(test_ent_init|test_ent_init_concurrency|test_ent_log|test_ent_db|test_ent_db_reinit_failure|test_ent_script|test_ent_script_return_compat|test_ent_thread|test_security|test_utl_timer|test_utl_timer_rt_self_delete|test_utl_tpool_integration)$"
 
       - name: Upload sanitizer logs
         if: always()
@@ -137,7 +138,7 @@ jobs:
           mkdir -p "$CI_LOG_DIR"
           set +e
           ctest --test-dir "$BUILD_DIR" --output-on-failure -V \
-            -R "^(test_ent_init_concurrency|test_ent_log|test_ent_db|test_ent_thread|test_utl_tpool_integration)$" \
+            -R "^(test_ent_init_concurrency|test_ent_log|test_ent_db|test_ent_thread|test_utl_timer_rt_self_delete|test_utl_tpool_integration)$" \
             2>&1 | tee "$CI_LOG_DIR/ctest-tsan.log"
           test "${PIPESTATUS[0]}" -eq 0
 
@@ -240,7 +241,7 @@ jobs:
           Push-Location $env:BUILD_DIR
           try {
             ctest -C Release --output-on-failure -V `
-              -R "^(test_ent_init|test_ent_init_concurrency|test_ent_log|test_ent_db|test_ent_thread|test_ent_thread_failures|test_utl_tpool_integration)$" `
+              -R "^(test_ent_init|test_ent_init_concurrency|test_ent_log|test_ent_db|test_ent_db_reinit_failure|test_ent_thread|test_ent_thread_failures|test_utl_timer|test_utl_tpool_integration)$" `
               *>&1 | Tee-Object -FilePath (Join-Path $logDir "ctest-windows-asan.log")
             if ($LASTEXITCODE -ne 0) {
               exit $LASTEXITCODE

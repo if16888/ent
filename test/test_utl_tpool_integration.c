@@ -22,6 +22,13 @@ typedef struct
     int      slow_started;
 } TPOOL_INTEGRATION_PROBE;
 
+typedef struct
+{
+    UTL_TPOOL* pool;
+    TPOOL_INTEGRATION_PROBE* completion;
+    volatile MSG_ID_T close_status;
+} TPOOL_SELF_CLOSE_PROBE;
+
 static int expect_true(int condition, const char* message)
 {
     if(!condition)
@@ -241,6 +248,31 @@ static MSG_ID_T slow_task_end_cb(void* data, MSG_ID_T* retVal)
     return ENT_SYS_NORMAL;
 }
 
+static MSG_ID_T self_close_task_cb(void* data)
+{
+    TPOOL_SELF_CLOSE_PROBE* probe = (TPOOL_SELF_CLOSE_PROBE*)data;
+
+    probe->close_status = UTL_TPoolClose(probe->pool);
+    return 13;
+}
+
+static MSG_ID_T self_close_task_end_cb(void* data, MSG_ID_T* retVal)
+{
+    TPOOL_SELF_CLOSE_PROBE* probe = (TPOOL_SELF_CLOSE_PROBE*)data;
+    TPOOL_INTEGRATION_PROBE* completion = probe->completion;
+
+    UTL_LockEnter(completion->lock);
+    completion->completed++;
+    completion->end_completed++;
+    if(retVal != NULL)
+    {
+        completion->ret_sum += *retVal;
+    }
+    UTL_CVWakeAll(completion->cv);
+    UTL_LockLeave(completion->lock);
+    return ENT_SYS_NORMAL;
+}
+
 static int test_real_tpool_executes_multiple_tasks(void)
 {
     enum { TASK_COUNT = 8 };
@@ -363,6 +395,78 @@ static int test_real_tpool_close_waits_for_running_task(void)
     return failures == 0 ? 0 : 1;
 }
 
+static int test_real_tpool_rejects_self_close_without_freeing_pool(void)
+{
+    UTL_TPOOL pool = NULL;
+    TPOOL_INTEGRATION_PROBE completion;
+    TPOOL_SELF_CLOSE_PROBE self_probe;
+    MSG_ID_T retVal = -1;
+    int failures = 0;
+
+    if(expect_true(probe_init(&completion, 1) == ENT_SYS_NORMAL,
+                   "probe_init should create completion state for self-close test") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(UTL_TPoolInit(&pool, 1) == ENT_SYS_NORMAL,
+                   "UTL_TPoolInit should create a one-worker pool for self-close test") != 0)
+    {
+        probe_close(&completion);
+        return 1;
+    }
+
+    memset(&self_probe, 0, sizeof(self_probe));
+    self_probe.pool = &pool;
+    self_probe.completion = &completion;
+    self_probe.close_status = -999;
+
+    if(expect_true(UTL_TPoolAddTask(pool,
+                                    self_close_task_cb,
+                                    self_close_task_end_cb,
+                                    &self_probe,
+                                    &retVal) == ENT_SYS_NORMAL,
+                   "UTL_TPoolAddTask should accept self-close regression task") != 0)
+    {
+        UTL_TPoolClose(&pool);
+        probe_close(&completion);
+        return 1;
+    }
+
+    if(expect_true(wait_for_completion(&completion, 1, 3000) == 1,
+                   "self-close task should return normally instead of freeing its worker pool") != 0)
+    {
+        failures++;
+    }
+
+    if(failures == 0 && expect_true(self_probe.close_status == ENT_THRD_IN_USE,
+                                    "worker should reject closing its own thread pool") != 0)
+    {
+        failures++;
+    }
+
+    if(failures == 0 && expect_true(pool != NULL,
+                                    "rejected self-close should leave the pool live for external cleanup") != 0)
+    {
+        failures++;
+    }
+
+    if(failures == 0 && expect_true(retVal == 13 && completion.end_completed == 1,
+                                    "task and end callback should finish after rejected self-close") != 0)
+    {
+        failures++;
+    }
+
+    if(expect_true(UTL_TPoolClose(&pool) == ENT_SYS_NORMAL,
+                   "an external thread should still be able to close the pool after rejected self-close") != 0)
+    {
+        failures++;
+    }
+
+    probe_close(&completion);
+    return failures == 0 ? 0 : 1;
+}
+
 static int test_real_tpool_rejects_add_after_close(void)
 {
     UTL_TPOOL pool = NULL;
@@ -402,6 +506,7 @@ int main(void)
 
     failures += test_real_tpool_executes_multiple_tasks();
     failures += test_real_tpool_close_waits_for_running_task();
+    failures += test_real_tpool_rejects_self_close_without_freeing_pool();
     failures += test_real_tpool_rejects_add_after_close();
 
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

@@ -80,6 +80,12 @@ typedef struct
     time_t            taskStartTime;
     ENT_THREAD_ID     thId;
     UTL_TPOOL_CTX*    pool;
+#ifdef _WIN32
+    DWORD             workerThreadId;
+#else
+    pthread_t         workerThreadId;
+#endif
+    BOOL              workerThreadIdValid;
 }UTL_TPOOL_THREAD;
 
 static int sPoolIdx;
@@ -167,6 +173,39 @@ static void iUTL_TPoolRegistryRemoveLocked(UTL_TPOOL_CTX* poolCtx)
     }
 }
 
+static BOOL iUTL_TPoolIsCurrentWorkerLocked(UTL_TPOOL_CTX* poolCtx)
+{
+    DLL_D_HDR* curr = NULL;
+
+    if(poolCtx == NULL)
+    {
+        return FALSE;
+    }
+
+    curr = poolCtx->threadHeader.fw_ptr;
+    while(curr != &poolCtx->threadHeader)
+    {
+        UTL_TPOOL_THREAD* thCtx = (UTL_TPOOL_THREAD*)curr;
+        if(thCtx->workerThreadIdValid)
+        {
+#ifdef _WIN32
+            if(thCtx->workerThreadId == GetCurrentThreadId())
+            {
+                return TRUE;
+            }
+#else
+            if(pthread_equal(thCtx->workerThreadId, pthread_self()))
+            {
+                return TRUE;
+            }
+#endif
+        }
+        curr = curr->fw_ptr;
+    }
+
+    return FALSE;
+}
+
 static MSG_ID_T iUTL_TPoolAcquireOp(UTL_TPOOL pool, UTL_TPOOL_CTX** outPool)
 {
     UTL_TPOOL_CTX* poolCtx = NULL;
@@ -236,6 +275,16 @@ static MSG_ID_T iUTL_TPoolBeginClose(UTL_TPOOL pool, UTL_TPOOL_CTX** outPool)
         iUTL_TPoolRegistryUnlock();
         return ENT_SYS_NORMAL;
     }
+
+    UTL_LockEnter(poolCtx->taskLock);
+    if(iUTL_TPoolIsCurrentWorkerLocked(poolCtx))
+    {
+        UTL_LockLeave(poolCtx->taskLock);
+        iUTL_TPoolRegistryUnlock();
+        return ENT_THRD_IN_USE;
+    }
+    UTL_LockLeave(poolCtx->taskLock);
+
     poolCtx->state = UTL_TPOOL_STATE_CLOSING_E;
     *outPool = poolCtx;
     iUTL_TPoolRegistryUnlock();
@@ -293,6 +342,15 @@ static DWORD iUTL_TPoolTaskPro(void* data)
 
     thCtx = (UTL_TPOOL_THREAD*)data;
     poolCtx = thCtx->pool;
+
+    UTL_LockEnter(poolCtx->taskLock);
+#ifdef _WIN32
+    thCtx->workerThreadId = GetCurrentThreadId();
+#else
+    thCtx->workerThreadId = pthread_self();
+#endif
+    thCtx->workerThreadIdValid = TRUE;
+    UTL_LockLeave(poolCtx->taskLock);
 
     do
     {

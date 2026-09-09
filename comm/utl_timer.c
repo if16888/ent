@@ -91,16 +91,33 @@ static bool          sUtilTimerInit;
 static TIMER_TH_CTX  sTimerCtx;
 #ifdef _WIN32
 static SRWLOCK       sTimerLifecycleLock = SRWLOCK_INIT;
+static __declspec(thread) unsigned int sTimerCallbackDepth = 0;
 #else
 static pthread_mutex_t sTimerLifecycleLock = PTHREAD_MUTEX_INITIALIZER;
+static __thread unsigned int sTimerCallbackDepth = 0;
 #endif
 static BOOL          sTimerClosing = FALSE;
 static unsigned int  sTimerLifecycleOps = 0;
+#if ENT_TMR_IMPL_LINUX && defined(ENT_TIMER_TEST_HOOKS)
+static unsigned int  sTimerRtLiveContexts = 0;
+#endif
 
 static MSG_ID_T iUTL_TimerDeleteTimer(UTL_TIMER_T* pTimer);
 #ifndef _WIN32
 static void iUTL_TimerSleepMs(int ms);
 #endif
+
+static void iUTL_TimerInvokeCallback(UTL_TIMER_EV_F callback, void* data)
+{
+    if(callback == NULL)
+    {
+        return;
+    }
+
+    sTimerCallbackDepth++;
+    (void)callback(data);
+    sTimerCallbackDepth--;
+}
 
 static void iUTL_TimerLifecycleLockEnter(void)
 {
@@ -134,6 +151,13 @@ static BOOL iUTL_TimerLifecycleBeginOp(void)
     return canRun;
 }
 
+static void iUTL_TimerLifecycleRetainOp(void)
+{
+    iUTL_TimerLifecycleLockEnter();
+    sTimerLifecycleOps++;
+    iUTL_TimerLifecycleLockLeave();
+}
+
 static void iUTL_TimerLifecycleEndOp(void)
 {
     iUTL_TimerLifecycleLockEnter();
@@ -164,6 +188,38 @@ static void iUTL_TimerLifecycleWaitOps(void)
 #endif
     }
 }
+
+#if ENT_TMR_IMPL_LINUX && defined(ENT_TIMER_TEST_HOOKS)
+static void iUTL_TimerTestRtContextCreated(void)
+{
+    iUTL_TimerLifecycleLockEnter();
+    sTimerRtLiveContexts++;
+    iUTL_TimerLifecycleLockLeave();
+}
+
+static void iUTL_TimerTestRtContextDestroyed(void)
+{
+    iUTL_TimerLifecycleLockEnter();
+    if(sTimerRtLiveContexts > 0)
+    {
+        sTimerRtLiveContexts--;
+    }
+    iUTL_TimerLifecycleLockLeave();
+}
+
+int iUTL_TimerTestRtLiveContextCount(void)
+{
+    unsigned int count;
+
+    iUTL_TimerLifecycleLockEnter();
+    count = sTimerRtLiveContexts;
+    iUTL_TimerLifecycleLockLeave();
+    return (int)count;
+}
+#else
+#define iUTL_TimerTestRtContextCreated() ((void)0)
+#define iUTL_TimerTestRtContextDestroyed() ((void)0)
+#endif
 
 #if ENT_TMR_IMPL_LINUX
 static long long iUTL_TimerMonotonicNs(void);
@@ -261,7 +317,7 @@ static void* iUTL_TimerThread(void* data)
 
         if(timerCb)
         {
-            timerCb(timerData);
+            iUTL_TimerInvokeCallback(timerCb, timerData);
         }
 
         if(timerCtx->selfDeleteRequested)
@@ -304,6 +360,12 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerClose()
 {
     MSG_ID_T     sts = ENT_SYS_NORMAL;
     DLL_D_HDR*   tmpDll = NULL;
+
+    if(sTimerCallbackDepth > 0)
+    {
+        IENT_LOG_ERROR("UTL_TimerClose cannot be called from a timer callback\n");
+        return ENT_TMR_THREAD_FAILED;
+    }
 
     iUTL_TimerLifecycleLockEnter();
     if(!sUtilTimerInit)
@@ -365,7 +427,7 @@ static void CALLBACK iUTL_TimerWinCb(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser,
 
     if(timerCtx->timer_ev_cb)
     {
-        timerCtx->timer_ev_cb(timerCtx->data);
+        iUTL_TimerInvokeCallback(timerCtx->timer_ev_cb, timerCtx->data);
     }
 }
 
@@ -560,6 +622,26 @@ static long long iUTL_TimerMonotonicNs(void)
     return (long long)ts.tv_sec * 1000000000LL + (long long)ts.tv_nsec;
 }
 
+static BOOL iUTL_TimerRtStopRequested(PTIMER_CTX_T timerCtx)
+{
+    BOOL stopWorker;
+
+    UTL_LockEnter(timerCtx->cbLock);
+    stopWorker = timerCtx->stopWorker;
+    UTL_LockLeave(timerCtx->cbLock);
+    return stopWorker;
+}
+
+static void iUTL_TimerRtRequestStop(PTIMER_CTX_T timerCtx)
+{
+    UTL_LockEnter(timerCtx->cbLock);
+    timerCtx->isEnable = false;
+    timerCtx->stopWorker = TRUE;
+    timerCtx->stopCallbackWorker = TRUE;
+    UTL_LockLeave(timerCtx->cbLock);
+    UTL_CVWakeAll(timerCtx->cbCv);
+}
+
 static void* iUTL_TimerRtWorker(void* data)
 {
     PTIMER_CTX_T timerCtx = (PTIMER_CTX_T)data;
@@ -570,12 +652,12 @@ static void* iUTL_TimerRtWorker(void* data)
     }
 
     timerCtx->next_deadline_ns = iUTL_TimerMonotonicNs() + timerCtx->period_ns;
-    while(!timerCtx->stopWorker)
+    while(!iUTL_TimerRtStopRequested(timerCtx))
     {
         long long deadline = timerCtx->next_deadline_ns;
         int sleepFailed = 0;
 
-        while(!timerCtx->stopWorker)
+        while(!iUTL_TimerRtStopRequested(timerCtx))
         {
             struct timespec ts;
             long long now = iUTL_TimerMonotonicNs();
@@ -603,7 +685,7 @@ static void* iUTL_TimerRtWorker(void* data)
             {
                 sleepSts = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
             }
-            while(sleepSts == EINTR && !timerCtx->stopWorker);
+            while(sleepSts == EINTR && !iUTL_TimerRtStopRequested(timerCtx));
 
             if(sleepSts != 0 && sleepSts != EINTR)
             {
@@ -613,23 +695,25 @@ static void* iUTL_TimerRtWorker(void* data)
             }
         }
 
-        if(sleepFailed)
-        {
-            break;
-        }
-
-        if(timerCtx->stopWorker)
+        if(sleepFailed || iUTL_TimerRtStopRequested(timerCtx))
         {
             break;
         }
 
         UTL_LockEnter(timerCtx->cbLock);
-        BOOL needWake = (timerCtx->pendingCallbacks == 0) ? TRUE : FALSE;
-        timerCtx->pendingCallbacks++;
-        UTL_LockLeave(timerCtx->cbLock);
-        if(needWake)
+        if(timerCtx->stopWorker)
         {
-            UTL_CVWake(timerCtx->cbCv);
+            UTL_LockLeave(timerCtx->cbLock);
+            break;
+        }
+        {
+            BOOL needWake = (timerCtx->pendingCallbacks == 0) ? TRUE : FALSE;
+            timerCtx->pendingCallbacks++;
+            UTL_LockLeave(timerCtx->cbLock);
+            if(needWake)
+            {
+                UTL_CVWake(timerCtx->cbCv);
+            }
         }
 
         if(timerCtx->timerType & UTL_TIMER_E_ONESHOT)
@@ -646,6 +730,7 @@ static void* iUTL_TimerRtWorker(void* data)
 static void* iUTL_TimerCallbackWorker(void* data)
 {
     PTIMER_CTX_T timerCtx = (PTIMER_CTX_T)data;
+    BOOL selfDeleteCleanup = FALSE;
 
     if(timerCtx == NULL || timerCtx->tag != UTL_TIMER_TAG)
     {
@@ -685,21 +770,45 @@ static void* iUTL_TimerCallbackWorker(void* data)
 
         while(callbackBatch > 0)
         {
+            BOOL shouldStopBatch = FALSE;
+
             if(timerCb)
             {
-                timerCb(timerData);
+                iUTL_TimerInvokeCallback(timerCb, timerData);
             }
             callbackBatch--;
-            if(oneshot)
+
+            UTL_LockEnter(timerCtx->cbLock);
+            shouldStopBatch = (timerCtx->selfDeleteRequested ||
+                               timerCtx->stopCallbackWorker) ? TRUE : FALSE;
+            UTL_LockLeave(timerCtx->cbLock);
+            if(shouldStopBatch || oneshot)
             {
                 break;
             }
         }
 
-        if(oneshot)
+        UTL_LockEnter(timerCtx->cbLock);
+        selfDeleteCleanup = timerCtx->selfDeleteRequested;
+        stopCallbackWorker = timerCtx->stopCallbackWorker;
+        UTL_LockLeave(timerCtx->cbLock);
+        if(selfDeleteCleanup || stopCallbackWorker || oneshot)
         {
             break;
         }
+    }
+
+    UTL_LockEnter(timerCtx->cbLock);
+    selfDeleteCleanup = timerCtx->selfDeleteRequested;
+    UTL_LockLeave(timerCtx->cbLock);
+    if(selfDeleteCleanup)
+    {
+        UTL_CVClose(&timerCtx->cbCv);
+        UTL_LockClose(&timerCtx->cbLock);
+        iUTL_TimerTestRtContextDestroyed();
+        memset(timerCtx,0,sizeof(TIMER_CTX_T));
+        free(timerCtx);
+        iUTL_TimerLifecycleEndOp();
     }
 
     return NULL;
@@ -790,6 +899,7 @@ static MSG_ID_T iUTL_TimerCreateRt(UTL_TIMER_T* pTimer,unsigned int type,int per
         goto CREATE_FAILED;
     }
     rtWorkerStarted = TRUE;
+    iUTL_TimerTestRtContextCreated();
 
     if(pTimer)
     {
@@ -799,10 +909,7 @@ static MSG_ID_T iUTL_TimerCreateRt(UTL_TIMER_T* pTimer,unsigned int type,int per
     return ENT_SYS_NORMAL;
 
 CREATE_FAILED:
-    timerCtx->isEnable = false;
-    timerCtx->stopWorker = TRUE;
-    timerCtx->stopCallbackWorker = TRUE;
-    UTL_CVWakeAll(timerCtx->cbCv);
+    iUTL_TimerRtRequestStop(timerCtx);
     if(rtWorkerStarted)
     {
         pthread_join(timerCtx->rtWorker, NULL);
@@ -829,6 +936,7 @@ static MSG_ID_T iUTL_TimerDeleteRt(PTIMER_CTX_T timerCtx)
 {
     MSG_ID_T     sts = 0;
     DLL_D_HDR*   tmpDll = NULL;
+    BOOL         selfDelete = FALSE;
 
     if(timerCtx == NULL || timerCtx->tag != UTL_TIMER_TAG)
     {
@@ -836,12 +944,39 @@ static MSG_ID_T iUTL_TimerDeleteRt(PTIMER_CTX_T timerCtx)
         return ENT_TMR_BAD_ARGUMENT;
     }
 
-    timerCtx->isEnable = false;
-    timerCtx->stopWorker = TRUE;
-    timerCtx->stopCallbackWorker = TRUE;
-    UTL_CVWakeAll(timerCtx->cbCv);
-
+    selfDelete = pthread_equal(pthread_self(), timerCtx->cbWorker) ? TRUE : FALSE;
+    iUTL_TimerRtRequestStop(timerCtx);
     pthread_join(timerCtx->rtWorker, NULL);
+
+    if(selfDelete)
+    {
+        UTL_LockEnter(sTimerCtx.dllLock);
+        sts = UTL_DllRemCurr((DLL_D_HDR*)timerCtx,&tmpDll);
+        UTL_LockLeave(sTimerCtx.dllLock);
+        if(sts < 0)
+        {
+            return ENT_TMR_LIST_FAILED;
+        }
+
+        if(pthread_detach(timerCtx->cbWorker) != 0)
+        {
+            UTL_LockEnter(sTimerCtx.dllLock);
+            sts = UTL_DllInsHead(&sTimerCtx.dllHeader,(DLL_D_HDR*)timerCtx);
+            UTL_LockLeave(sTimerCtx.dllLock);
+            if(sts < 0)
+            {
+                return ENT_TMR_LIST_FAILED;
+            }
+            return ENT_TMR_THREAD_FAILED;
+        }
+
+        iUTL_TimerLifecycleRetainOp();
+        UTL_LockEnter(timerCtx->cbLock);
+        timerCtx->selfDeleteRequested = TRUE;
+        UTL_LockLeave(timerCtx->cbLock);
+        return ENT_SYS_NORMAL;
+    }
+
     pthread_join(timerCtx->cbWorker, NULL);
 
     UTL_LockEnter(sTimerCtx.dllLock);
@@ -850,6 +985,7 @@ static MSG_ID_T iUTL_TimerDeleteRt(PTIMER_CTX_T timerCtx)
 
     UTL_CVClose(&timerCtx->cbCv);
     UTL_LockClose(&timerCtx->cbLock);
+    iUTL_TimerTestRtContextDestroyed();
     memset(timerCtx,0,sizeof(TIMER_CTX_T));
     free(timerCtx);
     if(sts < 0)
