@@ -43,6 +43,60 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Inject bounded-wait timer test candidate
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("test/test_utl_timer.c")
+          text = path.read_text()
+          replacements = [
+              (
+                  "    int beforeDelete = 0;\n    int afterDelete = 0;\n",
+                  "    int beforeDelete = 0;\n    int afterDelete = 0;\n    int i = 0;\n",
+              ),
+              (
+                  "    UTL_Sleep(90);\n    beforeDelete = hits;\n",
+                  "    for(i = 0; i < 500 && hits < 2; ++i)\n    {\n        UTL_Sleep(1);\n    }\n    beforeDelete = hits;\n",
+              ),
+              (
+                  "    int hits = 0;\n    int before_delete = 0;\n\n    if(expect_true(UTL_TimerInit() == 0, \"UTL_TimerInit should initialize before Linux RT periodic timer test\") != 0)\n",
+                  "    int hits = 0;\n    int before_delete = 0;\n    int i = 0;\n\n    if(expect_true(UTL_TimerInit() == 0, \"UTL_TimerInit should initialize before Linux RT periodic timer test\") != 0)\n",
+              ),
+              (
+                  "    UTL_Sleep(40);\n    before_delete = hits;\n",
+                  "    for(i = 0; i < 500 && hits < 3; ++i)\n    {\n        UTL_Sleep(1);\n    }\n    before_delete = hits;\n",
+              ),
+              (
+                  "    TIMER_SELF_DELETE_PROBE probe;\n\n    memset(&probe, 0, sizeof(probe));\n    probe.delete_status = -999;\n\n    if(expect_true(UTL_TimerInit() == 0, \"UTL_TimerInit should initialize before RT self-delete callback test\") != 0)\n",
+                  "    TIMER_SELF_DELETE_PROBE probe;\n    int i = 0;\n\n    memset(&probe, 0, sizeof(probe));\n    probe.delete_status = -999;\n\n    if(expect_true(UTL_TimerInit() == 0, \"UTL_TimerInit should initialize before RT self-delete callback test\") != 0)\n",
+              ),
+              (
+                  "    UTL_Sleep(80);\n\n    if(expect_true(probe.hits == 1, \"RT self-delete callback timer should fire exactly once\") != 0)\n",
+                  "    for(i = 0; i < 500 && probe.delete_status == -999; ++i)\n    {\n        UTL_Sleep(1);\n    }\n    UTL_Sleep(20);\n\n    if(expect_true(probe.hits == 1, \"RT self-delete callback timer should fire exactly once\") != 0)\n",
+              ),
+              (
+                  "    TIMER_SELF_DELETE_PROBE probe;\n\n    memset(&probe, 0, sizeof(probe));\n    probe.delete_status = -999;\n\n    if(expect_true(UTL_TimerInit() == 0, \"UTL_TimerInit should initialize before self-delete callback test\") != 0)\n",
+                  "    TIMER_SELF_DELETE_PROBE probe;\n    int i = 0;\n\n    memset(&probe, 0, sizeof(probe));\n    probe.delete_status = -999;\n\n    if(expect_true(UTL_TimerInit() == 0, \"UTL_TimerInit should initialize before self-delete callback test\") != 0)\n",
+              ),
+              (
+                  "    UTL_Sleep(80);\n\n    if(expect_true(probe.hits == 1, \"self-delete callback timer should fire exactly once\") != 0)\n",
+                  "    for(i = 0; i < 500 && probe.delete_status == -999; ++i)\n    {\n        UTL_Sleep(1);\n    }\n    UTL_Sleep(20);\n\n    if(expect_true(probe.hits == 1, \"self-delete callback timer should fire exactly once\") != 0)\n",
+              ),
+          ]
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"candidate patch expected one match, found {count}: {old[:80]!r}")
+              text = text.replace(old, new, 1)
+
+          path.write_text(text)
+          PY
+          git diff --check
+          git diff -- test/test_utl_timer.c
+
       - name: Clean persistent workspace outputs
         shell: bash
         run: rm -rf "$BUILD_DIR" "$CI_LOG_DIR"
