@@ -14,13 +14,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  oracle-x64-asan-timer:
-    name: Oracle self-hosted Linux X64 ASan timer stress
+  oracle-x64-asan-ubsan:
+    name: Oracle self-hosted Linux X64 ASan + UBSan
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
-      BUILD_DIR: build-self-hosted-asan-timer
-      CI_LOG_DIR: ${{ github.workspace }}/ci-logs/self-hosted-asan-timer
+      BUILD_DIR: build-self-hosted-asan-ubsan
+      CI_LOG_DIR: ${{ github.workspace }}/ci-logs/self-hosted-asan-ubsan
       CMAKE_BUILD_PARALLEL_LEVEL: 1
       CTEST_PARALLEL_LEVEL: 1
 
@@ -52,38 +52,22 @@ jobs:
           path = Path("test/test_utl_timer.c")
           text = path.read_text()
           replacements = [
-              (
-                  "    int beforeDelete = 0;\n    int afterDelete = 0;\n",
-                  "    int beforeDelete = 0;\n    int afterDelete = 0;\n    int i = 0;\n",
-              ),
-              (
-                  "    UTL_Sleep(90);\n    beforeDelete = hits;\n",
-                  "    for(i = 0; i < 500 && hits < 2; ++i)\n    {\n        UTL_Sleep(1);\n    }\n    beforeDelete = hits;\n",
-              ),
-              (
-                  "    int hits = 0;\n    int before_delete = 0;\n\n    if(expect_true(UTL_TimerInit() == 0, \"UTL_TimerInit should initialize before Linux RT periodic timer test\") != 0)\n",
-                  "    int hits = 0;\n    int before_delete = 0;\n    int i = 0;\n\n    if(expect_true(UTL_TimerInit() == 0, \"UTL_TimerInit should initialize before Linux RT periodic timer test\") != 0)\n",
-              ),
-              (
-                  "    UTL_Sleep(40);\n    before_delete = hits;\n",
-                  "    for(i = 0; i < 500 && hits < 3; ++i)\n    {\n        UTL_Sleep(1);\n    }\n    before_delete = hits;\n",
-              ),
-              (
-                  "    TIMER_SELF_DELETE_PROBE probe;\n\n    memset(&probe, 0, sizeof(probe));\n    probe.delete_status = -999;\n\n    if(expect_true(UTL_TimerInit() == 0, \"UTL_TimerInit should initialize before RT self-delete callback test\") != 0)\n",
-                  "    TIMER_SELF_DELETE_PROBE probe;\n    int i = 0;\n\n    memset(&probe, 0, sizeof(probe));\n    probe.delete_status = -999;\n\n    if(expect_true(UTL_TimerInit() == 0, \"UTL_TimerInit should initialize before RT self-delete callback test\") != 0)\n",
-              ),
-              (
-                  "    UTL_Sleep(80);\n\n    if(expect_true(probe.hits == 1, \"RT self-delete callback timer should fire exactly once\") != 0)\n",
-                  "    for(i = 0; i < 500 && probe.delete_status == -999; ++i)\n    {\n        UTL_Sleep(1);\n    }\n    UTL_Sleep(20);\n\n    if(expect_true(probe.hits == 1, \"RT self-delete callback timer should fire exactly once\") != 0)\n",
-              ),
-              (
-                  "    TIMER_SELF_DELETE_PROBE probe;\n\n    memset(&probe, 0, sizeof(probe));\n    probe.delete_status = -999;\n\n    if(expect_true(UTL_TimerInit() == 0, \"UTL_TimerInit should initialize before self-delete callback test\") != 0)\n",
-                  "    TIMER_SELF_DELETE_PROBE probe;\n    int i = 0;\n\n    memset(&probe, 0, sizeof(probe));\n    probe.delete_status = -999;\n\n    if(expect_true(UTL_TimerInit() == 0, \"UTL_TimerInit should initialize before self-delete callback test\") != 0)\n",
-              ),
-              (
-                  "    UTL_Sleep(80);\n\n    if(expect_true(probe.hits == 1, \"self-delete callback timer should fire exactly once\") != 0)\n",
-                  "    for(i = 0; i < 500 && probe.delete_status == -999; ++i)\n    {\n        UTL_Sleep(1);\n    }\n    UTL_Sleep(20);\n\n    if(expect_true(probe.hits == 1, \"self-delete callback timer should fire exactly once\") != 0)\n",
-              ),
+              ("    int beforeDelete = 0;\n    int afterDelete = 0;\n",
+               "    int beforeDelete = 0;\n    int afterDelete = 0;\n    int i = 0;\n"),
+              ("    UTL_Sleep(90);\n    beforeDelete = hits;\n",
+               "    for(i = 0; i < 500 && hits < 2; ++i)\n    {\n        UTL_Sleep(1);\n    }\n    beforeDelete = hits;\n"),
+              ("    int hits = 0;\n    int before_delete = 0;\n\n    if(expect_true(UTL_TimerInit() == 0, \"UTL_TimerInit should initialize before Linux RT periodic timer test\") != 0)\n",
+               "    int hits = 0;\n    int before_delete = 0;\n    int i = 0;\n\n    if(expect_true(UTL_TimerInit() == 0, \"UTL_TimerInit should initialize before Linux RT periodic timer test\") != 0)\n"),
+              ("    UTL_Sleep(40);\n    before_delete = hits;\n",
+               "    for(i = 0; i < 500 && hits < 3; ++i)\n    {\n        UTL_Sleep(1);\n    }\n    before_delete = hits;\n"),
+              ("    TIMER_SELF_DELETE_PROBE probe;\n\n    memset(&probe, 0, sizeof(probe));\n    probe.delete_status = -999;\n\n    if(expect_true(UTL_TimerInit() == 0, \"UTL_TimerInit should initialize before RT self-delete callback test\") != 0)\n",
+               "    TIMER_SELF_DELETE_PROBE probe;\n    int i = 0;\n\n    memset(&probe, 0, sizeof(probe));\n    probe.delete_status = -999;\n\n    if(expect_true(UTL_TimerInit() == 0, \"UTL_TimerInit should initialize before RT self-delete callback test\") != 0)\n"),
+              ("    UTL_Sleep(80);\n\n    if(expect_true(probe.hits == 1, \"RT self-delete callback timer should fire exactly once\") != 0)\n",
+               "    for(i = 0; i < 500 && probe.delete_status == -999; ++i)\n    {\n        UTL_Sleep(1);\n    }\n    UTL_Sleep(20);\n\n    if(expect_true(probe.hits == 1, \"RT self-delete callback timer should fire exactly once\") != 0)\n"),
+              ("    TIMER_SELF_DELETE_PROBE probe;\n\n    memset(&probe, 0, sizeof(probe));\n    probe.delete_status = -999;\n\n    if(expect_true(UTL_TimerInit() == 0, \"UTL_TimerInit should initialize before self-delete callback test\") != 0)\n",
+               "    TIMER_SELF_DELETE_PROBE probe;\n    int i = 0;\n\n    memset(&probe, 0, sizeof(probe));\n    probe.delete_status = -999;\n\n    if(expect_true(UTL_TimerInit() == 0, \"UTL_TimerInit should initialize before self-delete callback test\") != 0)\n"),
+              ("    UTL_Sleep(80);\n\n    if(expect_true(probe.hits == 1, \"self-delete callback timer should fire exactly once\") != 0)\n",
+               "    for(i = 0; i < 500 && probe.delete_status == -999; ++i)\n    {\n        UTL_Sleep(1);\n    }\n    UTL_Sleep(20);\n\n    if(expect_true(probe.hits == 1, \"self-delete callback timer should fire exactly once\") != 0)\n"),
           ]
 
           for old, new in replacements:
@@ -91,11 +75,9 @@ jobs:
               if count != 1:
                   raise SystemExit(f"candidate patch expected one match, found {count}: {old[:80]!r}")
               text = text.replace(old, new, 1)
-
           path.write_text(text)
           PY
           git diff --check
-          git diff -- test/test_utl_timer.c
 
       - name: Clean persistent workspace outputs
         shell: bash
@@ -114,51 +96,48 @@ jobs:
             -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address,undefined" \
             2>&1 | tee "$CI_LOG_DIR/configure.log"
 
-      - name: Build timer target
+      - name: Build ASan + UBSan
         shell: bash
         run: |
           set -o pipefail
-          cmake --build "$BUILD_DIR" --target test_utl_timer --parallel 1 \
+          cmake --build "$BUILD_DIR" --parallel 1 \
             2>&1 | tee "$CI_LOG_DIR/build.log"
 
-      - name: Run timer test 20 times
+      - name: Execute focused lifecycle tests
         shell: bash
         env:
-          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:log_path=${{ github.workspace }}/ci-logs/self-hosted-asan-timer/asan
-          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1:log_path=${{ github.workspace }}/ci-logs/self-hosted-asan-timer/ubsan
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:log_path=${{ github.workspace }}/ci-logs/self-hosted-asan-ubsan/asan
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1:log_path=${{ github.workspace }}/ci-logs/self-hosted-asan-ubsan/ubsan
         run: |
-          set +e
-          failures=0
-          : > "$CI_LOG_DIR/repeats.log"
-          for i in $(seq 1 20); do
-            echo "=== iteration $i ===" | tee -a "$CI_LOG_DIR/repeats.log"
-            "$BUILD_DIR/bin/test_utl_timer" 2>&1 | tee -a "$CI_LOG_DIR/repeats.log"
-            rc=${PIPESTATUS[0]}
-            echo "rc=$rc" | tee -a "$CI_LOG_DIR/repeats.log"
-            if [ "$rc" -ne 0 ]; then
-              failures=$((failures + 1))
-            fi
-          done
-          echo "TIMER_STRESS_FAILURES=$failures/20" | tee -a "$CI_LOG_DIR/repeats.log"
-          test "$failures" -eq 0
+          set -o pipefail
+          ctest --test-dir "$BUILD_DIR" --output-on-failure \
+            -R "^(test_ent_init|test_ent_init_concurrency|test_ent_log|test_ent_db|test_ent_db_reinit_failure|test_ent_script|test_ent_script_return_compat|test_ent_thread|test_security|test_utl_timer|test_utl_timer_rt_self_delete|test_utl_tpool_integration)$" \
+            2>&1 | tee "$CI_LOG_DIR/ctest.log"
+
+      - name: Reject sanitizer findings
+        shell: bash
+        run: |
+          if find "$CI_LOG_DIR" -maxdepth 1 -type f \( -name 'asan.*' -o -name 'ubsan.*' \) -print -quit | grep -q .; then
+            echo "Sanitizer report found"
+            find "$CI_LOG_DIR" -maxdepth 1 -type f \( -name 'asan.*' -o -name 'ubsan.*' \) -print
+            exit 1
+          fi
 
       - name: Final resource snapshot
         if: always()
         shell: bash
         run: |
-          echo '=== memory ==='
           free -h
-          echo '=== disk ==='
           df -h
-          echo '=== sanitizer logs ==='
-          find "$CI_LOG_DIR" -maxdepth 1 -type f -printf '%f\n' 2>/dev/null | sort || true
-          echo '=== recent OOM messages ==='
+          du -sh "$BUILD_DIR" 2>/dev/null || true
           dmesg 2>/dev/null | tail -100 | grep -Ei 'oom|out of memory|killed process' || true
 
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ent-self-hosted-linux-asan-timer-stress-logs
-          path: ${{ env.CI_LOG_DIR }}
+          name: ent-self-hosted-linux-asan-ubsan-logs
+          path: |
+            ${{ env.CI_LOG_DIR }}
+            ${{ env.BUILD_DIR }}/Testing/Temporary
           if-no-files-found: ignore
