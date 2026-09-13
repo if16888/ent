@@ -14,13 +14,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  oracle-x64-asan-ubsan:
-    name: Oracle self-hosted Linux X64 ASan + UBSan
+  oracle-x64-asan-timer:
+    name: Oracle self-hosted Linux X64 ASan timer stress
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 45
+    timeout-minutes: 30
     env:
-      BUILD_DIR: build-self-hosted-asan-ubsan
-      CI_LOG_DIR: ${{ github.workspace }}/ci-logs/self-hosted-asan-ubsan
+      BUILD_DIR: build-self-hosted-asan-timer
+      CI_LOG_DIR: ${{ github.workspace }}/ci-logs/self-hosted-asan-timer
       CMAKE_BUILD_PARALLEL_LEVEL: 1
       CTEST_PARALLEL_LEVEL: 1
 
@@ -31,17 +31,12 @@ jobs:
           set -euxo pipefail
           uname -a
           uname -m
-          id
           nproc
           free -h
           df -h
           gcc --version | head -1
           cmake --version | head -1
-          ctest --version | head -1
           ninja --version
-          pkg-config --modversion sqlite3 || true
-          pkg-config --modversion mysqlclient || true
-          pkg-config --modversion libpq || true
 
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -65,23 +60,33 @@ jobs:
             -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address,undefined" \
             2>&1 | tee "$CI_LOG_DIR/configure.log"
 
-      - name: Build ASan + UBSan
+      - name: Build timer target
         shell: bash
         run: |
           set -o pipefail
-          cmake --build "$BUILD_DIR" --parallel 1 \
+          cmake --build "$BUILD_DIR" --target test_utl_timer --parallel 1 \
             2>&1 | tee "$CI_LOG_DIR/build.log"
 
-      - name: Execute focused lifecycle tests
+      - name: Run timer test 20 times
         shell: bash
         env:
-          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:log_path=${{ github.workspace }}/ci-logs/self-hosted-asan-ubsan/asan
-          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1:log_path=${{ github.workspace }}/ci-logs/self-hosted-asan-ubsan/ubsan
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:log_path=${{ github.workspace }}/ci-logs/self-hosted-asan-timer/asan
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1:log_path=${{ github.workspace }}/ci-logs/self-hosted-asan-timer/ubsan
         run: |
-          set -o pipefail
-          ctest --test-dir "$BUILD_DIR" --output-on-failure \
-            -R "^(test_ent_init|test_ent_init_concurrency|test_ent_log|test_ent_db|test_ent_db_reinit_failure|test_ent_script|test_ent_script_return_compat|test_ent_thread|test_security|test_utl_timer|test_utl_timer_rt_self_delete|test_utl_tpool_integration)$" \
-            2>&1 | tee "$CI_LOG_DIR/ctest.log"
+          set +e
+          failures=0
+          : > "$CI_LOG_DIR/repeats.log"
+          for i in $(seq 1 20); do
+            echo "=== iteration $i ===" | tee -a "$CI_LOG_DIR/repeats.log"
+            "$BUILD_DIR/bin/test_utl_timer" 2>&1 | tee -a "$CI_LOG_DIR/repeats.log"
+            rc=${PIPESTATUS[0]}
+            echo "rc=$rc" | tee -a "$CI_LOG_DIR/repeats.log"
+            if [ "$rc" -ne 0 ]; then
+              failures=$((failures + 1))
+            fi
+          done
+          echo "TIMER_STRESS_FAILURES=$failures/20" | tee -a "$CI_LOG_DIR/repeats.log"
+          test "$failures" -eq 0
 
       - name: Final resource snapshot
         if: always()
@@ -91,8 +96,6 @@ jobs:
           free -h
           echo '=== disk ==='
           df -h
-          echo '=== build size ==='
-          du -sh "$BUILD_DIR" 2>/dev/null || true
           echo '=== sanitizer logs ==='
           find "$CI_LOG_DIR" -maxdepth 1 -type f -printf '%f\n' 2>/dev/null | sort || true
           echo '=== recent OOM messages ==='
@@ -102,8 +105,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ent-self-hosted-linux-asan-ubsan-logs
-          path: |
-            ${{ env.CI_LOG_DIR }}
-            ${{ env.BUILD_DIR }}/Testing/Temporary
+          name: ent-self-hosted-linux-asan-timer-stress-logs
+          path: ${{ env.CI_LOG_DIR }}
           if-no-files-found: ignore
