@@ -1,0 +1,84 @@
+name: Self-hosted Linux trial
+
+on:
+  push:
+    branches:
+      - test/self-hosted-linux-oracle
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: self-hosted-linux-trial-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  oracle-x64:
+    name: Oracle self-hosted Linux X64
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 45
+    env:
+      BUILD_DIR: build-self-hosted
+      CI_LOG_DIR: ${{ github.workspace }}/ci-logs/self-hosted
+      ENT_ENABLE_SQLITE: OFF
+      ENT_ENABLE_MYSQL: OFF
+      ENT_ENABLE_PGSQL: OFF
+      CMAKE_BUILD_PARALLEL_LEVEL: 2
+      CTEST_PARALLEL_LEVEL: 1
+
+    steps:
+      - name: Runner diagnostics
+        shell: bash
+        run: |
+          set -euxo pipefail
+          uname -a
+          uname -m
+          id
+          nproc
+          free -h
+          df -h
+          cmake --version
+          gcc --version | head -1
+          g++ --version | head -1
+          if command -v ninja >/dev/null 2>&1; then ninja --version; else echo 'ninja: not installed'; fi
+          if command -v ctest >/dev/null 2>&1; then ctest --version; fi
+
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Clean persistent workspace outputs
+        shell: bash
+        run: rm -rf "$BUILD_DIR" "$CI_LOG_DIR"
+
+      - name: Configure, build, test, install-consumer and perf
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p "$CI_LOG_DIR"
+          if [[ -x /usr/bin/time ]]; then
+            /usr/bin/time -v ./scripts/run-ci-linux.sh all 2>&1 | tee "$CI_LOG_DIR/self-hosted-all.log"
+          else
+            time ./scripts/run-ci-linux.sh all 2>&1 | tee "$CI_LOG_DIR/self-hosted-all.log"
+          fi
+
+      - name: Final resource snapshot
+        if: always()
+        shell: bash
+        run: |
+          echo '=== memory ==='
+          free -h
+          echo '=== disk ==='
+          df -h
+          echo '=== build size ==='
+          du -sh "$BUILD_DIR" 2>/dev/null || true
+          echo '=== recent OOM messages ==='
+          dmesg 2>/dev/null | tail -100 | grep -Ei 'oom|out of memory|killed process' || true
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ent-self-hosted-linux-trial-logs
+          path: ${{ env.CI_LOG_DIR }}
+          if-no-files-found: ignore
