@@ -24,28 +24,55 @@ jobs:
       ENT_ENABLE_SQLITE: OFF
       ENT_ENABLE_MYSQL: OFF
       ENT_ENABLE_PGSQL: OFF
-      CMAKE_BUILD_PARALLEL_LEVEL: 2
+      CMAKE_BUILD_PARALLEL_LEVEL: 1
       CTEST_PARALLEL_LEVEL: 1
 
     steps:
       - name: Runner diagnostics
         shell: bash
         run: |
-          set -euxo pipefail
+          set -u
           uname -a
           uname -m
           id
           nproc
           free -h
           df -h
-          cmake --version
-          gcc --version | head -1
-          g++ --version | head -1
-          if command -v ninja >/dev/null 2>&1; then ninja --version; else echo 'ninja: not installed'; fi
-          if command -v ctest >/dev/null 2>&1; then ctest --version; fi
+          for tool in python3 gcc g++ cmake ctest ninja; do
+            printf '%-8s ' "$tool"
+            if command -v "$tool" >/dev/null 2>&1; then
+              command -v "$tool"
+            else
+              echo MISSING
+            fi
+          done
+          python3 --version || true
+          gcc --version 2>/dev/null | head -1 || true
+          g++ --version 2>/dev/null | head -1 || true
 
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Bootstrap CMake and Ninja without root
+        shell: bash
+        run: |
+          set -euxo pipefail
+          TOOL_VENV="$RUNNER_TEMP/ent-ci-tools"
+          rm -rf "$TOOL_VENV"
+          python3 -m venv "$TOOL_VENV"
+          "$TOOL_VENV/bin/python" -m pip install --disable-pip-version-check --no-cache-dir --upgrade pip
+          "$TOOL_VENV/bin/python" -m pip install --disable-pip-version-check --no-cache-dir cmake ninja
+          echo "$TOOL_VENV/bin" >> "$GITHUB_PATH"
+
+      - name: Verify build toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --version
+          ctest --version
+          ninja --version
+          gcc --version | head -1
+          g++ --version | head -1
 
       - name: Clean persistent workspace outputs
         shell: bash
