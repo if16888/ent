@@ -21,9 +21,9 @@ jobs:
     env:
       BUILD_DIR: build-self-hosted
       CI_LOG_DIR: ${{ github.workspace }}/ci-logs/self-hosted
-      ENT_ENABLE_SQLITE: OFF
-      ENT_ENABLE_MYSQL: OFF
-      ENT_ENABLE_PGSQL: OFF
+      ENT_ENABLE_SQLITE: ON
+      ENT_ENABLE_MYSQL: ON
+      ENT_ENABLE_PGSQL: ON
       CMAKE_BUILD_PARALLEL_LEVEL: 1
       CTEST_PARALLEL_LEVEL: 1
 
@@ -43,24 +43,34 @@ jobs:
           cmake --version | head -1
           ctest --version | head -1
           ninja --version
+          pkg-config --modversion sqlite3 || true
+          pkg-config --modversion libmariadb || pkg-config --modversion mysqlclient || true
+          pkg-config --modversion libpq || true
 
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
 
       - name: Clean persistent workspace outputs
         shell: bash
         run: rm -rf "$BUILD_DIR" "$CI_LOG_DIR"
 
-      - name: Configure, build, test, install-consumer and perf
+      - name: Configure
         shell: bash
-        run: |
-          set -o pipefail
-          mkdir -p "$CI_LOG_DIR"
-          if [[ -x /usr/bin/time ]]; then
-            /usr/bin/time -v ./scripts/run-ci-linux.sh all 2>&1 | tee "$CI_LOG_DIR/self-hosted-all.log"
-          else
-            time ./scripts/run-ci-linux.sh all 2>&1 | tee "$CI_LOG_DIR/self-hosted-all.log"
-          fi
+        run: ./scripts/run-ci-linux.sh configure
+
+      - name: Build
+        shell: bash
+        run: ./scripts/run-ci-linux.sh build
+
+      - name: Test
+        shell: bash
+        run: ./scripts/run-ci-linux.sh test
+
+      - name: Install and downstream consumer check
+        shell: bash
+        run: ./scripts/run-ci-linux.sh install-consumer
 
       - name: Final resource snapshot
         if: always()
