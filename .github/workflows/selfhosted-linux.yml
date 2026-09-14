@@ -1,0 +1,81 @@
+name: Self-hosted Linux CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: selfhosted-linux-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  selfhosted-linux:
+    name: Self-hosted Linux X64
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 45
+    env:
+      BUILD_DIR: build-selfhosted
+      CI_LOG_DIR: ${{ github.workspace }}/ci-logs/selfhosted-linux
+      CMAKE_BUILD_PARALLEL_LEVEL: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Host preflight
+        run: |
+          set -euxo pipefail
+          uname -a
+          uname -m
+          nproc
+          cmake --version
+          gcc --version
+          free -h
+          df -h / /tmp
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libsqlite3-dev default-libmysqlclient-dev libpq-dev
+
+      - name: Configure
+        run: ./scripts/run-ci-linux.sh configure
+
+      - name: Build
+        run: ./scripts/run-ci-linux.sh build
+
+      - name: Test
+        run: ./scripts/run-ci-linux.sh test
+
+      - name: Install and downstream consumer check
+        run: ./scripts/run-ci-linux.sh install-consumer
+
+      - name: Performance Smoke
+        run: ./scripts/run-ci-linux.sh perf
+
+      - name: Resource snapshot
+        if: always()
+        run: |
+          echo '=== memory ==='
+          free -h || true
+          echo '=== filesystems ==='
+          df -h / /tmp || true
+          echo '=== build size ==='
+          du -sh "$BUILD_DIR" 2>/dev/null || true
+          echo '=== kernel OOM evidence ==='
+          dmesg 2>/dev/null | tail -n 120 | grep -Ei 'oom|out of memory|killed process' || true
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ci-failure-logs-selfhosted-linux
+          path: ${{ env.CI_LOG_DIR }}
+          if-no-files-found: ignore
