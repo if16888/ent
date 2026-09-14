@@ -384,7 +384,6 @@ static int test_periodic_timer_fires_until_deleted(void)
 {
     UTL_TIMER_T timer = NULL;
     int hits = 0;
-    int beforeDelete = 0;
     int afterDelete = 0;
 
     if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before creating a periodic timer") != 0)
@@ -400,20 +399,20 @@ static int test_periodic_timer_fires_until_deleted(void)
     }
 
     UTL_Sleep(90);
-    beforeDelete = hits;
-
-    if(expect_true(beforeDelete >= 2, "A periodic timer should fire multiple times before deletion") != 0)
-    {
-        UTL_TimerClose();
-        return 1;
-    }
 
     if(expect_true(UTL_TimerDelete(&timer) == 0, "UTL_TimerDelete should stop a periodic timer") != 0)
     {
         UTL_TimerClose();
         return 1;
     }
+
+    /* Delete synchronizes with the timer worker; only sample the callback count afterwards. */
     afterDelete = hits;
+    if(expect_true(afterDelete >= 2, "A periodic timer should fire multiple times before deletion") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
 
     UTL_Sleep(80);
 
@@ -536,7 +535,7 @@ static int test_timer_create_us_periodic_timer_fires_on_linux(void)
 #ifdef __linux__
     UTL_TIMER_T timer = NULL;
     int hits = 0;
-    int before_delete = 0;
+    int after_delete = 0;
 
     if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before Linux RT periodic timer test") != 0)
     {
@@ -551,14 +550,6 @@ static int test_timer_create_us_periodic_timer_fires_on_linux(void)
     }
 
     UTL_Sleep(40);
-    before_delete = hits;
-
-    if(expect_true(before_delete >= 3, "A Linux RT periodic timer should fire multiple times") != 0)
-    {
-        UTL_TimerDelete(&timer);
-        UTL_TimerClose();
-        return 1;
-    }
 
     if(expect_true(UTL_TimerDelete(&timer) == 0, "UTL_TimerDelete should stop a Linux RT periodic timer") != 0)
     {
@@ -566,9 +557,17 @@ static int test_timer_create_us_periodic_timer_fires_on_linux(void)
         return 1;
     }
 
+    /* A callback may legally finish while delete is joining the workers. Snapshot only after delete returns. */
+    after_delete = hits;
+    if(expect_true(after_delete >= 3, "A Linux RT periodic timer should fire multiple times") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
     UTL_Sleep(20);
 
-    if(expect_true(hits == before_delete, "A deleted Linux RT periodic timer should stop firing") != 0)
+    if(expect_true(hits == after_delete, "A deleted Linux RT periodic timer should stop firing") != 0)
     {
         UTL_TimerClose();
         return 1;
