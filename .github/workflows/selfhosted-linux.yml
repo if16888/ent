@@ -37,13 +37,17 @@ jobs:
           nproc
           cmake --version
           gcc --version
+          command -v ninja || true
           free -h
           df -h / /tmp
 
-      - name: Install dependencies
+      - name: Dependency inventory
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ninja-build libsqlite3-dev default-libmysqlclient-dev libpq-dev
+          set -euxo pipefail
+          dpkg-query -W ninja-build libsqlite3-dev default-libmysqlclient-dev libpq-dev || true
+          test -f /usr/include/sqlite3.h
+          test -f /usr/include/mysql/mysql.h
+          test -f /usr/include/postgresql/libpq-fe.h
 
       - name: Configure
         run: ./scripts/run-ci-linux.sh configure
