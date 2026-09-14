@@ -58,6 +58,14 @@ jobs:
       - name: Test
         run: ./scripts/run-ci-linux.sh test
 
+      - name: Timer lifecycle stress (50x)
+        run: |
+          set -euxo pipefail
+          for i in $(seq 1 50); do
+            echo "timer stress iteration ${i}/50"
+            "$BUILD_DIR/bin/test_utl_timer"
+          done
+
       - name: Install and downstream consumer check
         run: ./scripts/run-ci-linux.sh install-consumer
 
