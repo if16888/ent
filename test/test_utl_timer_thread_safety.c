@@ -303,6 +303,8 @@ typedef struct TIMER_SELF_DELETE_RESOURCE_PROBE
     pthread_mutex_t lock;
     pthread_cond_t cv;
     UTL_TIMER_T timer;
+    pthread_t callback_thread;
+    int callback_thread_valid;
     int callback_done;
     MSG_ID_T delete_status;
 } TIMER_SELF_DELETE_RESOURCE_PROBE;
@@ -310,7 +312,14 @@ typedef struct TIMER_SELF_DELETE_RESOURCE_PROBE
 static void* self_delete_resource_cb(void* data)
 {
     TIMER_SELF_DELETE_RESOURCE_PROBE* probe = (TIMER_SELF_DELETE_RESOURCE_PROBE*)data;
-    MSG_ID_T sts = UTL_TimerDelete(&probe->timer);
+    MSG_ID_T sts;
+
+    pthread_mutex_lock(&probe->lock);
+    probe->callback_thread = pthread_self();
+    probe->callback_thread_valid = 1;
+    pthread_mutex_unlock(&probe->lock);
+
+    sts = UTL_TimerDelete(&probe->timer);
 
     pthread_mutex_lock(&probe->lock);
     probe->delete_status = sts;
@@ -351,6 +360,8 @@ static int test_self_delete_reclaims_pthread_resource_before_close(void)
     {
         pthread_mutex_lock(&probe.lock);
         probe.timer = NULL;
+        memset(&probe.callback_thread, 0, sizeof(probe.callback_thread));
+        probe.callback_thread_valid = 0;
         probe.callback_done = 0;
         probe.delete_status = -999;
         pthread_mutex_unlock(&probe.lock);
@@ -395,6 +406,17 @@ static int test_self_delete_reclaims_pthread_resource_before_close(void)
         if(iUTL_TimerTestThreadSelfDetachCount() != detach_count_before + iteration + 1)
         {
             fprintf(stderr, "self-delete did not commit pthread detach at iteration %d\n", iteration);
+            goto CLOSE_TIMER;
+        }
+
+        if(!probe.callback_thread_valid)
+        {
+            fprintf(stderr, "self-delete callback thread identity missing at iteration %d\n", iteration);
+            goto CLOSE_TIMER;
+        }
+        if(pthread_join(probe.callback_thread, NULL) == 0)
+        {
+            fprintf(stderr, "self-delete left a joinable pthread resource at iteration %d\n", iteration);
             goto CLOSE_TIMER;
         }
     }
