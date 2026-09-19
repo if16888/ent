@@ -1203,6 +1203,21 @@ static MSG_ID_T iUTL_TimerDeleteTimer(UTL_TIMER_T* pTimer)
     iUTL_TimerThreadStateStop(timerCtx, FALSE);
     if(pthread_equal(pthread_self(), timerCtx->timerThread))
     {
+        int detachSts = pthread_detach(timerCtx->timerThread);
+        if(detachSts != 0)
+        {
+            IENT_LOG_ERROR("pthread_detach failed during timer self-delete,error [%d]->[%s]\n",
+                           detachSts,
+                           strerror(detachSts));
+            return ENT_TMR_THREAD_FAILED;
+        }
+
+        /*
+         * The self-deleting worker now owns its pthread resource as well as the
+         * timer context cleanup. Retain one lifecycle operation until the worker
+         * removes/frees the context; UTL_TimerClose therefore cannot take the
+         * join path for this detached thread.
+         */
         iUTL_TimerLifecycleRetainOp();
         iUTL_TimerThreadStateStop(timerCtx, TRUE);
         *pTimer = NULL;
