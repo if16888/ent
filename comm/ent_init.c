@@ -43,6 +43,7 @@
 
 #ifdef ENT_INIT_TEST_HOOKS
 extern void ENT_InitTestHandleCtxFreed(void);
+extern void ENT_InitTestHandleCallEnded(void);
 #endif
 
 #if defined(_MSC_VER)
@@ -399,6 +400,9 @@ static void iENT_HandleEndCall(ENT_HANDLE_CTX_T* handleCtx)
     {
         UTL_CVWakeAll(handleCtx->ctx.entCV);
     }
+#ifdef ENT_INIT_TEST_HOOKS
+    ENT_InitTestHandleCallEnded();
+#endif
     UTL_LockLeave(handleCtx->ctx.entLock);
 }
 
