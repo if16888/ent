@@ -583,114 +583,153 @@ static int test_timer_init_and_close_are_idempotent(void)
 static int test_oneshot_timer_fires_once(void)
 {
     UTL_TIMER_T timer = NULL;
-    int hits = 0;
+    TIMER_WAIT_PROBE probe;
+    int rc = 1;
 
-    if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before creating a timer") != 0)
+    if(timer_wait_probe_init(&probe) != 0)
     {
         return 1;
     }
+    if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before creating a timer") != 0)
+    {
+        goto CLEANUP;
+    }
 
-    if(expect_true(UTL_TimerCreate(&timer, UTL_TIMER_E_ONESHOT, 20, timer_cb, &hits) == 0,
+    if(expect_true(UTL_TimerCreate(&timer, UTL_TIMER_E_ONESHOT, 20, timer_wait_probe_cb, &probe) == 0,
                    "UTL_TimerCreate should create a oneshot timer") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    UTL_Sleep(100);
-
-    if(expect_true(hits == 1, "A oneshot timer should fire exactly once") != 0)
+    if(expect_true(timer_wait_probe_wait_at_least(&probe, 1, 2000) == 0,
+                   "A oneshot timer should fire within the bounded wait") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    return expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should clean up a oneshot timer");
-}
+    if(expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should clean up a oneshot timer") != 0 ||
+       expect_true(timer_wait_probe_hits(&probe) == 1, "A oneshot timer should fire exactly once") != 0)
+    {
+        goto CLEANUP;
+    }
 
+    rc = 0;
+CLEANUP:
+    timer_wait_probe_destroy(&probe);
+    return rc;
+}
 static int test_periodic_timer_fires_until_deleted(void)
 {
     UTL_TIMER_T timer = NULL;
-    int hits = 0;
+    TIMER_WAIT_PROBE probe;
     int afterDelete = 0;
+    int rc = 1;
 
-    if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before creating a periodic timer") != 0)
+    if(timer_wait_probe_init(&probe) != 0)
     {
         return 1;
     }
+    if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before creating a periodic timer") != 0)
+    {
+        goto CLEANUP;
+    }
 
-    if(expect_true(UTL_TimerCreate(&timer, UTL_TIMER_E_PERIOD, 20, timer_cb, &hits) == 0,
+    if(expect_true(UTL_TimerCreate(&timer, UTL_TIMER_E_PERIOD, 20, timer_wait_probe_cb, &probe) == 0,
                    "UTL_TimerCreate should create a periodic timer") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    UTL_Sleep(90);
+    if(expect_true(timer_wait_probe_wait_at_least(&probe, 2, 2000) == 0,
+                   "A periodic timer should fire multiple times within the bounded wait") != 0)
+    {
+        UTL_TimerDelete(&timer);
+        UTL_TimerClose();
+        goto CLEANUP;
+    }
 
     if(expect_true(UTL_TimerDelete(&timer) == 0, "UTL_TimerDelete should stop a periodic timer") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    /* Delete synchronizes with the timer worker; only sample the callback count afterwards. */
-    afterDelete = hits;
-    if(expect_true(afterDelete >= 2, "A periodic timer should fire multiple times before deletion") != 0)
-    {
-        UTL_TimerClose();
-        return 1;
-    }
-
+    afterDelete = timer_wait_probe_hits(&probe);
     UTL_Sleep(80);
-
-    if(expect_true(hits == afterDelete, "A deleted periodic timer should stop firing") != 0)
+    if(expect_true(timer_wait_probe_hits(&probe) == afterDelete, "A deleted periodic timer should stop firing") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    return expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after deleting a periodic timer");
-}
+    if(expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after deleting a periodic timer") != 0)
+    {
+        goto CLEANUP;
+    }
 
+    rc = 0;
+CLEANUP:
+    timer_wait_probe_destroy(&probe);
+    return rc;
+}
 static int test_timer_create_us_has_consistent_failure_contract(void)
 {
     UTL_TIMER_T timer = (UTL_TIMER_T)0x1;
-    int hits = 0;
+#ifdef __linux__
+    TIMER_WAIT_PROBE probe;
+
+    if(timer_wait_probe_init(&probe) != 0)
+    {
+        return 1;
+    }
+#endif
 
     if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before using UTL_TimerCreateUs") != 0)
     {
+#ifdef __linux__
+        timer_wait_probe_destroy(&probe);
+#endif
         return 1;
     }
 
 #ifdef __linux__
-    if(expect_true(UTL_TimerCreateUs(&timer, UTL_TIMER_E_ONESHOT, 1000, timer_cb, &hits) == 0,
+    if(expect_true(UTL_TimerCreateUs(&timer, UTL_TIMER_E_ONESHOT, 1000, timer_wait_probe_cb, &probe) == 0,
                    "UTL_TimerCreateUs should create a Linux RT oneshot timer") != 0)
     {
         UTL_TimerClose();
+        timer_wait_probe_destroy(&probe);
         return 1;
     }
 
-    UTL_Sleep(30);
-
-    if(expect_true(hits == 1, "A Linux RT oneshot timer should fire exactly once") != 0)
+    if(expect_true(timer_wait_probe_wait_at_least(&probe, 1, 2000) == 0,
+                   "A Linux RT oneshot timer should fire within the bounded wait") != 0)
     {
         UTL_TimerDelete(&timer);
         UTL_TimerClose();
+        timer_wait_probe_destroy(&probe);
         return 1;
     }
 
-    if(expect_true(UTL_TimerDelete(&timer) == 0, "UTL_TimerDelete should delete a Linux RT oneshot timer") != 0)
+    if(expect_true(UTL_TimerDelete(&timer) == 0, "UTL_TimerDelete should delete a Linux RT oneshot timer") != 0 ||
+       expect_true(timer_wait_probe_hits(&probe) == 1, "A Linux RT oneshot timer should fire exactly once") != 0)
     {
         UTL_TimerClose();
+        timer_wait_probe_destroy(&probe);
         return 1;
     }
+    timer_wait_probe_destroy(&probe);
 #else
-    if(expect_true(UTL_TimerCreateUs(&timer, UTL_TIMER_E_ONESHOT, 1000, timer_cb, &hits) == ENT_TMR_UNSUPPORTED,
-                   "UTL_TimerCreateUs should report unsupported platforms") != 0)
     {
-        UTL_TimerClose();
-        return 1;
+        int hits = 0;
+        if(expect_true(UTL_TimerCreateUs(&timer, UTL_TIMER_E_ONESHOT, 1000, timer_cb, &hits) == ENT_TMR_UNSUPPORTED,
+                       "UTL_TimerCreateUs should report unsupported platforms") != 0)
+        {
+            UTL_TimerClose();
+            return 1;
+        }
     }
 
     if(expect_true(timer == NULL, "UTL_TimerCreateUs should clear the output timer on failure") != 0)
@@ -702,7 +741,6 @@ static int test_timer_create_us_has_consistent_failure_contract(void)
 
     return expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after UTL_TimerCreateUs coverage");
 }
-
 static int test_timer_create_us_delete_does_not_wait_full_period(void)
 {
 #ifdef __linux__
@@ -762,62 +800,75 @@ static int test_timer_create_us_periodic_timer_fires_on_linux(void)
 {
 #ifdef __linux__
     UTL_TIMER_T timer = NULL;
-    int hits = 0;
+    TIMER_WAIT_PROBE probe;
     int after_delete = 0;
+    int rc = 1;
 
-    if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before Linux RT periodic timer test") != 0)
+    if(timer_wait_probe_init(&probe) != 0)
     {
         return 1;
     }
+    if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before Linux RT periodic timer test") != 0)
+    {
+        goto CLEANUP;
+    }
 
-    if(expect_true(UTL_TimerCreateUs(&timer, UTL_TIMER_E_PERIOD, 5000, timer_cb, &hits) == 0,
+    if(expect_true(UTL_TimerCreateUs(&timer, UTL_TIMER_E_PERIOD, 5000, timer_wait_probe_cb, &probe) == 0,
                    "UTL_TimerCreateUs should create a Linux RT periodic timer") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    UTL_Sleep(40);
+    if(expect_true(timer_wait_probe_wait_at_least(&probe, 3, 2000) == 0,
+                   "A Linux RT periodic timer should fire multiple times within the bounded wait") != 0)
+    {
+        UTL_TimerDelete(&timer);
+        UTL_TimerClose();
+        goto CLEANUP;
+    }
 
     if(expect_true(UTL_TimerDelete(&timer) == 0, "UTL_TimerDelete should stop a Linux RT periodic timer") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    /* A callback may legally finish while delete is joining the workers. Snapshot only after delete returns. */
-    after_delete = hits;
-    if(expect_true(after_delete >= 3, "A Linux RT periodic timer should fire multiple times") != 0)
-    {
-        UTL_TimerClose();
-        return 1;
-    }
-
+    after_delete = timer_wait_probe_hits(&probe);
     UTL_Sleep(20);
-
-    if(expect_true(hits == after_delete, "A deleted Linux RT periodic timer should stop firing") != 0)
+    if(expect_true(timer_wait_probe_hits(&probe) == after_delete, "A deleted Linux RT periodic timer should stop firing") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    return expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after Linux RT periodic timer test");
+    if(expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after Linux RT periodic timer test") != 0)
+    {
+        goto CLEANUP;
+    }
+
+    rc = 0;
+CLEANUP:
+    timer_wait_probe_destroy(&probe);
+    return rc;
 #else
     return 0;
 #endif
 }
-
 static int test_timer_create_us_callback_can_self_delete_safely(void)
 {
 #ifdef __linux__
     TIMER_SELF_DELETE_PROBE probe;
+    int rc = 1;
 
-    memset(&probe, 0, sizeof(probe));
-    probe.delete_status = -999;
+    if(timer_self_delete_probe_init(&probe) != 0)
+    {
+        return 1;
+    }
 
     if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before RT self-delete callback test") != 0)
     {
-        return 1;
+        goto CLEANUP;
     }
 
     if(expect_true(UTL_TimerCreateUs(&probe.timer,
@@ -828,79 +879,86 @@ static int test_timer_create_us_callback_can_self_delete_safely(void)
                    "UTL_TimerCreateUs should create a Linux RT timer for self-delete callback test") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    UTL_Sleep(80);
-
-    if(expect_true(probe.hits == 1, "RT self-delete callback timer should fire exactly once") != 0)
+    if(expect_true(timer_self_delete_probe_wait(&probe, 2000) == 0,
+                   "RT self-delete callback should complete within the bounded wait") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    if(expect_true(probe.delete_status == 0, "RT self-delete callback should be able to delete its own timer") != 0)
+    if(expect_true(probe.hits == 1, "RT self-delete callback timer should fire exactly once") != 0 ||
+       expect_true(probe.delete_status == 0, "RT self-delete callback should be able to delete its own timer") != 0 ||
+       expect_true(probe.timer == NULL, "RT self-delete callback should clear the timer handle") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    if(expect_true(probe.timer == NULL, "RT self-delete callback should clear the timer handle") != 0)
+    if(expect_true(UTL_TimerClose() == 0,
+                   "UTL_TimerClose should reclaim a self-deleted Linux RT timer") != 0)
     {
-        UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    return expect_true(UTL_TimerClose() == 0,
-                       "UTL_TimerClose should reclaim a self-deleted Linux RT timer");
+    rc = 0;
+CLEANUP:
+    timer_self_delete_probe_destroy(&probe);
+    return rc;
 #else
     return 0;
 #endif
 }
-
 #ifndef _WIN32
 static int test_timer_callback_can_self_delete_safely(void)
 {
     TIMER_SELF_DELETE_PROBE probe;
+    int rc = 1;
 
-    memset(&probe, 0, sizeof(probe));
-    probe.delete_status = -999;
+    if(timer_self_delete_probe_init(&probe) != 0)
+    {
+        return 1;
+    }
 
     if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before self-delete callback test") != 0)
     {
-        return 1;
+        goto CLEANUP;
     }
 
     if(expect_true(UTL_TimerCreate(&probe.timer, UTL_TIMER_E_PERIOD, 10, self_delete_timer_cb, &probe) == 0,
                    "UTL_TimerCreate should create a timer for self-delete callback test") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    UTL_Sleep(80);
-
-    if(expect_true(probe.hits == 1, "self-delete callback timer should fire exactly once") != 0)
+    if(expect_true(timer_self_delete_probe_wait(&probe, 2000) == 0,
+                   "self-delete callback should complete within the bounded wait") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    if(expect_true(probe.delete_status == 0, "self-delete callback should be able to delete its own timer") != 0)
+    if(expect_true(probe.hits == 1, "self-delete callback timer should fire exactly once") != 0 ||
+       expect_true(probe.delete_status == 0, "self-delete callback should be able to delete its own timer") != 0 ||
+       expect_true(probe.timer == NULL, "self-delete callback should clear the timer handle") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    if(expect_true(probe.timer == NULL, "self-delete callback should clear the timer handle") != 0)
+    if(expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after self-delete callback test") != 0)
     {
-        UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    return expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after self-delete callback test");
+    rc = 0;
+CLEANUP:
+    timer_self_delete_probe_destroy(&probe);
+    return rc;
 }
-
 static int test_timer_create_is_rejected_while_close_progresses(void)
 {
     UTL_TIMER_T timer = NULL;
