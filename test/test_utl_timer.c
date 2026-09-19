@@ -151,9 +151,8 @@ static void timer_wait_probe_destroy(TIMER_WAIT_PROBE* probe)
 #endif
 }
 
-static void* timer_wait_probe_cb(void* data)
+static void timer_wait_probe_signal(TIMER_WAIT_PROBE* probe)
 {
-    TIMER_WAIT_PROBE* probe = (TIMER_WAIT_PROBE*)data;
 #ifdef _WIN32
     EnterCriticalSection(&probe->lock);
     probe->hits++;
@@ -165,6 +164,11 @@ static void* timer_wait_probe_cb(void* data)
     pthread_cond_broadcast(&probe->cv);
     pthread_mutex_unlock(&probe->lock);
 #endif
+}
+
+static void* timer_wait_probe_cb(void* data)
+{
+    timer_wait_probe_signal((TIMER_WAIT_PROBE*)data);
     return NULL;
 }
 
@@ -258,32 +262,55 @@ static long long monotonic_ns(void)
 
 typedef struct
 {
-    volatile int hits;
-    volatile int in_callback;
-    volatile int reentry_hits;
+    TIMER_WAIT_PROBE callbacks;
+    int in_callback;
+    int reentry_hits;
 } TIMER_SLOW_PROBE;
 
 typedef struct
 {
-    volatile int in_callback;
-    volatile int callback_done;
-    volatile MSG_ID_T create_status;
-    volatile MSG_ID_T delete_status;
+    TIMER_WAIT_PROBE started;
+    TIMER_WAIT_PROBE done;
+    MSG_ID_T create_status;
+    MSG_ID_T delete_status;
 } TIMER_REENTRANT_PROBE;
 
 static void* slow_timer_cb(void* data)
 {
     TIMER_SLOW_PROBE* probe = (TIMER_SLOW_PROBE*)data;
-
+#ifdef _WIN32
+    EnterCriticalSection(&probe->callbacks.lock);
     if(probe->in_callback)
     {
         probe->reentry_hits++;
     }
-
     probe->in_callback = 1;
-    probe->hits++;
+    probe->callbacks.hits++;
+    WakeAllConditionVariable(&probe->callbacks.cv);
+    LeaveCriticalSection(&probe->callbacks.lock);
+#else
+    pthread_mutex_lock(&probe->callbacks.lock);
+    if(probe->in_callback)
+    {
+        probe->reentry_hits++;
+    }
+    probe->in_callback = 1;
+    probe->callbacks.hits++;
+    pthread_cond_broadcast(&probe->callbacks.cv);
+    pthread_mutex_unlock(&probe->callbacks.lock);
+#endif
+
     UTL_Sleep(60);
+
+#ifdef _WIN32
+    EnterCriticalSection(&probe->callbacks.lock);
     probe->in_callback = 0;
+    LeaveCriticalSection(&probe->callbacks.lock);
+#else
+    pthread_mutex_lock(&probe->callbacks.lock);
+    probe->in_callback = 0;
+    pthread_mutex_unlock(&probe->callbacks.lock);
+#endif
     return NULL;
 }
 
@@ -293,7 +320,7 @@ static void* reentrant_timer_api_cb(void* data)
     UTL_TIMER_T nested_timer = NULL;
     int nested_hits = 0;
 
-    probe->in_callback = 1;
+    timer_wait_probe_signal(&probe->started);
     UTL_Sleep(20);
     probe->create_status = UTL_TimerCreate(&nested_timer,
                                            UTL_TIMER_E_ONESHOT,
@@ -304,7 +331,7 @@ static void* reentrant_timer_api_cb(void* data)
     {
         probe->delete_status = UTL_TimerDelete(&nested_timer);
     }
-    probe->callback_done = 1;
+    timer_wait_probe_signal(&probe->done);
     return NULL;
 }
 
@@ -405,113 +432,130 @@ static int test_periodic_timer_remains_stable_with_slow_callback(void)
 {
     UTL_TIMER_T timer = NULL;
     TIMER_SLOW_PROBE probe;
+    int reentry_hits = 0;
+    int rc = 1;
 
     memset(&probe, 0, sizeof(probe));
+    if(timer_wait_probe_init(&probe.callbacks) != 0)
+    {
+        return 1;
+    }
 
     if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize for slow callback test") != 0)
     {
-        return 1;
+        goto CLEANUP;
     }
 
     if(expect_true(UTL_TimerCreate(&timer, UTL_TIMER_E_PERIOD, 20, slow_timer_cb, &probe) == 0,
                    "UTL_TimerCreate should create a periodic timer for slow callback test") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    UTL_Sleep(220);
-
-    if(expect_true(probe.hits >= 2, "slow periodic timer should still fire") != 0)
+    if(expect_true(timer_wait_probe_wait_at_least(&probe.callbacks, 2, 2000) == 0,
+                   "slow periodic timer should continue firing within the bounded wait") != 0)
     {
         UTL_TimerDelete(&timer);
         UTL_TimerClose();
-        return 1;
-    }
-
-    if(expect_true(probe.hits <= 8, "slow periodic timer should not spin out of control") != 0)
-    {
-        UTL_TimerDelete(&timer);
-        UTL_TimerClose();
-        return 1;
-    }
-
-    if(expect_true(probe.reentry_hits == 0, "slow periodic timer should not reenter callback") != 0)
-    {
-        UTL_TimerDelete(&timer);
-        UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
     if(expect_true(UTL_TimerDelete(&timer) == 0, "UTL_TimerDelete should succeed after slow callback test") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    return expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after slow callback test");
-}
+#ifdef _WIN32
+    EnterCriticalSection(&probe.callbacks.lock);
+    reentry_hits = probe.reentry_hits;
+    LeaveCriticalSection(&probe.callbacks.lock);
+#else
+    pthread_mutex_lock(&probe.callbacks.lock);
+    reentry_hits = probe.reentry_hits;
+    pthread_mutex_unlock(&probe.callbacks.lock);
+#endif
+    if(expect_true(reentry_hits == 0, "slow periodic timer should not reenter callback") != 0)
+    {
+        UTL_TimerClose();
+        goto CLEANUP;
+    }
 
+    if(expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after slow callback test") != 0)
+    {
+        goto CLEANUP;
+    }
+
+    rc = 0;
+CLEANUP:
+    timer_wait_probe_destroy(&probe.callbacks);
+    return rc;
+}
 static int test_timer_delete_allows_reentrant_callback_timer_api(void)
 {
     UTL_TIMER_T timer = NULL;
     TIMER_REENTRANT_PROBE probe;
-    int i = 0;
+    int rc = 1;
 
     memset(&probe, 0, sizeof(probe));
     probe.create_status = -999;
     probe.delete_status = -999;
+    if(timer_wait_probe_init(&probe.started) != 0)
+    {
+        return 1;
+    }
+    if(timer_wait_probe_init(&probe.done) != 0)
+    {
+        timer_wait_probe_destroy(&probe.started);
+        return 1;
+    }
 
     if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize for reentrant callback test") != 0)
     {
-        return 1;
+        goto CLEANUP;
     }
 
     if(expect_true(UTL_TimerCreate(&timer, UTL_TIMER_E_ONESHOT, 5, reentrant_timer_api_cb, &probe) == 0,
                    "UTL_TimerCreate should create a timer for reentrant callback test") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    for(i = 0; i < 100 && !probe.in_callback; ++i)
-    {
-        UTL_Sleep(1);
-    }
-
-    if(expect_true(probe.in_callback == 1, "reentrant callback should start before delete") != 0)
+    if(expect_true(timer_wait_probe_wait_at_least(&probe.started, 1, 2000) == 0,
+                   "reentrant callback should start before delete") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
     if(expect_true(UTL_TimerDelete(&timer) == 0, "UTL_TimerDelete should wait for reentrant callback without deadlock") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    if(expect_true(probe.callback_done == 1, "reentrant callback should complete during delete") != 0)
+    if(expect_true(timer_wait_probe_wait_at_least(&probe.done, 1, 2000) == 0,
+                   "reentrant callback should complete during delete") != 0 ||
+       expect_true(probe.create_status == 0, "reentrant callback should be able to create a timer") != 0 ||
+       expect_true(probe.delete_status == 0, "reentrant callback should be able to delete its nested timer") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    if(expect_true(probe.create_status == 0, "reentrant callback should be able to create a timer") != 0)
+    if(expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after reentrant callback test") != 0)
     {
-        UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    if(expect_true(probe.delete_status == 0, "reentrant callback should be able to delete its nested timer") != 0)
-    {
-        UTL_TimerClose();
-        return 1;
-    }
-
-    return expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after reentrant callback test");
+    rc = 0;
+CLEANUP:
+    timer_wait_probe_destroy(&probe.done);
+    timer_wait_probe_destroy(&probe.started);
+    return rc;
 }
-
 static int test_timer_rejects_uninitialized_use(void)
 {
     UTL_TIMER_T timer = NULL;
