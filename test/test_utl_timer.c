@@ -14,6 +14,7 @@
 ENT_CTX gEntCtx;
 
 int iUTL_TimerTestClosing(void);
+unsigned int iUTL_TimerTestCloseEpoch(void);
 
 static volatile int s_timer_hits = 0;
 
@@ -1015,6 +1016,7 @@ static int test_timer_create_is_rejected_while_close_progresses(void)
     int closer_started = 0;
     int rc = 1;
     int i;
+    unsigned int close_epoch_before;
 
     memset(&slow_probe, 0, sizeof(slow_probe));
     memset(&close_probe, 0, sizeof(close_probe));
@@ -1045,6 +1047,8 @@ static int test_timer_create_is_rejected_while_close_progresses(void)
         goto CLEANUP;
     }
 
+    close_epoch_before = iUTL_TimerTestCloseEpoch();
+
     if(expect_true(pthread_create(&closer, NULL, timer_close_thread, &close_probe) == 0,
                    "close helper thread should start") != 0)
     {
@@ -1054,12 +1058,12 @@ static int test_timer_create_is_rejected_while_close_progresses(void)
     }
     closer_started = 1;
 
-    for(i = 0; i < 2000 && !iUTL_TimerTestClosing(); ++i)
+    for(i = 0; i < 2000 && iUTL_TimerTestCloseEpoch() == close_epoch_before; ++i)
     {
         UTL_Sleep(1);
     }
-    if(expect_true(iUTL_TimerTestClosing(),
-                   "timer close should enter closing state within the bounded wait") != 0)
+    if(expect_true(iUTL_TimerTestCloseEpoch() != close_epoch_before,
+                   "timer close should start within the bounded wait") != 0)
     {
         goto JOIN_CLOSE;
     }
