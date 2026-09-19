@@ -13,6 +13,8 @@
 
 ENT_CTX gEntCtx;
 
+int iUTL_TimerTestClosing(void);
+
 static volatile int s_timer_hits = 0;
 
 static int expect_true(int condition, const char* message)
@@ -415,14 +417,13 @@ static int timer_self_delete_probe_wait(TIMER_SELF_DELETE_PROBE* probe, int time
 
 typedef struct
 {
-    volatile MSG_ID_T close_status;
+    MSG_ID_T close_status;
 } TIMER_CLOSE_THREAD_PROBE;
 
 static void* timer_close_thread(void* data)
 {
     TIMER_CLOSE_THREAD_PROBE* probe = (TIMER_CLOSE_THREAD_PROBE*)data;
 
-    UTL_Sleep(5);
     probe->close_status = UTL_TimerClose();
     return NULL;
 }
@@ -1010,61 +1011,87 @@ static int test_timer_create_is_rejected_while_close_progresses(void)
     TIMER_SLOW_PROBE slow_probe;
     TIMER_CLOSE_THREAD_PROBE close_probe;
     pthread_t closer;
-    int observed_rejection = 0;
-    int i = 0;
+    MSG_ID_T create_sts;
+    int closer_started = 0;
+    int rc = 1;
+    int i;
 
     memset(&slow_probe, 0, sizeof(slow_probe));
     memset(&close_probe, 0, sizeof(close_probe));
     close_probe.close_status = -999;
 
-    if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before close/create race test") != 0)
+    if(timer_wait_probe_init(&slow_probe.callbacks) != 0)
     {
         return 1;
+    }
+
+    if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before close/create race test") != 0)
+    {
+        goto CLEANUP;
     }
 
     if(expect_true(UTL_TimerCreate(&timer, UTL_TIMER_E_PERIOD, 5, slow_timer_cb, &slow_probe) == 0,
                    "UTL_TimerCreate should create a slow periodic timer for close/create race test") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    UTL_Sleep(15);
+    if(expect_true(timer_wait_probe_wait_at_least(&slow_probe.callbacks, 1, 2000) == 0,
+                   "slow callback should start before close/create race") != 0)
+    {
+        UTL_TimerDelete(&timer);
+        UTL_TimerClose();
+        goto CLEANUP;
+    }
 
     if(expect_true(pthread_create(&closer, NULL, timer_close_thread, &close_probe) == 0,
                    "close helper thread should start") != 0)
     {
         UTL_TimerDelete(&timer);
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
+    closer_started = 1;
 
-    for(i = 0; i < 200; ++i)
+    for(i = 0; i < 2000 && !iUTL_TimerTestClosing(); ++i)
     {
-        MSG_ID_T sts = UTL_TimerCreate(&rejected_timer, UTL_TIMER_E_ONESHOT, 10, timer_cb, NULL);
-        if(sts == ENT_TMR_NOT_INITIALIZED)
-        {
-            observed_rejection = 1;
-            break;
-        }
-        if(sts == 0)
-        {
-            UTL_TimerDelete(&rejected_timer);
-            rejected_timer = NULL;
-        }
         UTL_Sleep(1);
     }
-
-    pthread_join(closer, NULL);
-    timer = NULL;
-
-    if(expect_true(close_probe.close_status == 0, "UTL_TimerClose should succeed in helper thread") != 0)
+    if(expect_true(iUTL_TimerTestClosing(),
+                   "timer close should enter closing state within the bounded wait") != 0)
     {
-        return 1;
+        goto JOIN_CLOSE;
     }
 
-    return expect_true(observed_rejection == 1,
-                       "UTL_TimerCreate should be rejected once timer close has started");
+    create_sts = UTL_TimerCreate(&rejected_timer, UTL_TIMER_E_ONESHOT, 10, timer_cb, NULL);
+    if(create_sts == 0)
+    {
+        UTL_TimerDelete(&rejected_timer);
+        rejected_timer = NULL;
+    }
+    if(expect_true(create_sts == ENT_TMR_NOT_INITIALIZED,
+                   "UTL_TimerCreate should be rejected once timer close has started") != 0)
+    {
+        goto JOIN_CLOSE;
+    }
+
+    rc = 0;
+
+JOIN_CLOSE:
+    if(closer_started)
+    {
+        pthread_join(closer, NULL);
+        timer = NULL;
+        if(close_probe.close_status != ENT_SYS_NORMAL)
+        {
+            rc = 1;
+        }
+    }
+
+CLEANUP:
+    timer_wait_probe_destroy(&slow_probe.callbacks);
+    return rc;
 }
 #endif
 
