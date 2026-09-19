@@ -11,6 +11,33 @@
 
 ENT_CTX gEntCtx;
 
+MSG_ID_T ENT_LogInit(void) { return ENT_SYS_NORMAL; }
+MSG_ID_T ENT_LogClose(void) { return ENT_SYS_NORMAL; }
+MSG_ID_T ENT_LogInitHandle(ENT_LOG* pLogHandle, const char* moduleName, const char* logPath)
+{
+    (void)moduleName;
+    (void)logPath;
+    if(pLogHandle != NULL)
+    {
+        *pLogHandle = (ENT_LOG)0x1;
+    }
+    return ENT_SYS_NORMAL;
+}
+MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const void* arg)
+{
+    (void)logHandle;
+    (void)option;
+    (void)arg;
+    return ENT_SYS_NORMAL;
+}
+MSG_ID_T ENT_LogCloseHandle(ENT_LOG logHandle) { (void)logHandle; return ENT_SYS_NORMAL; }
+MSG_ID_T ENT_LogRaw(ENT_LOG logHandle, const char* format, ...) { (void)logHandle; (void)format; return ENT_SYS_NORMAL; }
+MSG_ID_T ENT_LogFatal(ENT_LOG logHandle, const char* format, ...) { (void)logHandle; (void)format; return ENT_SYS_NORMAL; }
+MSG_ID_T ENT_LogError(ENT_LOG logHandle, const char* format, ...) { (void)logHandle; (void)format; return ENT_SYS_NORMAL; }
+MSG_ID_T ENT_LogWarn(ENT_LOG logHandle, const char* format, ...) { (void)logHandle; (void)format; return ENT_SYS_NORMAL; }
+MSG_ID_T ENT_LogPrint(ENT_LOG logHandle, const char* format, ...) { (void)logHandle; (void)format; return ENT_SYS_NORMAL; }
+MSG_ID_T ENT_LogDebug(ENT_LOG logHandle, const char* format, ...) { (void)logHandle; (void)format; return ENT_SYS_NORMAL; }
+
 int iUTL_TimerTestLifecycleOpCount(void);
 int iUTL_TimerTestClosing(void);
 
