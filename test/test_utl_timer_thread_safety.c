@@ -9,18 +9,6 @@
 #include "ent_msg.h"
 #include "ent_utility.h"
 
-#if defined(__SANITIZE_THREAD__) || defined(__SANITIZE_ADDRESS__)
-#define ENT_TEST_UNDER_SANITIZER 1
-#elif defined(__has_feature)
-#if __has_feature(thread_sanitizer) || __has_feature(address_sanitizer)
-#define ENT_TEST_UNDER_SANITIZER 1
-#endif
-#endif
-
-#ifndef ENT_TEST_UNDER_SANITIZER
-#define ENT_TEST_UNDER_SANITIZER 0
-#endif
-
 ENT_CTX gEntCtx;
 
 MSG_ID_T ENT_LogInit(void) { return ENT_SYS_NORMAL; }
@@ -53,6 +41,8 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle, const char* format, ...) { (void)logHan
 int iUTL_TimerTestLifecycleOpCount(void);
 int iUTL_TimerTestClosing(void);
 int iUTL_TimerTestThreadSelfDetachCount(void);
+int iUTL_TimerTestThreadSelfCleanupCount(void);
+void iUTL_TimerTestInjectThreadDetachFailure(unsigned int count);
 
 typedef struct TIMER_THREAD_SAFETY_PROBE
 {
@@ -315,8 +305,7 @@ typedef struct TIMER_SELF_DELETE_RESOURCE_PROBE
     pthread_mutex_t lock;
     pthread_cond_t cv;
     UTL_TIMER_T timer;
-    pthread_t callback_thread;
-    int callback_thread_valid;
+    int create_done;
     int callback_done;
     MSG_ID_T delete_status;
 } TIMER_SELF_DELETE_RESOURCE_PROBE;
@@ -327,8 +316,10 @@ static void* self_delete_resource_cb(void* data)
     MSG_ID_T sts;
 
     pthread_mutex_lock(&probe->lock);
-    probe->callback_thread = pthread_self();
-    probe->callback_thread_valid = 1;
+    while(!probe->create_done)
+    {
+        pthread_cond_wait(&probe->cv, &probe->lock);
+    }
     pthread_mutex_unlock(&probe->lock);
 
     sts = UTL_TimerDelete(&probe->timer);
@@ -346,6 +337,7 @@ static int test_self_delete_reclaims_pthread_resource_before_close(void)
     enum { SELF_DELETE_ITERATIONS = 32 };
     TIMER_SELF_DELETE_RESOURCE_PROBE probe;
     int detach_count_before;
+    int cleanup_count_before;
     int iteration;
     int i;
     int rc = 1;
@@ -367,13 +359,13 @@ static int test_self_delete_reclaims_pthread_resource_before_close(void)
         goto CLEANUP;
     }
     detach_count_before = iUTL_TimerTestThreadSelfDetachCount();
+    cleanup_count_before = iUTL_TimerTestThreadSelfCleanupCount();
 
     for(iteration = 0; iteration < SELF_DELETE_ITERATIONS; ++iteration)
     {
         pthread_mutex_lock(&probe.lock);
         probe.timer = NULL;
-        memset(&probe.callback_thread, 0, sizeof(probe.callback_thread));
-        probe.callback_thread_valid = 0;
+        probe.create_done = 0;
         probe.callback_done = 0;
         probe.delete_status = -999;
         pthread_mutex_unlock(&probe.lock);
@@ -387,6 +379,11 @@ static int test_self_delete_reclaims_pthread_resource_before_close(void)
             fprintf(stderr, "self-delete resource timer create failed at iteration %d\n", iteration);
             goto CLOSE_TIMER;
         }
+
+        pthread_mutex_lock(&probe.lock);
+        probe.create_done = 1;
+        pthread_cond_broadcast(&probe.cv);
+        pthread_mutex_unlock(&probe.lock);
 
         if(wait_flag(&probe.lock, &probe.cv, &probe.callback_done) != 0)
         {
@@ -421,23 +418,9 @@ static int test_self_delete_reclaims_pthread_resource_before_close(void)
             goto CLOSE_TIMER;
         }
 
-        if(!probe.callback_thread_valid)
+        if(iUTL_TimerTestThreadSelfCleanupCount() != cleanup_count_before + iteration + 1)
         {
-            fprintf(stderr, "self-delete callback thread identity missing at iteration %d\n", iteration);
-            goto CLOSE_TIMER;
-        }
-
-        /*
-         * Joining an already-detached/terminated pthread is intentionally used
-         * as a normal-build ownership probe, but sanitizer runtimes intercept
-         * pthread_join() and do not provide a stable result for this invalid
-         * join target. Under sanitizers the detach-commit counter plus
-         * lifecycle-op drain is the synchronization proof; normal/self-hosted
-         * lanes retain the direct external-join regression.
-         */
-        if(!ENT_TEST_UNDER_SANITIZER && pthread_join(probe.callback_thread, NULL) == 0)
-        {
-            fprintf(stderr, "self-delete left a joinable pthread resource at iteration %d\n", iteration);
+            fprintf(stderr, "self-delete context cleanup did not commit at iteration %d\n", iteration);
             goto CLOSE_TIMER;
         }
     }
@@ -458,6 +441,110 @@ CLOSE_TIMER:
     (void)UTL_TimerClose();
 
 CLEANUP:
+    pthread_cond_destroy(&probe.cv);
+    pthread_mutex_destroy(&probe.lock);
+    return rc;
+}
+
+static int test_self_delete_detach_failure_restores_external_cleanup(void)
+{
+    TIMER_SELF_DELETE_RESOURCE_PROBE probe;
+    int detach_count_before;
+    int cleanup_count_before;
+    int rc = 1;
+
+    memset(&probe, 0, sizeof(probe));
+    probe.delete_status = -999;
+    if(pthread_mutex_init(&probe.lock, NULL) != 0)
+    {
+        return 1;
+    }
+    if(pthread_cond_init(&probe.cv, NULL) != 0)
+    {
+        pthread_mutex_destroy(&probe.lock);
+        return 1;
+    }
+
+    if(UTL_TimerInit() != ENT_SYS_NORMAL)
+    {
+        goto CLEANUP;
+    }
+
+    detach_count_before = iUTL_TimerTestThreadSelfDetachCount();
+    cleanup_count_before = iUTL_TimerTestThreadSelfCleanupCount();
+    iUTL_TimerTestInjectThreadDetachFailure(1);
+
+    if(UTL_TimerCreate(&probe.timer,
+                       UTL_TIMER_E_PERIOD,
+                       1,
+                       self_delete_resource_cb,
+                       &probe) != ENT_SYS_NORMAL)
+    {
+        fprintf(stderr, "detach-failure timer create failed\n");
+        goto CLOSE_TIMER;
+    }
+
+    pthread_mutex_lock(&probe.lock);
+    probe.create_done = 1;
+    pthread_cond_broadcast(&probe.cv);
+    pthread_mutex_unlock(&probe.lock);
+
+    if(wait_flag(&probe.lock, &probe.cv, &probe.callback_done) != 0)
+    {
+        fprintf(stderr, "detach-failure callback timed out\n");
+        goto CLOSE_TIMER;
+    }
+
+    if(probe.delete_status != ENT_TMR_THREAD_FAILED)
+    {
+        fprintf(stderr, "injected detach failure did not reach caller\n");
+        goto CLOSE_TIMER;
+    }
+    if(probe.timer == NULL)
+    {
+        fprintf(stderr, "detach failure lost timer handle ownership\n");
+        goto CLOSE_TIMER;
+    }
+    if(iUTL_TimerTestThreadSelfDetachCount() != detach_count_before ||
+       iUTL_TimerTestThreadSelfCleanupCount() != cleanup_count_before)
+    {
+        fprintf(stderr, "detach failure incorrectly committed self-cleanup ownership\n");
+        goto CLOSE_TIMER;
+    }
+    if(iUTL_TimerTestLifecycleOpCount() != 0)
+    {
+        fprintf(stderr, "detach failure leaked a lifecycle operation\n");
+        goto CLOSE_TIMER;
+    }
+
+    /*
+     * Detach failure restored list ownership and preserved a joinable worker.
+     * The external delete path must therefore be able to join and reclaim it.
+     */
+    if(UTL_TimerDelete(&probe.timer) != ENT_SYS_NORMAL || probe.timer != NULL)
+    {
+        fprintf(stderr, "external cleanup failed after injected detach failure\n");
+        goto CLOSE_TIMER;
+    }
+
+    if(UTL_TimerClose() != ENT_SYS_NORMAL)
+    {
+        goto CLEANUP;
+    }
+
+    rc = 0;
+    goto CLEANUP;
+
+CLOSE_TIMER:
+    iUTL_TimerTestInjectThreadDetachFailure(0);
+    if(probe.timer != NULL)
+    {
+        (void)UTL_TimerDelete(&probe.timer);
+    }
+    (void)UTL_TimerClose();
+
+CLEANUP:
+    iUTL_TimerTestInjectThreadDetachFailure(0);
     pthread_cond_destroy(&probe.cv);
     pthread_mutex_destroy(&probe.lock);
     return rc;
@@ -542,6 +629,12 @@ int main(void)
     if(test_self_delete_reclaims_pthread_resource_before_close() != 0)
     {
         fprintf(stderr, "self-delete pthread resource probe failed\n");
+        return EXIT_FAILURE;
+    }
+
+    if(test_self_delete_detach_failure_restores_external_cleanup() != 0)
+    {
+        fprintf(stderr, "self-delete detach-failure recovery probe failed\n");
         return EXIT_FAILURE;
     }
 
