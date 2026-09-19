@@ -101,6 +101,9 @@ static unsigned int  sTimerLifecycleOps = 0;
 #if ENT_TMR_IMPL_LINUX && defined(ENT_TIMER_TEST_HOOKS)
 static unsigned int  sTimerRtLiveContexts = 0;
 #endif
+#if (ENT_TMR_IMPL_LINUX || ENT_TMR_IMPL_POSIX_FALLBACK) && defined(ENT_TIMER_TEST_HOOKS)
+static unsigned int  sTimerThreadSelfDetachSuccess = 0;
+#endif
 
 static MSG_ID_T iUTL_TimerDeleteTimer(UTL_TIMER_T* pTimer);
 #ifndef _WIN32
@@ -241,6 +244,29 @@ int iUTL_TimerTestClosing(void)
     iUTL_TimerLifecycleLockLeave();
     return closing ? 1 : 0;
 }
+
+#if ENT_TMR_IMPL_LINUX || ENT_TMR_IMPL_POSIX_FALLBACK
+static void iUTL_TimerTestThreadSelfDetached(void)
+{
+    iUTL_TimerLifecycleLockEnter();
+    sTimerThreadSelfDetachSuccess++;
+    iUTL_TimerLifecycleLockLeave();
+}
+
+int iUTL_TimerTestThreadSelfDetachCount(void)
+{
+    unsigned int count;
+
+    iUTL_TimerLifecycleLockEnter();
+    count = sTimerThreadSelfDetachSuccess;
+    iUTL_TimerLifecycleLockLeave();
+    return (int)count;
+}
+#endif
+#else
+#if ENT_TMR_IMPL_LINUX || ENT_TMR_IMPL_POSIX_FALLBACK
+#define iUTL_TimerTestThreadSelfDetached() ((void)0)
+#endif
 #endif
 
 #if ENT_TMR_IMPL_LINUX
@@ -1203,6 +1229,7 @@ static MSG_ID_T iUTL_TimerDeleteTimer(UTL_TIMER_T* pTimer)
                            strerror(detachSts));
             return ENT_TMR_THREAD_FAILED;
         }
+        iUTL_TimerTestThreadSelfDetached();
 
         iUTL_TimerLifecycleRetainOp();
         iUTL_TimerThreadStateStop(timerCtx, TRUE);
