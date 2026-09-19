@@ -230,6 +230,8 @@ add_executable(
   ../comm/utl_timer.c
 )
 
+target_compile_definitions(test_ent_thread PRIVATE ENT_THREAD_TEST_HOOKS=1)
+
 target_include_directories(
   test_ent_thread
   PRIVATE
@@ -377,6 +379,31 @@ if(UNIX AND NOT APPLE)
 endif()
 
 add_test(NAME test_utl_timer COMMAND test_utl_timer)
+
+if(UNIX AND NOT APPLE)
+  add_executable(
+    test_utl_timer_thread_safety
+    test_utl_timer_thread_safety.c
+    test_runtime_stub.c
+    ../comm/utl_timer.c
+    ../comm/utl_thread.c
+    ../comm/utl_dll.c
+  )
+
+  target_include_directories(
+    test_utl_timer_thread_safety
+    PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+      ${CMAKE_CURRENT_SOURCE_DIR}/../comm
+  )
+
+  target_link_libraries(test_utl_timer_thread_safety PRIVATE pthread)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(test_utl_timer_thread_safety PRIVATE rt)
+  endif()
+
+  add_test(NAME test_utl_timer_thread_safety COMMAND test_utl_timer_thread_safety)
+endif()
 
 add_executable(
   test_utl_socket
