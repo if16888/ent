@@ -108,6 +108,140 @@ static void* timer_cb(void* data)
     return NULL;
 }
 
+typedef struct TIMER_WAIT_PROBE
+{
+#ifdef _WIN32
+    CRITICAL_SECTION lock;
+    CONDITION_VARIABLE cv;
+#else
+    pthread_mutex_t lock;
+    pthread_cond_t cv;
+#endif
+    int hits;
+} TIMER_WAIT_PROBE;
+
+static int timer_wait_probe_init(TIMER_WAIT_PROBE* probe)
+{
+    memset(probe, 0, sizeof(*probe));
+#ifdef _WIN32
+    InitializeCriticalSection(&probe->lock);
+    InitializeConditionVariable(&probe->cv);
+    return 0;
+#else
+    if(pthread_mutex_init(&probe->lock, NULL) != 0)
+    {
+        return -1;
+    }
+    if(pthread_cond_init(&probe->cv, NULL) != 0)
+    {
+        pthread_mutex_destroy(&probe->lock);
+        return -1;
+    }
+    return 0;
+#endif
+}
+
+static void timer_wait_probe_destroy(TIMER_WAIT_PROBE* probe)
+{
+#ifdef _WIN32
+    DeleteCriticalSection(&probe->lock);
+#else
+    pthread_cond_destroy(&probe->cv);
+    pthread_mutex_destroy(&probe->lock);
+#endif
+}
+
+static void* timer_wait_probe_cb(void* data)
+{
+    TIMER_WAIT_PROBE* probe = (TIMER_WAIT_PROBE*)data;
+#ifdef _WIN32
+    EnterCriticalSection(&probe->lock);
+    probe->hits++;
+    WakeAllConditionVariable(&probe->cv);
+    LeaveCriticalSection(&probe->lock);
+#else
+    pthread_mutex_lock(&probe->lock);
+    probe->hits++;
+    pthread_cond_broadcast(&probe->cv);
+    pthread_mutex_unlock(&probe->lock);
+#endif
+    return NULL;
+}
+
+static int timer_wait_probe_wait_at_least(TIMER_WAIT_PROBE* probe, int expected, int timeout_ms)
+{
+#ifdef _WIN32
+    ULONGLONG deadline = GetTickCount64() + (ULONGLONG)timeout_ms;
+    EnterCriticalSection(&probe->lock);
+    while(probe->hits < expected)
+    {
+        ULONGLONG now = GetTickCount64();
+        DWORD remaining;
+        if(now >= deadline)
+        {
+            LeaveCriticalSection(&probe->lock);
+            return -1;
+        }
+        remaining = (DWORD)(deadline - now);
+        if(!SleepConditionVariableCS(&probe->cv, &probe->lock, remaining))
+        {
+            DWORD err = GetLastError();
+            if(err == ERROR_TIMEOUT && probe->hits < expected)
+            {
+                LeaveCriticalSection(&probe->lock);
+                return -1;
+            }
+        }
+    }
+    LeaveCriticalSection(&probe->lock);
+    return 0;
+#else
+    struct timespec deadline;
+    int wait_sts = 0;
+
+    if(clock_gettime(CLOCK_REALTIME, &deadline) != 0)
+    {
+        return -1;
+    }
+    deadline.tv_sec += timeout_ms / 1000;
+    deadline.tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
+    if(deadline.tv_nsec >= 1000000000L)
+    {
+        deadline.tv_sec += deadline.tv_nsec / 1000000000L;
+        deadline.tv_nsec %= 1000000000L;
+    }
+
+    pthread_mutex_lock(&probe->lock);
+    while(probe->hits < expected)
+    {
+        wait_sts = pthread_cond_timedwait(&probe->cv, &probe->lock, &deadline);
+        if(wait_sts != 0)
+        {
+            pthread_mutex_unlock(&probe->lock);
+            return -1;
+        }
+    }
+    pthread_mutex_unlock(&probe->lock);
+    return 0;
+#endif
+}
+
+static int timer_wait_probe_hits(TIMER_WAIT_PROBE* probe)
+{
+    int hits;
+#ifdef _WIN32
+    EnterCriticalSection(&probe->lock);
+    hits = probe->hits;
+    LeaveCriticalSection(&probe->lock);
+#else
+    pthread_mutex_lock(&probe->lock);
+    hits = probe->hits;
+    pthread_mutex_unlock(&probe->lock);
+#endif
+    return hits;
+}
+
+
 #ifdef __linux__
 static long long monotonic_ns(void)
 {
@@ -178,17 +312,78 @@ static void* reentrant_timer_api_cb(void* data)
 typedef struct
 {
     UTL_TIMER_T timer;
-    volatile int hits;
-    volatile int delete_status;
+    pthread_mutex_t lock;
+    pthread_cond_t cv;
+    int hits;
+    int done;
+    MSG_ID_T delete_status;
 } TIMER_SELF_DELETE_PROBE;
 
 static void* self_delete_timer_cb(void* data)
 {
     TIMER_SELF_DELETE_PROBE* probe = (TIMER_SELF_DELETE_PROBE*)data;
+    MSG_ID_T delete_status = UTL_TimerDelete(&probe->timer);
 
+    pthread_mutex_lock(&probe->lock);
     probe->hits++;
-    probe->delete_status = UTL_TimerDelete(&probe->timer);
+    probe->delete_status = delete_status;
+    probe->done = 1;
+    pthread_cond_broadcast(&probe->cv);
+    pthread_mutex_unlock(&probe->lock);
     return NULL;
+}
+
+static int timer_self_delete_probe_init(TIMER_SELF_DELETE_PROBE* probe)
+{
+    memset(probe, 0, sizeof(*probe));
+    probe->delete_status = -999;
+    if(pthread_mutex_init(&probe->lock, NULL) != 0)
+    {
+        return -1;
+    }
+    if(pthread_cond_init(&probe->cv, NULL) != 0)
+    {
+        pthread_mutex_destroy(&probe->lock);
+        return -1;
+    }
+    return 0;
+}
+
+static void timer_self_delete_probe_destroy(TIMER_SELF_DELETE_PROBE* probe)
+{
+    pthread_cond_destroy(&probe->cv);
+    pthread_mutex_destroy(&probe->lock);
+}
+
+static int timer_self_delete_probe_wait(TIMER_SELF_DELETE_PROBE* probe, int timeout_ms)
+{
+    struct timespec deadline;
+    int wait_sts = 0;
+
+    if(clock_gettime(CLOCK_REALTIME, &deadline) != 0)
+    {
+        return -1;
+    }
+    deadline.tv_sec += timeout_ms / 1000;
+    deadline.tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
+    if(deadline.tv_nsec >= 1000000000L)
+    {
+        deadline.tv_sec += deadline.tv_nsec / 1000000000L;
+        deadline.tv_nsec %= 1000000000L;
+    }
+
+    pthread_mutex_lock(&probe->lock);
+    while(!probe->done)
+    {
+        wait_sts = pthread_cond_timedwait(&probe->cv, &probe->lock, &deadline);
+        if(wait_sts != 0)
+        {
+            pthread_mutex_unlock(&probe->lock);
+            return -1;
+        }
+    }
+    pthread_mutex_unlock(&probe->lock);
+    return 0;
 }
 
 typedef struct
