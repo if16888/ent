@@ -243,8 +243,7 @@ static void iENT_DbFreeConfigStrings(DB_CFG* dbCfg)
 }
 
 static MSG_ID_T iENT_DbValidateHandle(DB_HANDLE dbHandle,
-                                      DB_CFG** dbCfgOut,
-                                      bool requireInit)
+                                      DB_CFG** dbCfgOut)
 {
     DB_CFG* dbCfg = (DB_CFG*)dbHandle;
 
@@ -265,11 +264,6 @@ static MSG_ID_T iENT_DbValidateHandle(DB_HANDLE dbHandle,
         return ENT_DBS_BAD_HANDLE;
     }
 
-    if(requireInit && dbCfg->isInit == false)
-    {
-        IENT_LOG_ERROR("Database handle is not initialized.\n");
-        return ENT_DBS_NOT_INITIALIZED;
-    }
 
     if(dbCfgOut != NULL)
     {
@@ -336,29 +330,28 @@ static MSG_ID_T iENT_DbEnterHandleOp(DB_HANDLE dbHandle, DB_CFG** dbCfgOut)
         IENT_LOG_ERROR("Uninitialized,please call ENT_DbInit.\n");
         return ENT_DBS_NOT_INITIALIZED;
     }
-    sts = iENT_DbValidateHandle(dbHandle, &dbCfg, true);
+    sts = iENT_DbValidateHandle(dbHandle, &dbCfg);
     if(sts < 0)
     {
         iENT_DbGlobalUnlock();
         return sts;
     }
 
-    if(dbCfg->handleState != ENT_DB_HANDLE_ACTIVE_E)
-    {
-        DB_HANDLE_STATE_E state = dbCfg->handleState;
-        iENT_DbGlobalUnlock();
-        return (state == ENT_DB_HANDLE_CLOSING_E) ? ENT_DBS_IN_USE : ENT_DBS_BAD_HANDLE;
-    }
-
     iENT_DbLifecycleLock(dbCfg);
-    if(dbCfg->handleState != ENT_DB_HANDLE_ACTIVE_E)
+    if(dbCfg->handleState != ENT_DB_HANDLE_ACTIVE_E || !dbCfg->isInit)
     {
         DB_HANDLE_STATE_E state = dbCfg->handleState;
+        bool isInit = dbCfg->isInit;
         iENT_DbLifecycleUnlock(dbCfg);
         iENT_DbGlobalUnlock();
-        IENT_LOG_WARN("Database handle is not available for operation, state[%s].\n",
-                      iENT_DbHandleStateName(state));
-        return (state == ENT_DB_HANDLE_CLOSING_E) ? ENT_DBS_IN_USE : ENT_DBS_BAD_HANDLE;
+        IENT_LOG_WARN("Database handle is not available for operation, state[%s], initialized[%d].\n",
+                      iENT_DbHandleStateName(state),
+                      isInit ? 1 : 0);
+        if(state == ENT_DB_HANDLE_CLOSING_E)
+        {
+            return ENT_DBS_IN_USE;
+        }
+        return isInit ? ENT_DBS_BAD_HANDLE : ENT_DBS_NOT_INITIALIZED;
     }
     dbCfg->activeOps++;
     iENT_DbLifecycleUnlock(dbCfg);
@@ -420,18 +413,11 @@ MSG_ID_T  iENT_DbReInit(DB_HANDLE dbHandle,
         IENT_LOG_ERROR("Uninitialized,please call ENT_DbInit.\n");
         return ENT_DBS_NOT_INITIALIZED;
     }
-    sts = iENT_DbValidateHandle(dbHandle, &dbCfg, true);
+    sts = iENT_DbValidateHandle(dbHandle, &dbCfg);
     if(sts < 0)
     {
         iENT_DbGlobalUnlock();
         return sts;
-    }
-
-    if(dbCfg->handleState != ENT_DB_HANDLE_ACTIVE_E)
-    {
-        DB_HANDLE_STATE_E state = dbCfg->handleState;
-        iENT_DbGlobalUnlock();
-        return (state == ENT_DB_HANDLE_CLOSING_E) ? ENT_DBS_IN_USE : ENT_DBS_BAD_HANDLE;
     }
 
     if(dbType != dbCfg->dbType)
@@ -442,15 +428,22 @@ MSG_ID_T  iENT_DbReInit(DB_HANDLE dbHandle,
     }
 
     iENT_DbLifecycleLock(dbCfg);
-    if(dbCfg->handleState != ENT_DB_HANDLE_ACTIVE_E || dbCfg->activeOps > 0)
+    if(dbCfg->handleState != ENT_DB_HANDLE_ACTIVE_E || !dbCfg->isInit || dbCfg->activeOps > 0)
     {
         DB_HANDLE_STATE_E state = dbCfg->handleState;
+        bool isInit = dbCfg->isInit;
+        long activeOps = dbCfg->activeOps;
         iENT_DbLifecycleUnlock(dbCfg);
         iENT_DbGlobalUnlock();
-        IENT_LOG_WARN("Database handle cannot reinit in state[%s] with activeOps[%ld].\n",
+        IENT_LOG_WARN("Database handle cannot reinit in state[%s], initialized[%d], activeOps[%ld].\n",
                       iENT_DbHandleStateName(state),
-                      dbCfg->activeOps);
-        return (state == ENT_DB_HANDLE_CLOSING_E || dbCfg->activeOps > 0) ? ENT_DBS_IN_USE : ENT_DBS_BAD_HANDLE;
+                      isInit ? 1 : 0,
+                      activeOps);
+        if(state == ENT_DB_HANDLE_CLOSING_E || activeOps > 0)
+        {
+            return ENT_DBS_IN_USE;
+        }
+        return isInit ? ENT_DBS_BAD_HANDLE : ENT_DBS_NOT_INITIALIZED;
     }
 
     if(host != NULL)
@@ -837,22 +830,11 @@ ENT_PUBLIC MSG_ID_T ENT_DbCloseHandle(DB_HANDLE* dbHandle)
         IENT_LOG_ERROR("Uninitialized,please call ENT_DbInit.\n");
         return ENT_DBS_NOT_INITIALIZED;
     }
-    sts = iENT_DbValidateHandle(*dbHandle, &dbCfg, false);
+    sts = iENT_DbValidateHandle(*dbHandle, &dbCfg);
     if(sts < 0)
     {
         iENT_DbGlobalUnlock();
         return sts;
-    }
-
-    if(dbCfg->handleState == ENT_DB_HANDLE_CLOSING_E)
-    {
-        iENT_DbGlobalUnlock();
-        return ENT_DBS_IN_USE;
-    }
-    if(dbCfg->handleState != ENT_DB_HANDLE_ACTIVE_E)
-    {
-        iENT_DbGlobalUnlock();
-        return ENT_DBS_BAD_HANDLE;
     }
 
     iENT_DbLifecycleLock(dbCfg);
