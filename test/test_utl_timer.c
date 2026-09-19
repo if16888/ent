@@ -336,6 +336,39 @@ static int test_timer_rejects_uninitialized_use(void)
                        "UTL_TimerDelete should reject use before initialization");
 }
 
+static int test_timer_rejects_non_positive_period(void)
+{
+    UTL_TIMER_T timer = (UTL_TIMER_T)0x1;
+
+    if(expect_true(UTL_TimerInit() == ENT_SYS_NORMAL,
+                   "UTL_TimerInit should initialize before invalid period checks") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(UTL_TimerCreate(&timer, UTL_TIMER_E_PERIOD, 0, timer_cb, NULL) == ENT_TMR_BAD_ARGUMENT,
+                   "UTL_TimerCreate should reject a zero millisecond period") != 0 ||
+       expect_true(timer == NULL,
+                   "UTL_TimerCreate should clear the output timer after rejecting zero period") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    timer = (UTL_TIMER_T)0x1;
+    if(expect_true(UTL_TimerCreate(&timer, UTL_TIMER_E_PERIOD, -1, timer_cb, NULL) == ENT_TMR_BAD_ARGUMENT,
+                   "UTL_TimerCreate should reject a negative millisecond period") != 0 ||
+       expect_true(timer == NULL,
+                   "UTL_TimerCreate should clear the output timer after rejecting negative period") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    return expect_true(UTL_TimerClose() == ENT_SYS_NORMAL,
+                       "UTL_TimerClose should succeed after invalid period checks");
+}
+
 static int test_timer_init_and_close_are_idempotent(void)
 {
     if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize the timer subsystem") != 0)
@@ -743,6 +776,7 @@ int main(void)
     int failures = 0;
 
     failures += test_timer_rejects_uninitialized_use();
+    failures += test_timer_rejects_non_positive_period();
     failures += test_timer_init_and_close_are_idempotent();
     failures += test_oneshot_timer_fires_once();
     failures += test_periodic_timer_fires_until_deleted();
