@@ -13,6 +13,11 @@
 #include "ent_msg.h"
 #include "ent_thread.h"
 
+#ifdef ENT_THREAD_TEST_HOOKS
+extern void iENT_ThreadTestSetBeforeStartHook(void (*hook)(void));
+extern void iENT_ThreadTestSetCloseJoinHook(void (*hook)(void));
+#endif
+
 ENT_CTX gEntCtx;
 
 typedef struct TEST_BAD_THREAD_CTX
@@ -56,6 +61,11 @@ typedef struct TEST_RESULT_EVENT
     int        completed;
     MSG_ID_T   result;
 } TEST_RESULT_EVENT;
+
+#ifdef ENT_THREAD_TEST_HOOKS
+static TEST_RESULT_EVENT* s_thread_start_release_event = NULL;
+static TEST_RESULT_EVENT* s_thread_close_join_event = NULL;
+#endif
 
 static int test_result_event_init(TEST_RESULT_EVENT* ev)
 {
@@ -131,6 +141,24 @@ static MSG_ID_T test_result_event_wait(TEST_RESULT_EVENT* ev)
     return r;
 }
 
+#ifdef ENT_THREAD_TEST_HOOKS
+static void test_thread_before_start_hook(void)
+{
+    if(s_thread_start_release_event != NULL)
+    {
+        (void)test_result_event_wait(s_thread_start_release_event);
+    }
+}
+
+static void test_thread_close_join_hook(void)
+{
+    if(s_thread_close_join_event != NULL)
+    {
+        test_result_event_publish(s_thread_close_join_event, ENT_SYS_NORMAL);
+    }
+}
+#endif
+
 typedef struct TEST_SELF_CLOSE_CTX
 {
     ENT_THREAD       handle;
@@ -151,6 +179,13 @@ typedef struct TEST_TID_PUBLICATION_CTX
     TEST_RESULT_EVENT completed;
 } TEST_TID_PUBLICATION_CTX;
 
+typedef struct TEST_CLOSE_AFTER_CREATE_CTX
+{
+    ENT_THREAD handle;
+    TEST_RESULT_EVENT completed;
+    MSG_ID_T status;
+} TEST_CLOSE_AFTER_CREATE_CTX;
+
 #ifdef _WIN32
 static DWORD WINAPI tid_publication_thread(void* data)
 #else
@@ -161,6 +196,23 @@ static void* tid_publication_thread(void* data)
 
     ctx->sawPublishedTid = (ctx->tid != NULL && *ctx->tid != NULL);
     test_result_event_publish(&ctx->completed, ctx->sawPublishedTid);
+#ifdef _WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
+#ifdef _WIN32
+static DWORD WINAPI close_after_create_thread(void* data)
+#else
+static void* close_after_create_thread(void* data)
+#endif
+{
+    TEST_CLOSE_AFTER_CREATE_CTX* ctx = (TEST_CLOSE_AFTER_CREATE_CTX*)data;
+
+    ctx->status = ENT_ThreadClose(ctx->handle);
+    test_result_event_publish(&ctx->completed, ctx->status);
 #ifdef _WIN32
     return 0;
 #else
@@ -297,6 +349,22 @@ static void* quick_thread(void* data)
     return (DWORD)(ULONG_PTR)data;
 #else
     return data;
+#endif
+}
+
+#ifdef _WIN32
+static DWORD WINAPI close_contract_thread(void* data)
+#else
+static void* close_contract_thread(void* data)
+#endif
+{
+    int* hits = (int*)data;
+
+    (*hits)++;
+#ifdef _WIN32
+    return 0;
+#else
+    return NULL;
 #endif
 }
 
@@ -673,6 +741,125 @@ static int test_thread_wait_rejects_self_wait(void)
                        "ENT_ThreadClose should join the worker after self-wait rejection");
 }
 
+static int test_thread_close_does_not_cancel_successful_create(void)
+{
+#ifdef ENT_THREAD_TEST_HOOKS
+    ENT_THREAD handle = NULL;
+    TEST_RESULT_EVENT start_release;
+    TEST_RESULT_EVENT close_join_seen;
+    TEST_CLOSE_AFTER_CREATE_CTX close_ctx;
+    int callback_hits = 0;
+    int rc = 1;
+#ifdef _WIN32
+    HANDLE closer = NULL;
+#else
+    pthread_t closer;
+    int closer_started = 0;
+#endif
+
+    memset(&close_ctx, 0, sizeof(close_ctx));
+    if(test_result_event_init(&start_release) != 0 ||
+       test_result_event_init(&close_join_seen) != 0 ||
+       test_result_event_init(&close_ctx.completed) != 0)
+    {
+        fprintf(stderr, "close-after-create event init failed\n");
+        return 1;
+    }
+
+    s_thread_start_release_event = &start_release;
+    s_thread_close_join_event = &close_join_seen;
+    iENT_ThreadTestSetBeforeStartHook(test_thread_before_start_hook);
+    iENT_ThreadTestSetCloseJoinHook(test_thread_close_join_hook);
+
+    if(expect_true(ENT_ThreadInit(&handle) == ENT_SYS_NORMAL,
+                   "ENT_ThreadInit should create a context for close-after-create coverage") != 0)
+    {
+        goto CLEANUP;
+    }
+    if(expect_true(ENT_ThreadCreate(NULL, handle, close_contract_thread, &callback_hits) == ENT_SYS_NORMAL,
+                   "ENT_ThreadCreate success must commit the callback to run") != 0)
+    {
+        ENT_ThreadClose(handle);
+        handle = NULL;
+        goto CLEANUP;
+    }
+
+    close_ctx.handle = handle;
+#ifdef _WIN32
+    closer = CreateThread(NULL, 0, close_after_create_thread, &close_ctx, 0, NULL);
+    if(expect_true(closer != NULL,
+                   "close helper should start for close-after-create coverage") != 0)
+    {
+        test_result_event_publish(&start_release, ENT_SYS_NORMAL);
+        ENT_ThreadClose(handle);
+        handle = NULL;
+        goto CLEANUP;
+    }
+#else
+    if(expect_true(pthread_create(&closer, NULL, close_after_create_thread, &close_ctx) == 0,
+                   "close helper should start for close-after-create coverage") != 0)
+    {
+        test_result_event_publish(&start_release, ENT_SYS_NORMAL);
+        ENT_ThreadClose(handle);
+        handle = NULL;
+        goto CLEANUP;
+    }
+    closer_started = 1;
+#endif
+
+    (void)test_result_event_wait(&close_join_seen);
+    if(expect_true(callback_hits == 0,
+                   "callback must still be blocked when close reaches its join boundary") != 0)
+    {
+        test_result_event_publish(&start_release, ENT_SYS_NORMAL);
+        goto JOIN_CLOSE;
+    }
+
+    test_result_event_publish(&start_release, ENT_SYS_NORMAL);
+    if(expect_true(test_result_event_wait(&close_ctx.completed) == ENT_SYS_NORMAL,
+                   "ENT_ThreadClose should succeed after allowing the committed callback to run") != 0)
+    {
+        goto JOIN_CLOSE;
+    }
+    handle = NULL;
+
+    if(expect_true(callback_hits == 1,
+                   "a callback from a successful ENT_ThreadCreate must run exactly once even when close follows immediately") != 0)
+    {
+        goto JOIN_CLOSE;
+    }
+
+    rc = 0;
+
+JOIN_CLOSE:
+#ifdef _WIN32
+    if(closer != NULL)
+    {
+        WaitForSingleObject(closer, INFINITE);
+        CloseHandle(closer);
+    }
+#else
+    if(closer_started)
+    {
+        pthread_join(closer, NULL);
+    }
+#endif
+    handle = NULL;
+
+CLEANUP:
+    iENT_ThreadTestSetBeforeStartHook(NULL);
+    iENT_ThreadTestSetCloseJoinHook(NULL);
+    s_thread_start_release_event = NULL;
+    s_thread_close_join_event = NULL;
+    test_result_event_destroy(&close_ctx.completed);
+    test_result_event_destroy(&close_join_seen);
+    test_result_event_destroy(&start_release);
+    return rc;
+#else
+    return 0;
+#endif
+}
+
 int main(void)
 {
     int failures = 0;
@@ -687,6 +874,7 @@ int main(void)
     failures += test_thread_close_does_not_call_pthread_cancel();
     failures += test_thread_close_rejects_self_close();
     failures += test_thread_wait_rejects_self_wait();
+    failures += test_thread_close_does_not_cancel_successful_create();
 
     if(failures != 0)
     {
