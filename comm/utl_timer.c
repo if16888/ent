@@ -312,49 +312,17 @@ static void iUTL_TimerSleepMs(int ms)
 #if ENT_TMR_IMPL_LINUX || ENT_TMR_IMPL_POSIX_FALLBACK
 static void iUTL_TimerCleanupSelfDeletedThreadTimer(PTIMER_CTX_T timerCtx)
 {
-    MSG_ID_T sts = 0;
-    DLL_D_HDR* tmpDll = NULL;
-    BOOL timerInit = FALSE;
-    BOOL closeOwnsCleanup = FALSE;
-    UTL_LOCK dllLock = NULL;
-
     if(timerCtx == NULL || timerCtx->tag != UTL_TIMER_TAG)
     {
         return;
     }
 
-    iUTL_TimerLifecycleLockEnter();
-    timerInit = sUtilTimerInit;
-    closeOwnsCleanup = sTimerClosing;
-    dllLock = sTimerCtx.dllLock;
-    iUTL_TimerLifecycleLockLeave();
-
-    if(closeOwnsCleanup)
-    {
-        iUTL_TimerLifecycleEndOp();
-        return;
-    }
-
-    if(!timerInit || dllLock == NULL)
-    {
-        if(timerCtx->stateLock != NULL)
-        {
-            UTL_LockClose(&timerCtx->stateLock);
-        }
-        memset(timerCtx,0,sizeof(TIMER_CTX_T));
-        free(timerCtx);
-        iUTL_TimerLifecycleEndOp();
-        return;
-    }
-
-    UTL_LockEnter(dllLock);
-    sts = UTL_DllRemCurr((DLL_D_HDR*)timerCtx,&tmpDll);
-    UTL_LockLeave(dllLock);
-    if(sts < 0)
-    {
-        IENT_LOG_ERROR("UTL_DllRemCurr failed during timer self-cleanup,sts [%d]\n",sts);
-    }
-
+    /*
+     * Successful self-delete removes the context from the global timer list
+     * before detaching the worker. Close therefore cannot take ownership of
+     * this context: it only waits for the retained lifecycle operation while
+     * the detached worker destroys its private state here.
+     */
     if(timerCtx->stateLock != NULL)
     {
         UTL_LockClose(&timerCtx->stateLock);
@@ -1203,21 +1171,39 @@ static MSG_ID_T iUTL_TimerDeleteTimer(UTL_TIMER_T* pTimer)
     iUTL_TimerThreadStateStop(timerCtx, FALSE);
     if(pthread_equal(pthread_self(), timerCtx->timerThread))
     {
-        int detachSts = pthread_detach(timerCtx->timerThread);
+        int detachSts;
+
+        /*
+         * Transfer ownership atomically enough for Close: remove the context
+         * while this public Delete still owns a lifecycle operation, then
+         * detach the worker. On detach failure restore list ownership so a
+         * later external Delete/Close can still join and reclaim the thread.
+         */
+        UTL_LockEnter(sTimerCtx.dllLock);
+        sts = UTL_DllRemCurr((DLL_D_HDR*)timerCtx,&tmpDll);
+        UTL_LockLeave(sTimerCtx.dllLock);
+        if(sts < 0)
+        {
+            return ENT_TMR_LIST_FAILED;
+        }
+
+        detachSts = pthread_detach(timerCtx->timerThread);
         if(detachSts != 0)
         {
+            UTL_LockEnter(sTimerCtx.dllLock);
+            sts = UTL_DllInsHead(&sTimerCtx.dllHeader,(DLL_D_HDR*)timerCtx);
+            UTL_LockLeave(sTimerCtx.dllLock);
+            if(sts < 0)
+            {
+                return ENT_TMR_LIST_FAILED;
+            }
+
             IENT_LOG_ERROR("pthread_detach failed during timer self-delete,error [%d]->[%s]\n",
                            detachSts,
                            strerror(detachSts));
             return ENT_TMR_THREAD_FAILED;
         }
 
-        /*
-         * The self-deleting worker now owns its pthread resource as well as the
-         * timer context cleanup. Retain one lifecycle operation until the worker
-         * removes/frees the context; UTL_TimerClose therefore cannot take the
-         * join path for this detached thread.
-         */
         iUTL_TimerLifecycleRetainOp();
         iUTL_TimerThreadStateStop(timerCtx, TRUE);
         *pTimer = NULL;
