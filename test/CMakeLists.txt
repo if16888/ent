@@ -359,6 +359,8 @@ add_executable(
   ../comm/utl_dll.c
 )
 
+target_compile_definitions(test_utl_timer PRIVATE ENT_TIMER_TEST_HOOKS=1)
+
 target_include_directories(
   test_utl_timer
   PRIVATE
