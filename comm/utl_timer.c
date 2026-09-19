@@ -98,6 +98,9 @@ static __thread unsigned int sTimerCallbackDepth = 0;
 #endif
 static BOOL          sTimerClosing = FALSE;
 static unsigned int  sTimerLifecycleOps = 0;
+#ifdef ENT_TIMER_TEST_HOOKS
+static unsigned int  sTimerCloseEpoch = 0;
+#endif
 #if ENT_TMR_IMPL_LINUX && defined(ENT_TIMER_TEST_HOOKS)
 static unsigned int  sTimerRtLiveContexts = 0;
 #endif
@@ -243,6 +246,16 @@ int iUTL_TimerTestClosing(void)
     closing = sTimerClosing;
     iUTL_TimerLifecycleLockLeave();
     return closing ? 1 : 0;
+}
+
+unsigned int iUTL_TimerTestCloseEpoch(void)
+{
+    unsigned int epoch;
+
+    iUTL_TimerLifecycleLockEnter();
+    epoch = sTimerCloseEpoch;
+    iUTL_TimerLifecycleLockLeave();
+    return epoch;
 }
 
 #if ENT_TMR_IMPL_LINUX || ENT_TMR_IMPL_POSIX_FALLBACK
@@ -449,6 +462,9 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerClose()
         return ENT_SYS_NORMAL;
     }
     sTimerClosing = TRUE;
+#ifdef ENT_TIMER_TEST_HOOKS
+    sTimerCloseEpoch++;
+#endif
     iUTL_TimerLifecycleLockLeave();
     iUTL_TimerLifecycleWaitOps();
 
