@@ -27,7 +27,7 @@ static volatile int s_block_wait_released = 0;
 static int test_flag_load(volatile int* value)
 {
 #ifdef _WIN32
-    return *value;
+    return (int)InterlockedCompareExchange((volatile LONG*)value, 0, 0);
 #else
     return __sync_fetch_and_add(value, 0);
 #endif
@@ -36,7 +36,7 @@ static int test_flag_load(volatile int* value)
 static void test_flag_store(volatile int* value, int state)
 {
 #ifdef _WIN32
-    *value = state;
+    InterlockedExchange((volatile LONG*)value, (LONG)state);
 #else
     __sync_lock_test_and_set(value, state);
 #endif
@@ -69,6 +69,8 @@ static uintptr_t s_next_lock_handle = 0x2000;
 static uintptr_t s_next_cv_handle = 0x3000;
 #ifdef ENT_INIT_TEST_HOOKS
 static int s_handle_ctx_free_calls = 0;
+static volatile int s_handle_call_ended = 0;
+static volatile int s_handle_freed_before_call_end = 0;
 #endif
 static ENT_LOG s_ent_log_at_lock_init = NULL;
 static const char* s_last_log_init_handle_module = NULL;
@@ -244,8 +246,17 @@ static void close_handle_if_needed(ENT_HANDLE* handle)
 }
 
 #ifdef ENT_INIT_TEST_HOOKS
+void ENT_InitTestHandleCallEnded(void)
+{
+    test_flag_store(&s_handle_call_ended, 1);
+}
+
 void ENT_InitTestHandleCtxFreed(void)
 {
+    if(!test_flag_load(&s_handle_call_ended))
+    {
+        test_flag_store(&s_handle_freed_before_call_end, 1);
+    }
     s_handle_ctx_free_calls += 1;
 }
 #endif
@@ -672,6 +683,11 @@ static int test_ent_run_waits_on_cv_with_lock(void)
     handle->ctx.running = false;
     handle->ctx.stopRequested = false;
     reset_wait_capture();
+    reset_close_counters();
+#ifdef ENT_INIT_TEST_HOOKS
+    test_flag_store(&s_handle_call_ended, 0);
+    test_flag_store(&s_handle_freed_before_call_end, 0);
+#endif
     enable_blocking_wait(handle->ctx.entCV);
 
     threadCtx.handle = handle;
@@ -1103,12 +1119,12 @@ static int test_ent_close_waits_for_running_worker_before_free(void)
     wait_until_close_thread_started();
     wait_until_close_wait_entered();
 
-    if(expect_true(ENT_Run(handle) != ENT_SYS_NORMAL,
-                   "ENT_Run should not succeed while close is in progress") != 0)
-    {
-        failed = 1;
-    }
-
+    /*
+     * Do not launch a brand-new API call through the raw handle after close
+     * has begun. The handle may legally be reclaimed once admitted calls have
+     * drained. This test instead proves that the already-admitted ENT_Run call
+     * ends before outer handle reclamation.
+     */
     release_blocking_wait();
 
     if(expect_true(join_test_thread(runTh) == 0,
@@ -1142,6 +1158,18 @@ static int test_ent_close_waits_for_running_worker_before_free(void)
     }
 
 #ifdef ENT_INIT_TEST_HOOKS
+    if(expect_true(test_flag_load(&s_handle_call_ended) == 1,
+                   "the admitted ENT_Run call should end before handle reclamation") != 0)
+    {
+        failed = 1;
+    }
+
+    if(expect_true(test_flag_load(&s_handle_freed_before_call_end) == 0,
+                   "ENT_Close must not free the outer handle before the admitted call ends") != 0)
+    {
+        failed = 1;
+    }
+
     if(expect_true(s_handle_ctx_free_calls == 1,
                    "ENT_Close should free the outer handle context exactly once after waiting for the worker") != 0)
     {
