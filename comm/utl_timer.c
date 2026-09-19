@@ -106,6 +106,8 @@ static unsigned int  sTimerRtLiveContexts = 0;
 #endif
 #if (ENT_TMR_IMPL_LINUX || ENT_TMR_IMPL_POSIX_FALLBACK) && defined(ENT_TIMER_TEST_HOOKS)
 static unsigned int  sTimerThreadSelfDetachSuccess = 0;
+static unsigned int  sTimerThreadSelfCleanupSuccess = 0;
+static unsigned int  sTimerThreadDetachFailuresToInject = 0;
 #endif
 
 static MSG_ID_T iUTL_TimerDeleteTimer(UTL_TIMER_T* pTimer);
@@ -266,6 +268,13 @@ static void iUTL_TimerTestThreadSelfDetached(void)
     iUTL_TimerLifecycleLockLeave();
 }
 
+static void iUTL_TimerTestThreadSelfCleaned(void)
+{
+    iUTL_TimerLifecycleLockEnter();
+    sTimerThreadSelfCleanupSuccess++;
+    iUTL_TimerLifecycleLockLeave();
+}
+
 int iUTL_TimerTestThreadSelfDetachCount(void)
 {
     unsigned int count;
@@ -275,10 +284,48 @@ int iUTL_TimerTestThreadSelfDetachCount(void)
     iUTL_TimerLifecycleLockLeave();
     return (int)count;
 }
+
+int iUTL_TimerTestThreadSelfCleanupCount(void)
+{
+    unsigned int count;
+
+    iUTL_TimerLifecycleLockEnter();
+    count = sTimerThreadSelfCleanupSuccess;
+    iUTL_TimerLifecycleLockLeave();
+    return (int)count;
+}
+
+void iUTL_TimerTestInjectThreadDetachFailure(unsigned int count)
+{
+    iUTL_TimerLifecycleLockEnter();
+    sTimerThreadDetachFailuresToInject = count;
+    iUTL_TimerLifecycleLockLeave();
+}
+
+static int iUTL_TimerDetachThread(pthread_t thread)
+{
+    BOOL injectFailure = FALSE;
+
+    iUTL_TimerLifecycleLockEnter();
+    if(sTimerThreadDetachFailuresToInject > 0)
+    {
+        sTimerThreadDetachFailuresToInject--;
+        injectFailure = TRUE;
+    }
+    iUTL_TimerLifecycleLockLeave();
+
+    if(injectFailure)
+    {
+        return EINVAL;
+    }
+    return pthread_detach(thread);
+}
 #endif
 #else
 #if ENT_TMR_IMPL_LINUX || ENT_TMR_IMPL_POSIX_FALLBACK
 #define iUTL_TimerTestThreadSelfDetached() ((void)0)
+#define iUTL_TimerTestThreadSelfCleaned() ((void)0)
+#define iUTL_TimerDetachThread(thread) pthread_detach(thread)
 #endif
 #endif
 
@@ -356,7 +403,7 @@ static MSG_ID_T iUTL_TimerCommitSelfDeleteThread(UTL_TIMER_T* pTimer, PTIMER_CTX
         return ENT_TMR_LIST_FAILED;
     }
 
-    detachSts = pthread_detach(timerCtx->timerThread);
+    detachSts = iUTL_TimerDetachThread(timerCtx->timerThread);
     if(detachSts != 0)
     {
         UTL_LockEnter(sTimerCtx.dllLock);
@@ -420,6 +467,7 @@ static void iUTL_TimerCleanupSelfDeletedThreadTimer(PTIMER_CTX_T timerCtx)
     {
         UTL_LockClose(&timerCtx->stateLock);
     }
+    iUTL_TimerTestThreadSelfCleaned();
     memset(timerCtx,0,sizeof(TIMER_CTX_T));
     free(timerCtx);
     iUTL_TimerLifecycleEndOp();
