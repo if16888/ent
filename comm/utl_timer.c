@@ -293,6 +293,7 @@ static MSG_ID_T iUTL_TimerDeleteRt(PTIMER_CTX_T timerCtx);
 #if ENT_TMR_IMPL_LINUX || ENT_TMR_IMPL_POSIX_FALLBACK
 static void* iUTL_TimerThread(void* data);
 static void iUTL_TimerCleanupSelfDeletedThreadTimer(PTIMER_CTX_T timerCtx);
+static MSG_ID_T iUTL_TimerCommitSelfDeleteThread(UTL_TIMER_T* pTimer, PTIMER_CTX_T timerCtx);
 #endif
 
 #if ENT_TMR_IMPL_LINUX || ENT_TMR_IMPL_POSIX_FALLBACK
@@ -325,6 +326,59 @@ static void iUTL_TimerThreadStateStop(PTIMER_CTX_T timerCtx, BOOL selfDelete)
         timerCtx->selfDeleteRequested = TRUE;
     }
     UTL_LockLeave(timerCtx->stateLock);
+}
+
+static MSG_ID_T iUTL_TimerCommitSelfDeleteThread(UTL_TIMER_T* pTimer, PTIMER_CTX_T timerCtx)
+{
+    MSG_ID_T sts;
+    DLL_D_HDR* tmpDll = NULL;
+    int detachSts;
+
+    /*
+     * The public Delete call already owns one lifecycle operation, so Close
+     * cannot start list traversal while ownership is being transferred.
+     *
+     * Successful transfer:
+     *   listed + joinable
+     *       -> unlisted + detached
+     *       -> retained lifecycle op
+     *       -> worker self-cleanup/free
+     *
+     * Detach failure restores list ownership so a later external Delete/Close
+     * can still join the worker. The self-delete flag is committed only after
+     * detach succeeds.
+     */
+    UTL_LockEnter(sTimerCtx.dllLock);
+    sts = UTL_DllRemCurr((DLL_D_HDR*)timerCtx,&tmpDll);
+    UTL_LockLeave(sTimerCtx.dllLock);
+    if(sts < 0)
+    {
+        return ENT_TMR_LIST_FAILED;
+    }
+
+    detachSts = pthread_detach(timerCtx->timerThread);
+    if(detachSts != 0)
+    {
+        UTL_LockEnter(sTimerCtx.dllLock);
+        sts = UTL_DllInsHead(&sTimerCtx.dllHeader,(DLL_D_HDR*)timerCtx);
+        UTL_LockLeave(sTimerCtx.dllLock);
+        if(sts < 0)
+        {
+            IENT_LOG_ERROR("timer self-delete ownership restore failed,sts [%d]\n",sts);
+            return ENT_TMR_LIST_FAILED;
+        }
+
+        IENT_LOG_ERROR("pthread_detach failed during timer self-delete,error [%d]->[%s]\n",
+                       detachSts,
+                       strerror(detachSts));
+        return ENT_TMR_THREAD_FAILED;
+    }
+
+    iUTL_TimerTestThreadSelfDetached();
+    iUTL_TimerLifecycleRetainOp();
+    iUTL_TimerThreadStateStop(timerCtx, TRUE);
+    *pTimer = NULL;
+    return ENT_SYS_NORMAL;
 }
 #endif
 
@@ -1213,44 +1267,7 @@ static MSG_ID_T iUTL_TimerDeleteTimer(UTL_TIMER_T* pTimer)
     iUTL_TimerThreadStateStop(timerCtx, FALSE);
     if(pthread_equal(pthread_self(), timerCtx->timerThread))
     {
-        int detachSts;
-
-        /*
-         * Transfer ownership atomically enough for Close: remove the context
-         * while this public Delete still owns a lifecycle operation, then
-         * detach the worker. On detach failure restore list ownership so a
-         * later external Delete/Close can still join and reclaim the thread.
-         */
-        UTL_LockEnter(sTimerCtx.dllLock);
-        sts = UTL_DllRemCurr((DLL_D_HDR*)timerCtx,&tmpDll);
-        UTL_LockLeave(sTimerCtx.dllLock);
-        if(sts < 0)
-        {
-            return ENT_TMR_LIST_FAILED;
-        }
-
-        detachSts = pthread_detach(timerCtx->timerThread);
-        if(detachSts != 0)
-        {
-            UTL_LockEnter(sTimerCtx.dllLock);
-            sts = UTL_DllInsHead(&sTimerCtx.dllHeader,(DLL_D_HDR*)timerCtx);
-            UTL_LockLeave(sTimerCtx.dllLock);
-            if(sts < 0)
-            {
-                return ENT_TMR_LIST_FAILED;
-            }
-
-            IENT_LOG_ERROR("pthread_detach failed during timer self-delete,error [%d]->[%s]\n",
-                           detachSts,
-                           strerror(detachSts));
-            return ENT_TMR_THREAD_FAILED;
-        }
-        iUTL_TimerTestThreadSelfDetached();
-
-        iUTL_TimerLifecycleRetainOp();
-        iUTL_TimerThreadStateStop(timerCtx, TRUE);
-        *pTimer = NULL;
-        return ENT_SYS_NORMAL;
+        return iUTL_TimerCommitSelfDeleteThread(pTimer, timerCtx);
     }
 
     pthread_join(timerCtx->timerThread, NULL);
@@ -1438,10 +1455,7 @@ static MSG_ID_T iUTL_TimerDeleteTimer(UTL_TIMER_T* pTimer)
     iUTL_TimerThreadStateStop(timerCtx, FALSE);
     if(pthread_equal(pthread_self(), timerCtx->timerThread))
     {
-        iUTL_TimerLifecycleRetainOp();
-        iUTL_TimerThreadStateStop(timerCtx, TRUE);
-        *pTimer = NULL;
-        return ENT_SYS_NORMAL;
+        return iUTL_TimerCommitSelfDeleteThread(pTimer, timerCtx);
     }
 
     pthread_join(timerCtx->timerThread, NULL);
