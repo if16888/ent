@@ -9,16 +9,16 @@
 #include "ent_msg.h"
 #include "ent_utility.h"
 
-#if defined(__SANITIZE_THREAD__)
-#define ENT_TEST_UNDER_TSAN 1
+#if defined(__SANITIZE_THREAD__) || defined(__SANITIZE_ADDRESS__)
+#define ENT_TEST_UNDER_SANITIZER 1
 #elif defined(__has_feature)
-#if __has_feature(thread_sanitizer)
-#define ENT_TEST_UNDER_TSAN 1
+#if __has_feature(thread_sanitizer) || __has_feature(address_sanitizer)
+#define ENT_TEST_UNDER_SANITIZER 1
 #endif
 #endif
 
-#ifndef ENT_TEST_UNDER_TSAN
-#define ENT_TEST_UNDER_TSAN 0
+#ifndef ENT_TEST_UNDER_SANITIZER
+#define ENT_TEST_UNDER_SANITIZER 0
 #endif
 
 ENT_CTX gEntCtx;
@@ -431,11 +431,11 @@ static int test_self_delete_reclaims_pthread_resource_before_close(void)
          * Joining an already-detached/terminated pthread is intentionally used
          * as a normal-build ownership probe, but sanitizer runtimes intercept
          * pthread_join() and do not provide a stable result for this invalid
-         * join target. Under TSan the detach-commit counter plus lifecycle-op
-         * drain is the synchronization proof; normal/self-hosted lanes retain
-         * the direct external-join regression.
+         * join target. Under sanitizers the detach-commit counter plus
+         * lifecycle-op drain is the synchronization proof; normal/self-hosted
+         * lanes retain the direct external-join regression.
          */
-        if(!ENT_TEST_UNDER_TSAN && pthread_join(probe.callback_thread, NULL) == 0)
+        if(!ENT_TEST_UNDER_SANITIZER && pthread_join(probe.callback_thread, NULL) == 0)
         {
             fprintf(stderr, "self-delete left a joinable pthread resource at iteration %d\n", iteration);
             goto CLOSE_TIMER;
