@@ -177,9 +177,13 @@ static int test_self_delete_close_waits_for_cleanup(void)
     memset(&probe, 0, sizeof(probe));
     probe.delete_status = -999;
     probe.close_status = -999;
-    if(pthread_mutex_init(&probe.lock, NULL) != 0 ||
-       pthread_cond_init(&probe.cv, NULL) != 0)
+    if(pthread_mutex_init(&probe.lock, NULL) != 0)
     {
+        return 1;
+    }
+    if(pthread_cond_init(&probe.cv, NULL) != 0)
+    {
+        pthread_mutex_destroy(&probe.lock);
         return 1;
     }
 
@@ -198,12 +202,7 @@ static int test_self_delete_close_waits_for_cleanup(void)
     }
     if(wait_flag(&probe.lock, &probe.cv, &probe.delete_returned) != 0)
     {
-        if(probe.timer != NULL)
-        {
-            UTL_TimerDelete(&probe.timer);
-        }
-        UTL_TimerClose();
-        goto CLEANUP;
+        goto RELEASE_CALLBACK;
     }
 
     if(probe.delete_status != ENT_SYS_NORMAL ||
