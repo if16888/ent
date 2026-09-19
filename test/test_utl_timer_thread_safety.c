@@ -40,6 +40,7 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle, const char* format, ...) { (void)logHan
 
 int iUTL_TimerTestLifecycleOpCount(void);
 int iUTL_TimerTestClosing(void);
+int iUTL_TimerTestThreadSelfDetachCount(void);
 
 typedef struct TIMER_THREAD_SAFETY_PROBE
 {
@@ -302,7 +303,6 @@ typedef struct TIMER_SELF_DELETE_RESOURCE_PROBE
     pthread_mutex_t lock;
     pthread_cond_t cv;
     UTL_TIMER_T timer;
-    pthread_t worker;
     int callback_done;
     MSG_ID_T delete_status;
 } TIMER_SELF_DELETE_RESOURCE_PROBE;
@@ -310,13 +310,7 @@ typedef struct TIMER_SELF_DELETE_RESOURCE_PROBE
 static void* self_delete_resource_cb(void* data)
 {
     TIMER_SELF_DELETE_RESOURCE_PROBE* probe = (TIMER_SELF_DELETE_RESOURCE_PROBE*)data;
-    MSG_ID_T sts;
-
-    pthread_mutex_lock(&probe->lock);
-    probe->worker = pthread_self();
-    pthread_mutex_unlock(&probe->lock);
-
-    sts = UTL_TimerDelete(&probe->timer);
+    MSG_ID_T sts = UTL_TimerDelete(&probe->timer);
 
     pthread_mutex_lock(&probe->lock);
     probe->delete_status = sts;
@@ -329,8 +323,7 @@ static void* self_delete_resource_cb(void* data)
 static int test_self_delete_reclaims_pthread_resource_before_close(void)
 {
     TIMER_SELF_DELETE_RESOURCE_PROBE probe;
-    pthread_t worker;
-    int join_status;
+    int detach_count_before;
     int i;
     int rc = 1;
 
@@ -350,6 +343,8 @@ static int test_self_delete_reclaims_pthread_resource_before_close(void)
     {
         goto CLEANUP;
     }
+    detach_count_before = iUTL_TimerTestThreadSelfDetachCount();
+
     if(UTL_TimerCreate(&probe.timer,
                        UTL_TIMER_E_PERIOD,
                        1,
@@ -365,11 +360,6 @@ static int test_self_delete_reclaims_pthread_resource_before_close(void)
         UTL_TimerClose();
         goto CLEANUP;
     }
-
-    pthread_mutex_lock(&probe.lock);
-    worker = probe.worker;
-    pthread_mutex_unlock(&probe.lock);
-
     if(probe.delete_status != ENT_SYS_NORMAL || probe.timer != NULL)
     {
         UTL_TimerClose();
@@ -387,14 +377,13 @@ static int test_self_delete_reclaims_pthread_resource_before_close(void)
     }
 
     /*
-     * A self-deleting timer owns pthread resource cleanup. Once its retained
-     * lifecycle op is gone, the worker must already be detached; a successful
-     * external join here would prove the library leaked a joinable resource.
+     * The detach counter advances only after pthread_detach() returns success.
+     * Once the retained lifecycle operation is also gone, the detached worker
+     * has completed context cleanup and Close must not own or join it.
      */
-    join_status = pthread_join(worker, NULL);
-    if(join_status == 0)
+    if(iUTL_TimerTestThreadSelfDetachCount() != detach_count_before + 1)
     {
-        fprintf(stderr, "self-deleting timer worker remained externally joinable\n");
+        fprintf(stderr, "self-delete did not commit pthread detach ownership\n");
         UTL_TimerClose();
         goto CLEANUP;
     }
