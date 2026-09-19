@@ -297,6 +297,121 @@ CLEANUP:
     return rc;
 }
 
+typedef struct TIMER_SELF_DELETE_RESOURCE_PROBE
+{
+    pthread_mutex_t lock;
+    pthread_cond_t cv;
+    UTL_TIMER_T timer;
+    pthread_t worker;
+    int callback_done;
+    MSG_ID_T delete_status;
+} TIMER_SELF_DELETE_RESOURCE_PROBE;
+
+static void* self_delete_resource_cb(void* data)
+{
+    TIMER_SELF_DELETE_RESOURCE_PROBE* probe = (TIMER_SELF_DELETE_RESOURCE_PROBE*)data;
+    MSG_ID_T sts;
+
+    pthread_mutex_lock(&probe->lock);
+    probe->worker = pthread_self();
+    pthread_mutex_unlock(&probe->lock);
+
+    sts = UTL_TimerDelete(&probe->timer);
+
+    pthread_mutex_lock(&probe->lock);
+    probe->delete_status = sts;
+    probe->callback_done = 1;
+    pthread_cond_broadcast(&probe->cv);
+    pthread_mutex_unlock(&probe->lock);
+    return NULL;
+}
+
+static int test_self_delete_reclaims_pthread_resource_before_close(void)
+{
+    TIMER_SELF_DELETE_RESOURCE_PROBE probe;
+    pthread_t worker;
+    int join_status;
+    int i;
+    int rc = 1;
+
+    memset(&probe, 0, sizeof(probe));
+    probe.delete_status = -999;
+    if(pthread_mutex_init(&probe.lock, NULL) != 0)
+    {
+        return 1;
+    }
+    if(pthread_cond_init(&probe.cv, NULL) != 0)
+    {
+        pthread_mutex_destroy(&probe.lock);
+        return 1;
+    }
+
+    if(UTL_TimerInit() != ENT_SYS_NORMAL)
+    {
+        goto CLEANUP;
+    }
+    if(UTL_TimerCreate(&probe.timer,
+                       UTL_TIMER_E_PERIOD,
+                       1,
+                       self_delete_resource_cb,
+                       &probe) != ENT_SYS_NORMAL)
+    {
+        UTL_TimerClose();
+        goto CLEANUP;
+    }
+
+    if(wait_flag(&probe.lock, &probe.cv, &probe.callback_done) != 0)
+    {
+        UTL_TimerClose();
+        goto CLEANUP;
+    }
+
+    pthread_mutex_lock(&probe.lock);
+    worker = probe.worker;
+    pthread_mutex_unlock(&probe.lock);
+
+    if(probe.delete_status != ENT_SYS_NORMAL || probe.timer != NULL)
+    {
+        UTL_TimerClose();
+        goto CLEANUP;
+    }
+
+    for(i = 0; i < 2000 && iUTL_TimerTestLifecycleOpCount() != 0; ++i)
+    {
+        sleep_ms(1);
+    }
+    if(iUTL_TimerTestLifecycleOpCount() != 0)
+    {
+        UTL_TimerClose();
+        goto CLEANUP;
+    }
+
+    /*
+     * A self-deleting timer owns pthread resource cleanup. Once its retained
+     * lifecycle op is gone, the worker must already be detached; a successful
+     * external join here would prove the library leaked a joinable resource.
+     */
+    join_status = pthread_join(worker, NULL);
+    if(join_status == 0)
+    {
+        fprintf(stderr, "self-deleting timer worker remained externally joinable\n");
+        UTL_TimerClose();
+        goto CLEANUP;
+    }
+
+    if(UTL_TimerClose() != ENT_SYS_NORMAL)
+    {
+        goto CLEANUP;
+    }
+
+    rc = 0;
+
+CLEANUP:
+    pthread_cond_destroy(&probe.cv);
+    pthread_mutex_destroy(&probe.lock);
+    return rc;
+}
+
 int main(void)
 {
     enum { ITERATIONS = 100 };
@@ -370,6 +485,12 @@ int main(void)
     if(test_self_delete_close_waits_for_cleanup() != 0)
     {
         fprintf(stderr, "self-delete close lifecycle probe failed\n");
+        return EXIT_FAILURE;
+    }
+
+    if(test_self_delete_reclaims_pthread_resource_before_close() != 0)
+    {
+        fprintf(stderr, "self-delete pthread resource probe failed\n");
         return EXIT_FAILURE;
     }
 
