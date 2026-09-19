@@ -231,6 +231,16 @@ int iUTL_TimerTestLifecycleOpCount(void)
     iUTL_TimerLifecycleLockLeave();
     return (int)count;
 }
+
+int iUTL_TimerTestClosing(void)
+{
+    BOOL closing;
+
+    iUTL_TimerLifecycleLockEnter();
+    closing = sTimerClosing;
+    iUTL_TimerLifecycleLockLeave();
+    return closing ? 1 : 0;
+}
 #endif
 
 #if ENT_TMR_IMPL_LINUX
