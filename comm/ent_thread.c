@@ -62,12 +62,47 @@ enum
     ENT_THREAD_START_ABORT_E
 };
 
+#ifdef ENT_THREAD_TEST_HOOKS
+static void (*sThreadTestBeforeStartHook)(void) = NULL;
+static void (*sThreadTestCloseJoinHook)(void) = NULL;
+
+void iENT_ThreadTestSetBeforeStartHook(void (*hook)(void))
+{
+    sThreadTestBeforeStartHook = hook;
+}
+
+void iENT_ThreadTestSetCloseJoinHook(void (*hook)(void))
+{
+    sThreadTestCloseJoinHook = hook;
+}
+
+static void iENT_ThreadTestBeforeStart(void)
+{
+    if(sThreadTestBeforeStartHook != NULL)
+    {
+        sThreadTestBeforeStartHook();
+    }
+}
+
+static void iENT_ThreadTestCloseJoin(void)
+{
+    if(sThreadTestCloseJoinHook != NULL)
+    {
+        sThreadTestCloseJoinHook();
+    }
+}
+#else
+#define iENT_ThreadTestBeforeStart() ((void)0)
+#define iENT_ThreadTestCloseJoin() ((void)0)
+#endif
+
 #ifdef _WIN32
 static DWORD WINAPI iENT_ThreadProc(void* data)
 {
     THREAD_DB* thDb = (THREAD_DB*)data;
     LONG state;
 
+    iENT_ThreadTestBeforeStart();
     EnterCriticalSection(&thDb->startLock);
     while(thDb->startState == ENT_THREAD_START_PENDING_E)
     {
@@ -216,6 +251,7 @@ static void* iENT_ThreadProc(void* data)
         return NULL;
     }
 
+    iENT_ThreadTestBeforeStart();
     pthread_mutex_lock(&thDb->doneMutex);
     while(thDb->startState == ENT_THREAD_START_PENDING_E)
     {
@@ -540,6 +576,7 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
         thDb = (THREAD_DB*)tmp;
         if(thDb->thHandle)
         {
+            iENT_ThreadTestCloseJoin();
             waitSts = WaitForSingleObject(thDb->thHandle, INFINITE);
             if(waitSts != WAIT_OBJECT_0)
             {
@@ -898,8 +935,7 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
         }
         thDb = (THREAD_DB*)tmp;
         pthread_mutex_lock(&thDb->doneMutex);
-        thDb->startState = ENT_THREAD_START_ABORT_E;
-        pthread_cond_broadcast(&thDb->doneCv);
+        iENT_ThreadTestCloseJoin();
         while(!thDb->finished)
         {
             pthread_cond_wait(&thDb->doneCv, &thDb->doneMutex);
