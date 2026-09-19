@@ -11,6 +11,9 @@
 
 ENT_CTX gEntCtx;
 
+int iUTL_TimerTestLifecycleOpCount(void);
+int iUTL_TimerTestClosing(void);
+
 typedef struct TIMER_THREAD_SAFETY_PROBE
 {
     pthread_mutex_t lock;
@@ -94,6 +97,180 @@ static void sleep_ms(int ms)
     nanosleep(&req, NULL);
 }
 
+typedef struct TIMER_SELF_DELETE_CLOSE_PROBE
+{
+    pthread_mutex_t lock;
+    pthread_cond_t cv;
+    UTL_TIMER_T timer;
+    int delete_returned;
+    int release_callback;
+    int close_done;
+    MSG_ID_T delete_status;
+    MSG_ID_T close_status;
+} TIMER_SELF_DELETE_CLOSE_PROBE;
+
+static void* self_delete_cb(void* data)
+{
+    TIMER_SELF_DELETE_CLOSE_PROBE* probe = (TIMER_SELF_DELETE_CLOSE_PROBE*)data;
+    MSG_ID_T sts = UTL_TimerDelete(&probe->timer);
+
+    pthread_mutex_lock(&probe->lock);
+    probe->delete_status = sts;
+    probe->delete_returned = 1;
+    pthread_cond_broadcast(&probe->cv);
+    while(!probe->release_callback)
+    {
+        pthread_cond_wait(&probe->cv, &probe->lock);
+    }
+    pthread_mutex_unlock(&probe->lock);
+    return NULL;
+}
+
+static void* close_thread(void* data)
+{
+    TIMER_SELF_DELETE_CLOSE_PROBE* probe = (TIMER_SELF_DELETE_CLOSE_PROBE*)data;
+    MSG_ID_T sts = UTL_TimerClose();
+
+    pthread_mutex_lock(&probe->lock);
+    probe->close_status = sts;
+    probe->close_done = 1;
+    pthread_cond_broadcast(&probe->cv);
+    pthread_mutex_unlock(&probe->lock);
+    return NULL;
+}
+
+static int wait_flag(pthread_mutex_t* lock,
+                     pthread_cond_t* cv,
+                     int* flag)
+{
+    struct timespec deadline;
+    int rc = 0;
+
+    if(clock_gettime(CLOCK_REALTIME, &deadline) != 0)
+    {
+        return -1;
+    }
+    deadline.tv_sec += 2;
+
+    pthread_mutex_lock(lock);
+    while(!*flag)
+    {
+        rc = pthread_cond_timedwait(cv, lock, &deadline);
+        if(rc != 0)
+        {
+            pthread_mutex_unlock(lock);
+            return -1;
+        }
+    }
+    pthread_mutex_unlock(lock);
+    return 0;
+}
+
+static int test_self_delete_close_waits_for_cleanup(void)
+{
+    TIMER_SELF_DELETE_CLOSE_PROBE probe;
+    pthread_t closer;
+    int closer_started = 0;
+    int rc = 1;
+    int i;
+
+    memset(&probe, 0, sizeof(probe));
+    probe.delete_status = -999;
+    probe.close_status = -999;
+    if(pthread_mutex_init(&probe.lock, NULL) != 0 ||
+       pthread_cond_init(&probe.cv, NULL) != 0)
+    {
+        return 1;
+    }
+
+    if(UTL_TimerInit() != ENT_SYS_NORMAL)
+    {
+        goto CLEANUP;
+    }
+    if(UTL_TimerCreate(&probe.timer,
+                       UTL_TIMER_E_PERIOD,
+                       1,
+                       self_delete_cb,
+                       &probe) != ENT_SYS_NORMAL)
+    {
+        UTL_TimerClose();
+        goto CLEANUP;
+    }
+    if(wait_flag(&probe.lock, &probe.cv, &probe.delete_returned) != 0)
+    {
+        if(probe.timer != NULL)
+        {
+            UTL_TimerDelete(&probe.timer);
+        }
+        UTL_TimerClose();
+        goto CLEANUP;
+    }
+
+    if(probe.delete_status != ENT_SYS_NORMAL ||
+       probe.timer != NULL ||
+       iUTL_TimerTestLifecycleOpCount() != 1)
+    {
+        goto RELEASE_CALLBACK;
+    }
+
+    if(pthread_create(&closer, NULL, close_thread, &probe) != 0)
+    {
+        goto RELEASE_CALLBACK;
+    }
+    closer_started = 1;
+
+    for(i = 0; i < 2000 && !iUTL_TimerTestClosing(); ++i)
+    {
+        sleep_ms(1);
+    }
+    if(!iUTL_TimerTestClosing())
+    {
+        goto RELEASE_CALLBACK;
+    }
+
+    pthread_mutex_lock(&probe.lock);
+    if(probe.close_done)
+    {
+        pthread_mutex_unlock(&probe.lock);
+        goto RELEASE_CALLBACK;
+    }
+    pthread_mutex_unlock(&probe.lock);
+
+    if(iUTL_TimerTestLifecycleOpCount() != 1)
+    {
+        goto RELEASE_CALLBACK;
+    }
+
+    rc = 0;
+
+RELEASE_CALLBACK:
+    pthread_mutex_lock(&probe.lock);
+    probe.release_callback = 1;
+    pthread_cond_broadcast(&probe.cv);
+    pthread_mutex_unlock(&probe.lock);
+
+    if(closer_started)
+    {
+        pthread_join(closer, NULL);
+        if(probe.close_status != ENT_SYS_NORMAL ||
+           iUTL_TimerTestLifecycleOpCount() != 0 ||
+           iUTL_TimerTestClosing())
+        {
+            rc = 1;
+        }
+    }
+    else
+    {
+        UTL_TimerClose();
+        rc = 1;
+    }
+
+CLEANUP:
+    pthread_cond_destroy(&probe.cv);
+    pthread_mutex_destroy(&probe.lock);
+    return rc;
+}
+
 int main(void)
 {
     enum { ITERATIONS = 100 };
@@ -163,5 +340,12 @@ int main(void)
     }
 
     probe_destroy(&probe);
+
+    if(test_self_delete_close_waits_for_cleanup() != 0)
+    {
+        fprintf(stderr, "self-delete close lifecycle probe failed\n");
+        return EXIT_FAILURE;
+    }
+
     return EXIT_SUCCESS;
 }
