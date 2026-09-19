@@ -221,6 +221,18 @@ int iUTL_TimerTestRtLiveContextCount(void)
 #define iUTL_TimerTestRtContextDestroyed() ((void)0)
 #endif
 
+#ifdef ENT_TIMER_TEST_HOOKS
+int iUTL_TimerTestLifecycleOpCount(void)
+{
+    unsigned int count;
+
+    iUTL_TimerLifecycleLockEnter();
+    count = sTimerLifecycleOps;
+    iUTL_TimerLifecycleLockLeave();
+    return (int)count;
+}
+#endif
+
 #if ENT_TMR_IMPL_LINUX
 static long long iUTL_TimerMonotonicNs(void);
 static void* iUTL_TimerRtWorker(void* data);
@@ -309,6 +321,7 @@ static void iUTL_TimerCleanupSelfDeletedThreadTimer(PTIMER_CTX_T timerCtx)
 
     if(closeOwnsCleanup)
     {
+        iUTL_TimerLifecycleEndOp();
         return;
     }
 
@@ -320,6 +333,7 @@ static void iUTL_TimerCleanupSelfDeletedThreadTimer(PTIMER_CTX_T timerCtx)
         }
         memset(timerCtx,0,sizeof(TIMER_CTX_T));
         free(timerCtx);
+        iUTL_TimerLifecycleEndOp();
         return;
     }
 
@@ -337,6 +351,7 @@ static void iUTL_TimerCleanupSelfDeletedThreadTimer(PTIMER_CTX_T timerCtx)
     }
     memset(timerCtx,0,sizeof(TIMER_CTX_T));
     free(timerCtx);
+    iUTL_TimerLifecycleEndOp();
 }
 
 static void* iUTL_TimerThread(void* data)
@@ -1178,6 +1193,7 @@ static MSG_ID_T iUTL_TimerDeleteTimer(UTL_TIMER_T* pTimer)
     iUTL_TimerThreadStateStop(timerCtx, FALSE);
     if(pthread_equal(pthread_self(), timerCtx->timerThread))
     {
+        iUTL_TimerLifecycleRetainOp();
         iUTL_TimerThreadStateStop(timerCtx, TRUE);
         *pTimer = NULL;
         return ENT_SYS_NORMAL;
@@ -1368,6 +1384,7 @@ static MSG_ID_T iUTL_TimerDeleteTimer(UTL_TIMER_T* pTimer)
     iUTL_TimerThreadStateStop(timerCtx, FALSE);
     if(pthread_equal(pthread_self(), timerCtx->timerThread))
     {
+        iUTL_TimerLifecycleRetainOp();
         iUTL_TimerThreadStateStop(timerCtx, TRUE);
         *pTimer = NULL;
         return ENT_SYS_NORMAL;
