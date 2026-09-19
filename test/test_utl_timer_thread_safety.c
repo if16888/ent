@@ -322,8 +322,10 @@ static void* self_delete_resource_cb(void* data)
 
 static int test_self_delete_reclaims_pthread_resource_before_close(void)
 {
+    enum { SELF_DELETE_ITERATIONS = 32 };
     TIMER_SELF_DELETE_RESOURCE_PROBE probe;
     int detach_count_before;
+    int iteration;
     int i;
     int rc = 1;
 
@@ -345,47 +347,56 @@ static int test_self_delete_reclaims_pthread_resource_before_close(void)
     }
     detach_count_before = iUTL_TimerTestThreadSelfDetachCount();
 
-    if(UTL_TimerCreate(&probe.timer,
-                       UTL_TIMER_E_PERIOD,
-                       1,
-                       self_delete_resource_cb,
-                       &probe) != ENT_SYS_NORMAL)
+    for(iteration = 0; iteration < SELF_DELETE_ITERATIONS; ++iteration)
     {
-        UTL_TimerClose();
-        goto CLEANUP;
-    }
+        pthread_mutex_lock(&probe.lock);
+        probe.timer = NULL;
+        probe.callback_done = 0;
+        probe.delete_status = -999;
+        pthread_mutex_unlock(&probe.lock);
 
-    if(wait_flag(&probe.lock, &probe.cv, &probe.callback_done) != 0)
-    {
-        UTL_TimerClose();
-        goto CLEANUP;
-    }
-    if(probe.delete_status != ENT_SYS_NORMAL || probe.timer != NULL)
-    {
-        UTL_TimerClose();
-        goto CLEANUP;
-    }
+        if(UTL_TimerCreate(&probe.timer,
+                           UTL_TIMER_E_PERIOD,
+                           1,
+                           self_delete_resource_cb,
+                           &probe) != ENT_SYS_NORMAL)
+        {
+            fprintf(stderr, "self-delete resource timer create failed at iteration %d\n", iteration);
+            goto CLOSE_TIMER;
+        }
 
-    for(i = 0; i < 2000 && iUTL_TimerTestLifecycleOpCount() != 0; ++i)
-    {
-        sleep_ms(1);
-    }
-    if(iUTL_TimerTestLifecycleOpCount() != 0)
-    {
-        UTL_TimerClose();
-        goto CLEANUP;
-    }
+        if(wait_flag(&probe.lock, &probe.cv, &probe.callback_done) != 0)
+        {
+            fprintf(stderr, "self-delete resource callback timed out at iteration %d\n", iteration);
+            goto CLOSE_TIMER;
+        }
+        if(probe.delete_status != ENT_SYS_NORMAL || probe.timer != NULL)
+        {
+            fprintf(stderr, "self-delete resource ownership failed at iteration %d\n", iteration);
+            goto CLOSE_TIMER;
+        }
 
-    /*
-     * The detach counter advances only after pthread_detach() returns success.
-     * Once the retained lifecycle operation is also gone, the detached worker
-     * has completed context cleanup and Close must not own or join it.
-     */
-    if(iUTL_TimerTestThreadSelfDetachCount() != detach_count_before + 1)
-    {
-        fprintf(stderr, "self-delete did not commit pthread detach ownership\n");
-        UTL_TimerClose();
-        goto CLEANUP;
+        for(i = 0; i < 2000 && iUTL_TimerTestLifecycleOpCount() != 0; ++i)
+        {
+            sleep_ms(1);
+        }
+        if(iUTL_TimerTestLifecycleOpCount() != 0)
+        {
+            fprintf(stderr, "self-delete cleanup did not finish at iteration %d\n", iteration);
+            goto CLOSE_TIMER;
+        }
+
+        /*
+         * The counter advances only after pthread_detach() succeeds. Requiring
+         * one new detach commit for every self-delete iteration proves that
+         * joinable pthread resources are not abandoned behind an unlisted
+         * timer context.
+         */
+        if(iUTL_TimerTestThreadSelfDetachCount() != detach_count_before + iteration + 1)
+        {
+            fprintf(stderr, "self-delete did not commit pthread detach at iteration %d\n", iteration);
+            goto CLOSE_TIMER;
+        }
     }
 
     if(UTL_TimerClose() != ENT_SYS_NORMAL)
@@ -394,6 +405,14 @@ static int test_self_delete_reclaims_pthread_resource_before_close(void)
     }
 
     rc = 0;
+    goto CLEANUP;
+
+CLOSE_TIMER:
+    if(probe.timer != NULL)
+    {
+        (void)UTL_TimerDelete(&probe.timer);
+    }
+    (void)UTL_TimerClose();
 
 CLEANUP:
     pthread_cond_destroy(&probe.cv);
