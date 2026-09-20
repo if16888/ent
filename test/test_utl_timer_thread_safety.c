@@ -133,6 +133,7 @@ typedef struct TIMER_SELF_DELETE_CLOSE_PROBE
     pthread_cond_t cv;
     UTL_TIMER_T timer;
     int create_done;
+    int callback_waiting_for_create;
     int delete_returned;
     int release_callback;
     int close_done;
@@ -146,6 +147,11 @@ static void* self_delete_cb(void* data)
     MSG_ID_T sts;
 
     pthread_mutex_lock(&probe->lock);
+    if(!probe->create_done)
+    {
+        probe->callback_waiting_for_create = 1;
+        pthread_cond_broadcast(&probe->cv);
+    }
     while(!probe->create_done)
     {
         pthread_cond_wait(&probe->cv, &probe->lock);
@@ -241,6 +247,16 @@ static int test_self_delete_close_waits_for_cleanup(void)
         goto CLEANUP;
     }
 
+    /*
+     * Force the publication handshake to execute on every run. The callback
+     * must reach the gate while create_done is still false; only then may the
+     * creator publish the returned timer handle and release self-delete.
+     */
+    if(wait_flag(&probe.lock, &probe.cv, &probe.callback_waiting_for_create) != 0)
+    {
+        goto RELEASE_CALLBACK;
+    }
+
     pthread_mutex_lock(&probe.lock);
     probe.create_done = 1;
     pthread_cond_broadcast(&probe.cv);
@@ -290,6 +306,7 @@ static int test_self_delete_close_waits_for_cleanup(void)
 
 RELEASE_CALLBACK:
     pthread_mutex_lock(&probe.lock);
+    probe.create_done = 1;
     probe.release_callback = 1;
     pthread_cond_broadcast(&probe.cv);
     pthread_mutex_unlock(&probe.lock);
