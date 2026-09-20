@@ -558,6 +558,12 @@ static int test_sqlite_close_busy_preserves_handle_for_retry(void)
         goto END_OF_ROUTINE;
     }
 
+    if(expect_true(ENT_DbOpen(db_handle) == ENT_SYS_NORMAL,
+                   "a handle restored after retryable close failure should remain usable") != 0)
+    {
+        goto END_OF_ROUTINE;
+    }
+
     sqlite3_finalize(stmt);
     stmt = NULL;
     if(expect_true(ENT_DbCloseHandle(&db_handle) == ENT_SYS_NORMAL,

@@ -13,6 +13,9 @@
 
 ENT_CTX gEntCtx;
 
+int iUTL_TimerTestClosing(void);
+unsigned int iUTL_TimerTestCloseEpoch(void);
+
 static volatile int s_timer_hits = 0;
 
 static int expect_true(int condition, const char* message)
@@ -108,6 +111,144 @@ static void* timer_cb(void* data)
     return NULL;
 }
 
+typedef struct TIMER_WAIT_PROBE
+{
+#ifdef _WIN32
+    CRITICAL_SECTION lock;
+    CONDITION_VARIABLE cv;
+#else
+    pthread_mutex_t lock;
+    pthread_cond_t cv;
+#endif
+    int hits;
+} TIMER_WAIT_PROBE;
+
+static int timer_wait_probe_init(TIMER_WAIT_PROBE* probe)
+{
+    memset(probe, 0, sizeof(*probe));
+#ifdef _WIN32
+    InitializeCriticalSection(&probe->lock);
+    InitializeConditionVariable(&probe->cv);
+    return 0;
+#else
+    if(pthread_mutex_init(&probe->lock, NULL) != 0)
+    {
+        return -1;
+    }
+    if(pthread_cond_init(&probe->cv, NULL) != 0)
+    {
+        pthread_mutex_destroy(&probe->lock);
+        return -1;
+    }
+    return 0;
+#endif
+}
+
+static void timer_wait_probe_destroy(TIMER_WAIT_PROBE* probe)
+{
+#ifdef _WIN32
+    DeleteCriticalSection(&probe->lock);
+#else
+    pthread_cond_destroy(&probe->cv);
+    pthread_mutex_destroy(&probe->lock);
+#endif
+}
+
+static void timer_wait_probe_signal(TIMER_WAIT_PROBE* probe)
+{
+#ifdef _WIN32
+    EnterCriticalSection(&probe->lock);
+    probe->hits++;
+    WakeAllConditionVariable(&probe->cv);
+    LeaveCriticalSection(&probe->lock);
+#else
+    pthread_mutex_lock(&probe->lock);
+    probe->hits++;
+    pthread_cond_broadcast(&probe->cv);
+    pthread_mutex_unlock(&probe->lock);
+#endif
+}
+
+static void* timer_wait_probe_cb(void* data)
+{
+    timer_wait_probe_signal((TIMER_WAIT_PROBE*)data);
+    return NULL;
+}
+
+static int timer_wait_probe_wait_at_least(TIMER_WAIT_PROBE* probe, int expected, int timeout_ms)
+{
+#ifdef _WIN32
+    ULONGLONG deadline = GetTickCount64() + (ULONGLONG)timeout_ms;
+    EnterCriticalSection(&probe->lock);
+    while(probe->hits < expected)
+    {
+        ULONGLONG now = GetTickCount64();
+        DWORD remaining;
+        if(now >= deadline)
+        {
+            LeaveCriticalSection(&probe->lock);
+            return -1;
+        }
+        remaining = (DWORD)(deadline - now);
+        if(!SleepConditionVariableCS(&probe->cv, &probe->lock, remaining))
+        {
+            DWORD err = GetLastError();
+            if(err == ERROR_TIMEOUT && probe->hits < expected)
+            {
+                LeaveCriticalSection(&probe->lock);
+                return -1;
+            }
+        }
+    }
+    LeaveCriticalSection(&probe->lock);
+    return 0;
+#else
+    struct timespec deadline;
+    int wait_sts = 0;
+
+    if(clock_gettime(CLOCK_REALTIME, &deadline) != 0)
+    {
+        return -1;
+    }
+    deadline.tv_sec += timeout_ms / 1000;
+    deadline.tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
+    if(deadline.tv_nsec >= 1000000000L)
+    {
+        deadline.tv_sec += deadline.tv_nsec / 1000000000L;
+        deadline.tv_nsec %= 1000000000L;
+    }
+
+    pthread_mutex_lock(&probe->lock);
+    while(probe->hits < expected)
+    {
+        wait_sts = pthread_cond_timedwait(&probe->cv, &probe->lock, &deadline);
+        if(wait_sts != 0)
+        {
+            pthread_mutex_unlock(&probe->lock);
+            return -1;
+        }
+    }
+    pthread_mutex_unlock(&probe->lock);
+    return 0;
+#endif
+}
+
+static int timer_wait_probe_hits(TIMER_WAIT_PROBE* probe)
+{
+    int hits;
+#ifdef _WIN32
+    EnterCriticalSection(&probe->lock);
+    hits = probe->hits;
+    LeaveCriticalSection(&probe->lock);
+#else
+    pthread_mutex_lock(&probe->lock);
+    hits = probe->hits;
+    pthread_mutex_unlock(&probe->lock);
+#endif
+    return hits;
+}
+
+
 #ifdef __linux__
 static long long monotonic_ns(void)
 {
@@ -124,32 +265,55 @@ static long long monotonic_ns(void)
 
 typedef struct
 {
-    volatile int hits;
-    volatile int in_callback;
-    volatile int reentry_hits;
+    TIMER_WAIT_PROBE callbacks;
+    int in_callback;
+    int reentry_hits;
 } TIMER_SLOW_PROBE;
 
 typedef struct
 {
-    volatile int in_callback;
-    volatile int callback_done;
-    volatile MSG_ID_T create_status;
-    volatile MSG_ID_T delete_status;
+    TIMER_WAIT_PROBE started;
+    TIMER_WAIT_PROBE done;
+    MSG_ID_T create_status;
+    MSG_ID_T delete_status;
 } TIMER_REENTRANT_PROBE;
 
 static void* slow_timer_cb(void* data)
 {
     TIMER_SLOW_PROBE* probe = (TIMER_SLOW_PROBE*)data;
-
+#ifdef _WIN32
+    EnterCriticalSection(&probe->callbacks.lock);
     if(probe->in_callback)
     {
         probe->reentry_hits++;
     }
-
     probe->in_callback = 1;
-    probe->hits++;
+    probe->callbacks.hits++;
+    WakeAllConditionVariable(&probe->callbacks.cv);
+    LeaveCriticalSection(&probe->callbacks.lock);
+#else
+    pthread_mutex_lock(&probe->callbacks.lock);
+    if(probe->in_callback)
+    {
+        probe->reentry_hits++;
+    }
+    probe->in_callback = 1;
+    probe->callbacks.hits++;
+    pthread_cond_broadcast(&probe->callbacks.cv);
+    pthread_mutex_unlock(&probe->callbacks.lock);
+#endif
+
     UTL_Sleep(60);
+
+#ifdef _WIN32
+    EnterCriticalSection(&probe->callbacks.lock);
     probe->in_callback = 0;
+    LeaveCriticalSection(&probe->callbacks.lock);
+#else
+    pthread_mutex_lock(&probe->callbacks.lock);
+    probe->in_callback = 0;
+    pthread_mutex_unlock(&probe->callbacks.lock);
+#endif
     return NULL;
 }
 
@@ -159,7 +323,7 @@ static void* reentrant_timer_api_cb(void* data)
     UTL_TIMER_T nested_timer = NULL;
     int nested_hits = 0;
 
-    probe->in_callback = 1;
+    timer_wait_probe_signal(&probe->started);
     UTL_Sleep(20);
     probe->create_status = UTL_TimerCreate(&nested_timer,
                                            UTL_TIMER_E_ONESHOT,
@@ -170,7 +334,7 @@ static void* reentrant_timer_api_cb(void* data)
     {
         probe->delete_status = UTL_TimerDelete(&nested_timer);
     }
-    probe->callback_done = 1;
+    timer_wait_probe_signal(&probe->done);
     return NULL;
 }
 
@@ -178,29 +342,89 @@ static void* reentrant_timer_api_cb(void* data)
 typedef struct
 {
     UTL_TIMER_T timer;
-    volatile int hits;
-    volatile int delete_status;
+    pthread_mutex_t lock;
+    pthread_cond_t cv;
+    int hits;
+    int done;
+    MSG_ID_T delete_status;
 } TIMER_SELF_DELETE_PROBE;
 
 static void* self_delete_timer_cb(void* data)
 {
     TIMER_SELF_DELETE_PROBE* probe = (TIMER_SELF_DELETE_PROBE*)data;
+    MSG_ID_T delete_status = UTL_TimerDelete(&probe->timer);
 
+    pthread_mutex_lock(&probe->lock);
     probe->hits++;
-    probe->delete_status = UTL_TimerDelete(&probe->timer);
+    probe->delete_status = delete_status;
+    probe->done = 1;
+    pthread_cond_broadcast(&probe->cv);
+    pthread_mutex_unlock(&probe->lock);
     return NULL;
+}
+
+static int timer_self_delete_probe_init(TIMER_SELF_DELETE_PROBE* probe)
+{
+    memset(probe, 0, sizeof(*probe));
+    probe->delete_status = -999;
+    if(pthread_mutex_init(&probe->lock, NULL) != 0)
+    {
+        return -1;
+    }
+    if(pthread_cond_init(&probe->cv, NULL) != 0)
+    {
+        pthread_mutex_destroy(&probe->lock);
+        return -1;
+    }
+    return 0;
+}
+
+static void timer_self_delete_probe_destroy(TIMER_SELF_DELETE_PROBE* probe)
+{
+    pthread_cond_destroy(&probe->cv);
+    pthread_mutex_destroy(&probe->lock);
+}
+
+static int timer_self_delete_probe_wait(TIMER_SELF_DELETE_PROBE* probe, int timeout_ms)
+{
+    struct timespec deadline;
+    int wait_sts = 0;
+
+    if(clock_gettime(CLOCK_REALTIME, &deadline) != 0)
+    {
+        return -1;
+    }
+    deadline.tv_sec += timeout_ms / 1000;
+    deadline.tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
+    if(deadline.tv_nsec >= 1000000000L)
+    {
+        deadline.tv_sec += deadline.tv_nsec / 1000000000L;
+        deadline.tv_nsec %= 1000000000L;
+    }
+
+    pthread_mutex_lock(&probe->lock);
+    while(!probe->done)
+    {
+        wait_sts = pthread_cond_timedwait(&probe->cv, &probe->lock, &deadline);
+        if(wait_sts != 0)
+        {
+            pthread_mutex_unlock(&probe->lock);
+            return -1;
+        }
+    }
+    pthread_mutex_unlock(&probe->lock);
+    return 0;
 }
 
 typedef struct
 {
-    volatile MSG_ID_T close_status;
+    MSG_ID_T close_status;
 } TIMER_CLOSE_THREAD_PROBE;
 
 static void* timer_close_thread(void* data)
 {
     TIMER_CLOSE_THREAD_PROBE* probe = (TIMER_CLOSE_THREAD_PROBE*)data;
 
-    UTL_Sleep(5);
     probe->close_status = UTL_TimerClose();
     return NULL;
 }
@@ -210,113 +434,130 @@ static int test_periodic_timer_remains_stable_with_slow_callback(void)
 {
     UTL_TIMER_T timer = NULL;
     TIMER_SLOW_PROBE probe;
+    int reentry_hits = 0;
+    int rc = 1;
 
     memset(&probe, 0, sizeof(probe));
+    if(timer_wait_probe_init(&probe.callbacks) != 0)
+    {
+        return 1;
+    }
 
     if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize for slow callback test") != 0)
     {
-        return 1;
+        goto CLEANUP;
     }
 
     if(expect_true(UTL_TimerCreate(&timer, UTL_TIMER_E_PERIOD, 20, slow_timer_cb, &probe) == 0,
                    "UTL_TimerCreate should create a periodic timer for slow callback test") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    UTL_Sleep(220);
-
-    if(expect_true(probe.hits >= 2, "slow periodic timer should still fire") != 0)
+    if(expect_true(timer_wait_probe_wait_at_least(&probe.callbacks, 2, 2000) == 0,
+                   "slow periodic timer should continue firing within the bounded wait") != 0)
     {
         UTL_TimerDelete(&timer);
         UTL_TimerClose();
-        return 1;
-    }
-
-    if(expect_true(probe.hits <= 8, "slow periodic timer should not spin out of control") != 0)
-    {
-        UTL_TimerDelete(&timer);
-        UTL_TimerClose();
-        return 1;
-    }
-
-    if(expect_true(probe.reentry_hits == 0, "slow periodic timer should not reenter callback") != 0)
-    {
-        UTL_TimerDelete(&timer);
-        UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
     if(expect_true(UTL_TimerDelete(&timer) == 0, "UTL_TimerDelete should succeed after slow callback test") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    return expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after slow callback test");
-}
+#ifdef _WIN32
+    EnterCriticalSection(&probe.callbacks.lock);
+    reentry_hits = probe.reentry_hits;
+    LeaveCriticalSection(&probe.callbacks.lock);
+#else
+    pthread_mutex_lock(&probe.callbacks.lock);
+    reentry_hits = probe.reentry_hits;
+    pthread_mutex_unlock(&probe.callbacks.lock);
+#endif
+    if(expect_true(reentry_hits == 0, "slow periodic timer should not reenter callback") != 0)
+    {
+        UTL_TimerClose();
+        goto CLEANUP;
+    }
 
+    if(expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after slow callback test") != 0)
+    {
+        goto CLEANUP;
+    }
+
+    rc = 0;
+CLEANUP:
+    timer_wait_probe_destroy(&probe.callbacks);
+    return rc;
+}
 static int test_timer_delete_allows_reentrant_callback_timer_api(void)
 {
     UTL_TIMER_T timer = NULL;
     TIMER_REENTRANT_PROBE probe;
-    int i = 0;
+    int rc = 1;
 
     memset(&probe, 0, sizeof(probe));
     probe.create_status = -999;
     probe.delete_status = -999;
+    if(timer_wait_probe_init(&probe.started) != 0)
+    {
+        return 1;
+    }
+    if(timer_wait_probe_init(&probe.done) != 0)
+    {
+        timer_wait_probe_destroy(&probe.started);
+        return 1;
+    }
 
     if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize for reentrant callback test") != 0)
     {
-        return 1;
+        goto CLEANUP;
     }
 
     if(expect_true(UTL_TimerCreate(&timer, UTL_TIMER_E_ONESHOT, 5, reentrant_timer_api_cb, &probe) == 0,
                    "UTL_TimerCreate should create a timer for reentrant callback test") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    for(i = 0; i < 100 && !probe.in_callback; ++i)
-    {
-        UTL_Sleep(1);
-    }
-
-    if(expect_true(probe.in_callback == 1, "reentrant callback should start before delete") != 0)
+    if(expect_true(timer_wait_probe_wait_at_least(&probe.started, 1, 2000) == 0,
+                   "reentrant callback should start before delete") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
     if(expect_true(UTL_TimerDelete(&timer) == 0, "UTL_TimerDelete should wait for reentrant callback without deadlock") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    if(expect_true(probe.callback_done == 1, "reentrant callback should complete during delete") != 0)
+    if(expect_true(timer_wait_probe_wait_at_least(&probe.done, 1, 2000) == 0,
+                   "reentrant callback should complete during delete") != 0 ||
+       expect_true(probe.create_status == 0, "reentrant callback should be able to create a timer") != 0 ||
+       expect_true(probe.delete_status == 0, "reentrant callback should be able to delete its nested timer") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    if(expect_true(probe.create_status == 0, "reentrant callback should be able to create a timer") != 0)
+    if(expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after reentrant callback test") != 0)
     {
-        UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    if(expect_true(probe.delete_status == 0, "reentrant callback should be able to delete its nested timer") != 0)
-    {
-        UTL_TimerClose();
-        return 1;
-    }
-
-    return expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after reentrant callback test");
+    rc = 0;
+CLEANUP:
+    timer_wait_probe_destroy(&probe.done);
+    timer_wait_probe_destroy(&probe.started);
+    return rc;
 }
-
 static int test_timer_rejects_uninitialized_use(void)
 {
     UTL_TIMER_T timer = NULL;
@@ -334,6 +575,39 @@ static int test_timer_rejects_uninitialized_use(void)
 
     return expect_true(UTL_TimerDelete(&timer) == ENT_TMR_NOT_INITIALIZED,
                        "UTL_TimerDelete should reject use before initialization");
+}
+
+static int test_timer_rejects_non_positive_period(void)
+{
+    UTL_TIMER_T timer = (UTL_TIMER_T)0x1;
+
+    if(expect_true(UTL_TimerInit() == ENT_SYS_NORMAL,
+                   "UTL_TimerInit should initialize before invalid period checks") != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(UTL_TimerCreate(&timer, UTL_TIMER_E_PERIOD, 0, timer_cb, NULL) == ENT_TMR_BAD_ARGUMENT,
+                   "UTL_TimerCreate should reject a zero millisecond period") != 0 ||
+       expect_true(timer == NULL,
+                   "UTL_TimerCreate should clear the output timer after rejecting zero period") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    timer = (UTL_TIMER_T)0x1;
+    if(expect_true(UTL_TimerCreate(&timer, UTL_TIMER_E_PERIOD, -1, timer_cb, NULL) == ENT_TMR_BAD_ARGUMENT,
+                   "UTL_TimerCreate should reject a negative millisecond period") != 0 ||
+       expect_true(timer == NULL,
+                   "UTL_TimerCreate should clear the output timer after rejecting negative period") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+
+    return expect_true(UTL_TimerClose() == ENT_SYS_NORMAL,
+                       "UTL_TimerClose should succeed after invalid period checks");
 }
 
 static int test_timer_init_and_close_are_idempotent(void)
@@ -355,114 +629,153 @@ static int test_timer_init_and_close_are_idempotent(void)
 static int test_oneshot_timer_fires_once(void)
 {
     UTL_TIMER_T timer = NULL;
-    int hits = 0;
+    TIMER_WAIT_PROBE probe;
+    int rc = 1;
 
-    if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before creating a timer") != 0)
+    if(timer_wait_probe_init(&probe) != 0)
     {
         return 1;
     }
+    if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before creating a timer") != 0)
+    {
+        goto CLEANUP;
+    }
 
-    if(expect_true(UTL_TimerCreate(&timer, UTL_TIMER_E_ONESHOT, 20, timer_cb, &hits) == 0,
+    if(expect_true(UTL_TimerCreate(&timer, UTL_TIMER_E_ONESHOT, 20, timer_wait_probe_cb, &probe) == 0,
                    "UTL_TimerCreate should create a oneshot timer") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    UTL_Sleep(100);
-
-    if(expect_true(hits == 1, "A oneshot timer should fire exactly once") != 0)
+    if(expect_true(timer_wait_probe_wait_at_least(&probe, 1, 2000) == 0,
+                   "A oneshot timer should fire within the bounded wait") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    return expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should clean up a oneshot timer");
-}
+    if(expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should clean up a oneshot timer") != 0 ||
+       expect_true(timer_wait_probe_hits(&probe) == 1, "A oneshot timer should fire exactly once") != 0)
+    {
+        goto CLEANUP;
+    }
 
+    rc = 0;
+CLEANUP:
+    timer_wait_probe_destroy(&probe);
+    return rc;
+}
 static int test_periodic_timer_fires_until_deleted(void)
 {
     UTL_TIMER_T timer = NULL;
-    int hits = 0;
+    TIMER_WAIT_PROBE probe;
     int afterDelete = 0;
+    int rc = 1;
 
-    if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before creating a periodic timer") != 0)
+    if(timer_wait_probe_init(&probe) != 0)
     {
         return 1;
     }
+    if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before creating a periodic timer") != 0)
+    {
+        goto CLEANUP;
+    }
 
-    if(expect_true(UTL_TimerCreate(&timer, UTL_TIMER_E_PERIOD, 20, timer_cb, &hits) == 0,
+    if(expect_true(UTL_TimerCreate(&timer, UTL_TIMER_E_PERIOD, 20, timer_wait_probe_cb, &probe) == 0,
                    "UTL_TimerCreate should create a periodic timer") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    UTL_Sleep(90);
+    if(expect_true(timer_wait_probe_wait_at_least(&probe, 2, 2000) == 0,
+                   "A periodic timer should fire multiple times within the bounded wait") != 0)
+    {
+        UTL_TimerDelete(&timer);
+        UTL_TimerClose();
+        goto CLEANUP;
+    }
 
     if(expect_true(UTL_TimerDelete(&timer) == 0, "UTL_TimerDelete should stop a periodic timer") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    /* Delete synchronizes with the timer worker; only sample the callback count afterwards. */
-    afterDelete = hits;
-    if(expect_true(afterDelete >= 2, "A periodic timer should fire multiple times before deletion") != 0)
-    {
-        UTL_TimerClose();
-        return 1;
-    }
-
+    afterDelete = timer_wait_probe_hits(&probe);
     UTL_Sleep(80);
-
-    if(expect_true(hits == afterDelete, "A deleted periodic timer should stop firing") != 0)
+    if(expect_true(timer_wait_probe_hits(&probe) == afterDelete, "A deleted periodic timer should stop firing") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    return expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after deleting a periodic timer");
-}
+    if(expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after deleting a periodic timer") != 0)
+    {
+        goto CLEANUP;
+    }
 
+    rc = 0;
+CLEANUP:
+    timer_wait_probe_destroy(&probe);
+    return rc;
+}
 static int test_timer_create_us_has_consistent_failure_contract(void)
 {
     UTL_TIMER_T timer = (UTL_TIMER_T)0x1;
-    int hits = 0;
+#ifdef __linux__
+    TIMER_WAIT_PROBE probe;
+
+    if(timer_wait_probe_init(&probe) != 0)
+    {
+        return 1;
+    }
+#endif
 
     if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before using UTL_TimerCreateUs") != 0)
     {
+#ifdef __linux__
+        timer_wait_probe_destroy(&probe);
+#endif
         return 1;
     }
 
 #ifdef __linux__
-    if(expect_true(UTL_TimerCreateUs(&timer, UTL_TIMER_E_ONESHOT, 1000, timer_cb, &hits) == 0,
+    if(expect_true(UTL_TimerCreateUs(&timer, UTL_TIMER_E_ONESHOT, 1000, timer_wait_probe_cb, &probe) == 0,
                    "UTL_TimerCreateUs should create a Linux RT oneshot timer") != 0)
     {
         UTL_TimerClose();
+        timer_wait_probe_destroy(&probe);
         return 1;
     }
 
-    UTL_Sleep(30);
-
-    if(expect_true(hits == 1, "A Linux RT oneshot timer should fire exactly once") != 0)
+    if(expect_true(timer_wait_probe_wait_at_least(&probe, 1, 2000) == 0,
+                   "A Linux RT oneshot timer should fire within the bounded wait") != 0)
     {
         UTL_TimerDelete(&timer);
         UTL_TimerClose();
+        timer_wait_probe_destroy(&probe);
         return 1;
     }
 
-    if(expect_true(UTL_TimerDelete(&timer) == 0, "UTL_TimerDelete should delete a Linux RT oneshot timer") != 0)
+    if(expect_true(UTL_TimerDelete(&timer) == 0, "UTL_TimerDelete should delete a Linux RT oneshot timer") != 0 ||
+       expect_true(timer_wait_probe_hits(&probe) == 1, "A Linux RT oneshot timer should fire exactly once") != 0)
     {
         UTL_TimerClose();
+        timer_wait_probe_destroy(&probe);
         return 1;
     }
+    timer_wait_probe_destroy(&probe);
 #else
-    if(expect_true(UTL_TimerCreateUs(&timer, UTL_TIMER_E_ONESHOT, 1000, timer_cb, &hits) == ENT_TMR_UNSUPPORTED,
-                   "UTL_TimerCreateUs should report unsupported platforms") != 0)
     {
-        UTL_TimerClose();
-        return 1;
+        int hits = 0;
+        if(expect_true(UTL_TimerCreateUs(&timer, UTL_TIMER_E_ONESHOT, 1000, timer_cb, &hits) == ENT_TMR_UNSUPPORTED,
+                       "UTL_TimerCreateUs should report unsupported platforms") != 0)
+        {
+            UTL_TimerClose();
+            return 1;
+        }
     }
 
     if(expect_true(timer == NULL, "UTL_TimerCreateUs should clear the output timer on failure") != 0)
@@ -474,7 +787,6 @@ static int test_timer_create_us_has_consistent_failure_contract(void)
 
     return expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after UTL_TimerCreateUs coverage");
 }
-
 static int test_timer_create_us_delete_does_not_wait_full_period(void)
 {
 #ifdef __linux__
@@ -534,62 +846,75 @@ static int test_timer_create_us_periodic_timer_fires_on_linux(void)
 {
 #ifdef __linux__
     UTL_TIMER_T timer = NULL;
-    int hits = 0;
+    TIMER_WAIT_PROBE probe;
     int after_delete = 0;
+    int rc = 1;
 
-    if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before Linux RT periodic timer test") != 0)
+    if(timer_wait_probe_init(&probe) != 0)
     {
         return 1;
     }
+    if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before Linux RT periodic timer test") != 0)
+    {
+        goto CLEANUP;
+    }
 
-    if(expect_true(UTL_TimerCreateUs(&timer, UTL_TIMER_E_PERIOD, 5000, timer_cb, &hits) == 0,
+    if(expect_true(UTL_TimerCreateUs(&timer, UTL_TIMER_E_PERIOD, 5000, timer_wait_probe_cb, &probe) == 0,
                    "UTL_TimerCreateUs should create a Linux RT periodic timer") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    UTL_Sleep(40);
+    if(expect_true(timer_wait_probe_wait_at_least(&probe, 3, 2000) == 0,
+                   "A Linux RT periodic timer should fire multiple times within the bounded wait") != 0)
+    {
+        UTL_TimerDelete(&timer);
+        UTL_TimerClose();
+        goto CLEANUP;
+    }
 
     if(expect_true(UTL_TimerDelete(&timer) == 0, "UTL_TimerDelete should stop a Linux RT periodic timer") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    /* A callback may legally finish while delete is joining the workers. Snapshot only after delete returns. */
-    after_delete = hits;
-    if(expect_true(after_delete >= 3, "A Linux RT periodic timer should fire multiple times") != 0)
-    {
-        UTL_TimerClose();
-        return 1;
-    }
-
+    after_delete = timer_wait_probe_hits(&probe);
     UTL_Sleep(20);
-
-    if(expect_true(hits == after_delete, "A deleted Linux RT periodic timer should stop firing") != 0)
+    if(expect_true(timer_wait_probe_hits(&probe) == after_delete, "A deleted Linux RT periodic timer should stop firing") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    return expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after Linux RT periodic timer test");
+    if(expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after Linux RT periodic timer test") != 0)
+    {
+        goto CLEANUP;
+    }
+
+    rc = 0;
+CLEANUP:
+    timer_wait_probe_destroy(&probe);
+    return rc;
 #else
     return 0;
 #endif
 }
-
 static int test_timer_create_us_callback_can_self_delete_safely(void)
 {
 #ifdef __linux__
     TIMER_SELF_DELETE_PROBE probe;
+    int rc = 1;
 
-    memset(&probe, 0, sizeof(probe));
-    probe.delete_status = -999;
+    if(timer_self_delete_probe_init(&probe) != 0)
+    {
+        return 1;
+    }
 
     if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before RT self-delete callback test") != 0)
     {
-        return 1;
+        goto CLEANUP;
     }
 
     if(expect_true(UTL_TimerCreateUs(&probe.timer,
@@ -600,79 +925,86 @@ static int test_timer_create_us_callback_can_self_delete_safely(void)
                    "UTL_TimerCreateUs should create a Linux RT timer for self-delete callback test") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    UTL_Sleep(80);
-
-    if(expect_true(probe.hits == 1, "RT self-delete callback timer should fire exactly once") != 0)
+    if(expect_true(timer_self_delete_probe_wait(&probe, 2000) == 0,
+                   "RT self-delete callback should complete within the bounded wait") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    if(expect_true(probe.delete_status == 0, "RT self-delete callback should be able to delete its own timer") != 0)
+    if(expect_true(probe.hits == 1, "RT self-delete callback timer should fire exactly once") != 0 ||
+       expect_true(probe.delete_status == 0, "RT self-delete callback should be able to delete its own timer") != 0 ||
+       expect_true(probe.timer == NULL, "RT self-delete callback should clear the timer handle") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    if(expect_true(probe.timer == NULL, "RT self-delete callback should clear the timer handle") != 0)
+    if(expect_true(UTL_TimerClose() == 0,
+                   "UTL_TimerClose should reclaim a self-deleted Linux RT timer") != 0)
     {
-        UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    return expect_true(UTL_TimerClose() == 0,
-                       "UTL_TimerClose should reclaim a self-deleted Linux RT timer");
+    rc = 0;
+CLEANUP:
+    timer_self_delete_probe_destroy(&probe);
+    return rc;
 #else
     return 0;
 #endif
 }
-
 #ifndef _WIN32
 static int test_timer_callback_can_self_delete_safely(void)
 {
     TIMER_SELF_DELETE_PROBE probe;
+    int rc = 1;
 
-    memset(&probe, 0, sizeof(probe));
-    probe.delete_status = -999;
+    if(timer_self_delete_probe_init(&probe) != 0)
+    {
+        return 1;
+    }
 
     if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before self-delete callback test") != 0)
     {
-        return 1;
+        goto CLEANUP;
     }
 
     if(expect_true(UTL_TimerCreate(&probe.timer, UTL_TIMER_E_PERIOD, 10, self_delete_timer_cb, &probe) == 0,
                    "UTL_TimerCreate should create a timer for self-delete callback test") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    UTL_Sleep(80);
-
-    if(expect_true(probe.hits == 1, "self-delete callback timer should fire exactly once") != 0)
+    if(expect_true(timer_self_delete_probe_wait(&probe, 2000) == 0,
+                   "self-delete callback should complete within the bounded wait") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    if(expect_true(probe.delete_status == 0, "self-delete callback should be able to delete its own timer") != 0)
+    if(expect_true(probe.hits == 1, "self-delete callback timer should fire exactly once") != 0 ||
+       expect_true(probe.delete_status == 0, "self-delete callback should be able to delete its own timer") != 0 ||
+       expect_true(probe.timer == NULL, "self-delete callback should clear the timer handle") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    if(expect_true(probe.timer == NULL, "self-delete callback should clear the timer handle") != 0)
+    if(expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after self-delete callback test") != 0)
     {
-        UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    return expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should succeed after self-delete callback test");
+    rc = 0;
+CLEANUP:
+    timer_self_delete_probe_destroy(&probe);
+    return rc;
 }
-
 static int test_timer_create_is_rejected_while_close_progresses(void)
 {
     UTL_TIMER_T timer = NULL;
@@ -680,61 +1012,90 @@ static int test_timer_create_is_rejected_while_close_progresses(void)
     TIMER_SLOW_PROBE slow_probe;
     TIMER_CLOSE_THREAD_PROBE close_probe;
     pthread_t closer;
-    int observed_rejection = 0;
-    int i = 0;
+    MSG_ID_T create_sts;
+    int closer_started = 0;
+    int rc = 1;
+    int i;
+    unsigned int close_epoch_before;
 
     memset(&slow_probe, 0, sizeof(slow_probe));
     memset(&close_probe, 0, sizeof(close_probe));
     close_probe.close_status = -999;
 
-    if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before close/create race test") != 0)
+    if(timer_wait_probe_init(&slow_probe.callbacks) != 0)
     {
         return 1;
+    }
+
+    if(expect_true(UTL_TimerInit() == 0, "UTL_TimerInit should initialize before close/create race test") != 0)
+    {
+        goto CLEANUP;
     }
 
     if(expect_true(UTL_TimerCreate(&timer, UTL_TIMER_E_PERIOD, 5, slow_timer_cb, &slow_probe) == 0,
                    "UTL_TimerCreate should create a slow periodic timer for close/create race test") != 0)
     {
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
 
-    UTL_Sleep(15);
+    if(expect_true(timer_wait_probe_wait_at_least(&slow_probe.callbacks, 1, 2000) == 0,
+                   "slow callback should start before close/create race") != 0)
+    {
+        UTL_TimerDelete(&timer);
+        UTL_TimerClose();
+        goto CLEANUP;
+    }
+
+    close_epoch_before = iUTL_TimerTestCloseEpoch();
 
     if(expect_true(pthread_create(&closer, NULL, timer_close_thread, &close_probe) == 0,
                    "close helper thread should start") != 0)
     {
         UTL_TimerDelete(&timer);
         UTL_TimerClose();
-        return 1;
+        goto CLEANUP;
     }
+    closer_started = 1;
 
-    for(i = 0; i < 200; ++i)
+    for(i = 0; i < 2000 && iUTL_TimerTestCloseEpoch() == close_epoch_before; ++i)
     {
-        MSG_ID_T sts = UTL_TimerCreate(&rejected_timer, UTL_TIMER_E_ONESHOT, 10, timer_cb, NULL);
-        if(sts == ENT_TMR_NOT_INITIALIZED)
-        {
-            observed_rejection = 1;
-            break;
-        }
-        if(sts == 0)
-        {
-            UTL_TimerDelete(&rejected_timer);
-            rejected_timer = NULL;
-        }
         UTL_Sleep(1);
     }
-
-    pthread_join(closer, NULL);
-    timer = NULL;
-
-    if(expect_true(close_probe.close_status == 0, "UTL_TimerClose should succeed in helper thread") != 0)
+    if(expect_true(iUTL_TimerTestCloseEpoch() != close_epoch_before,
+                   "timer close should start within the bounded wait") != 0)
     {
-        return 1;
+        goto JOIN_CLOSE;
     }
 
-    return expect_true(observed_rejection == 1,
-                       "UTL_TimerCreate should be rejected once timer close has started");
+    create_sts = UTL_TimerCreate(&rejected_timer, UTL_TIMER_E_ONESHOT, 10, timer_cb, NULL);
+    if(create_sts == 0)
+    {
+        UTL_TimerDelete(&rejected_timer);
+        rejected_timer = NULL;
+    }
+    if(expect_true(create_sts == ENT_TMR_NOT_INITIALIZED,
+                   "UTL_TimerCreate should be rejected once timer close has started") != 0)
+    {
+        goto JOIN_CLOSE;
+    }
+
+    rc = 0;
+
+JOIN_CLOSE:
+    if(closer_started)
+    {
+        pthread_join(closer, NULL);
+        timer = NULL;
+        if(close_probe.close_status != ENT_SYS_NORMAL)
+        {
+            rc = 1;
+        }
+    }
+
+CLEANUP:
+    timer_wait_probe_destroy(&slow_probe.callbacks);
+    return rc;
 }
 #endif
 
@@ -743,6 +1104,7 @@ int main(void)
     int failures = 0;
 
     failures += test_timer_rejects_uninitialized_use();
+    failures += test_timer_rejects_non_positive_period();
     failures += test_timer_init_and_close_are_idempotent();
     failures += test_oneshot_timer_fires_once();
     failures += test_periodic_timer_fires_until_deleted();

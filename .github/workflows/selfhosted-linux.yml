@@ -16,9 +16,11 @@ permissions:
 
 jobs:
   selfhosted-linux:
-    name: Self-hosted Linux X64
+    name: GitHub-hosted Linux X64 (temporary fallback)
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, Linux, X64]
+    # Temporary fallback while the project self-hosted runner is unavailable.
+    # Keep the same extended gate coverage on a GitHub-hosted Linux runner.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       BUILD_DIR: build-selfhosted
@@ -28,6 +30,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libsqlite3-dev default-libmysqlclient-dev libpq-dev
 
       - name: Host preflight
         run: |

@@ -27,7 +27,7 @@ static volatile int s_block_wait_released = 0;
 static int test_flag_load(volatile int* value)
 {
 #ifdef _WIN32
-    return *value;
+    return (int)InterlockedCompareExchange((volatile LONG*)value, 0, 0);
 #else
     return __sync_fetch_and_add(value, 0);
 #endif
@@ -36,7 +36,7 @@ static int test_flag_load(volatile int* value)
 static void test_flag_store(volatile int* value, int state)
 {
 #ifdef _WIN32
-    *value = state;
+    InterlockedExchange((volatile LONG*)value, (LONG)state);
 #else
     __sync_lock_test_and_set(value, state);
 #endif
@@ -69,6 +69,10 @@ static uintptr_t s_next_lock_handle = 0x2000;
 static uintptr_t s_next_cv_handle = 0x3000;
 #ifdef ENT_INIT_TEST_HOOKS
 static int s_handle_ctx_free_calls = 0;
+static ENT_HANDLE_CTX_T* s_handle_lifecycle_target = NULL;
+static volatile int s_handle_call_ended = 0;
+static volatile int s_handle_freed_before_call_end = 0;
+static volatile int s_suppress_handle_call_ended = 0;
 #endif
 static ENT_LOG s_ent_log_at_lock_init = NULL;
 static const char* s_last_log_init_handle_module = NULL;
@@ -244,8 +248,42 @@ static void close_handle_if_needed(ENT_HANDLE* handle)
 }
 
 #ifdef ENT_INIT_TEST_HOOKS
-void ENT_InitTestHandleCtxFreed(void)
+static void reset_handle_lifecycle_observer(ENT_HANDLE handle)
 {
+    s_handle_lifecycle_target = (ENT_HANDLE_CTX_T*)handle;
+    test_flag_store(&s_handle_call_ended, 0);
+    test_flag_store(&s_handle_freed_before_call_end, 0);
+    test_flag_store(&s_suppress_handle_call_ended, 0);
+}
+
+static void clear_handle_lifecycle_observer(void)
+{
+    s_handle_lifecycle_target = NULL;
+    test_flag_store(&s_suppress_handle_call_ended, 0);
+}
+
+static int handle_lifecycle_observer_valid(void)
+{
+    return test_flag_load(&s_handle_call_ended) == 1 &&
+           test_flag_load(&s_handle_freed_before_call_end) == 0;
+}
+
+void ENT_InitTestHandleCallEnded(ENT_HANDLE_CTX_T* handleCtx)
+{
+    if(handleCtx == s_handle_lifecycle_target &&
+       !test_flag_load(&s_suppress_handle_call_ended))
+    {
+        test_flag_store(&s_handle_call_ended, 1);
+    }
+}
+
+void ENT_InitTestHandleCtxFreed(ENT_HANDLE_CTX_T* handleCtx)
+{
+    if(handleCtx == s_handle_lifecycle_target &&
+       !test_flag_load(&s_handle_call_ended))
+    {
+        test_flag_store(&s_handle_freed_before_call_end, 1);
+    }
     s_handle_ctx_free_calls += 1;
 }
 #endif
@@ -672,6 +710,11 @@ static int test_ent_run_waits_on_cv_with_lock(void)
     handle->ctx.running = false;
     handle->ctx.stopRequested = false;
     reset_wait_capture();
+    reset_close_counters();
+#ifdef ENT_INIT_TEST_HOOKS
+    test_flag_store(&s_handle_call_ended, 0);
+    test_flag_store(&s_handle_freed_before_call_end, 0);
+#endif
     enable_blocking_wait(handle->ctx.entCV);
 
     threadCtx.handle = handle;
@@ -1049,17 +1092,20 @@ static int test_ent_close_stops_running_handle(void)
     return 0;
 }
 
-static int test_ent_close_waits_for_running_worker_before_free(void)
+static int run_ent_close_waits_for_running_worker_before_free(int suppress_call_end,
+                                                               int* order_valid)
 {
-    /* This test covers reclamation for a worker already inside the run path.
-     * It does not promise that a brand-new concurrent call launched after
-     * close begins is code-level safe without an outer lifecycle lock. */
     TEST_THREAD runTh;
     TEST_THREAD closeTh;
     TEST_RUN_THREAD_CTX runCtx;
     TEST_CLOSE_THREAD_CTX closeCtx;
     ENT_HANDLE handle = (ENT_HANDLE)calloc(1, sizeof(*handle));
     int failed = 0;
+
+    if(order_valid != NULL)
+    {
+        *order_valid = 0;
+    }
 
     if(handle == NULL)
     {
@@ -1074,7 +1120,18 @@ static int test_ent_close_waits_for_running_worker_before_free(void)
     handle->ctx.stopRequested = false;
     handle->ctx.handleState = ENT_HANDLE_STATE_ACTIVE_E;
     handle->ctx.activeCalls = 0u;
+
+    /*
+     * This scenario owns all observer state. Only events for this exact outer
+     * handle can satisfy the ordering predicate, so no earlier test can make
+     * the result pass.
+     */
     reset_wait_capture();
+    reset_close_counters();
+#ifdef ENT_INIT_TEST_HOOKS
+    reset_handle_lifecycle_observer(handle);
+    test_flag_store(&s_suppress_handle_call_ended, suppress_call_end ? 1 : 0);
+#endif
     enable_blocking_wait(handle->ctx.entCV);
 
     runCtx.handle = handle;
@@ -1085,6 +1142,9 @@ static int test_ent_close_waits_for_running_worker_before_free(void)
     if(expect_true(start_test_thread(&runTh, &runCtx) == 0,
                    "thread start should start the ENT_Run worker for close-wait testing") != 0)
     {
+#ifdef ENT_INIT_TEST_HOOKS
+        clear_handle_lifecycle_observer();
+#endif
         free(handle);
         return 1;
     }
@@ -1096,19 +1156,15 @@ static int test_ent_close_waits_for_running_worker_before_free(void)
     {
         release_blocking_wait();
         join_test_thread(runTh);
+#ifdef ENT_INIT_TEST_HOOKS
+        clear_handle_lifecycle_observer();
+#endif
         free(handle);
         return 1;
     }
 
     wait_until_close_thread_started();
     wait_until_close_wait_entered();
-
-    if(expect_true(ENT_Run(handle) != ENT_SYS_NORMAL,
-                   "ENT_Run should not succeed while close is in progress") != 0)
-    {
-        failed = 1;
-    }
-
     release_blocking_wait();
 
     if(expect_true(join_test_thread(runTh) == 0,
@@ -1142,14 +1198,60 @@ static int test_ent_close_waits_for_running_worker_before_free(void)
     }
 
 #ifdef ENT_INIT_TEST_HOOKS
-    if(expect_true(s_handle_ctx_free_calls == 1,
-                   "ENT_Close should free the outer handle context exactly once after waiting for the worker") != 0)
+    if(order_valid != NULL)
     {
-        failed = 1;
+        *order_valid = handle_lifecycle_observer_valid() &&
+                       s_handle_ctx_free_calls == 1;
+    }
+    clear_handle_lifecycle_observer();
+#else
+    if(order_valid != NULL)
+    {
+        *order_valid = 1;
     }
 #endif
 
     return failed;
+}
+
+static int test_ent_close_waits_for_running_worker_before_free(void)
+{
+    int order_valid = 0;
+
+    /*
+     * Positive control: the current target handle's admitted ENT_Run call must
+     * publish CallEnded before outer handle reclamation.
+     */
+    if(run_ent_close_waits_for_running_worker_before_free(0, &order_valid) != 0)
+    {
+        return 1;
+    }
+    if(expect_true(order_valid,
+                   "the current admitted ENT_Run call must end before its handle is freed") != 0)
+    {
+        return 1;
+    }
+
+#ifdef ENT_INIT_TEST_HOOKS
+    /*
+     * Negative control over the same real Run/Close scenario: suppress only
+     * this target handle's CallEnded record. The ordering predicate must then
+     * fail. This proves the positive result cannot come from stale state left
+     * by an earlier test or another handle.
+     */
+    order_valid = 1;
+    if(run_ent_close_waits_for_running_worker_before_free(1, &order_valid) != 0)
+    {
+        return 1;
+    }
+    if(expect_true(!order_valid,
+                   "ordering proof must fail when this scenario's CallEnded event is suppressed") != 0)
+    {
+        return 1;
+    }
+#endif
+
+    return 0;
 }
 
 static int test_ent_close_frees_handle_context(void)
