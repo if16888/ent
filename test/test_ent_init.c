@@ -286,8 +286,7 @@ void ENT_InitTestHandleCtxFreed(ENT_HANDLE_CTX_T* handleCtx)
     }
     s_handle_ctx_free_calls += 1;
 }
-
-
+#endif
 
 static ENT_HANDLE make_bad_magic_handle(void)
 {
