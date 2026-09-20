@@ -132,6 +132,7 @@ typedef struct TIMER_SELF_DELETE_CLOSE_PROBE
     pthread_mutex_t lock;
     pthread_cond_t cv;
     UTL_TIMER_T timer;
+    int create_done;
     int delete_returned;
     int release_callback;
     int close_done;
@@ -142,7 +143,16 @@ typedef struct TIMER_SELF_DELETE_CLOSE_PROBE
 static void* self_delete_cb(void* data)
 {
     TIMER_SELF_DELETE_CLOSE_PROBE* probe = (TIMER_SELF_DELETE_CLOSE_PROBE*)data;
-    MSG_ID_T sts = UTL_TimerDelete(&probe->timer);
+    MSG_ID_T sts;
+
+    pthread_mutex_lock(&probe->lock);
+    while(!probe->create_done)
+    {
+        pthread_cond_wait(&probe->cv, &probe->lock);
+    }
+    pthread_mutex_unlock(&probe->lock);
+
+    sts = UTL_TimerDelete(&probe->timer);
 
     pthread_mutex_lock(&probe->lock);
     probe->delete_status = sts;
@@ -230,6 +240,12 @@ static int test_self_delete_close_waits_for_cleanup(void)
         UTL_TimerClose();
         goto CLEANUP;
     }
+
+    pthread_mutex_lock(&probe.lock);
+    probe.create_done = 1;
+    pthread_cond_broadcast(&probe.cv);
+    pthread_mutex_unlock(&probe.lock);
+
     if(wait_flag(&probe.lock, &probe.cv, &probe.delete_returned) != 0)
     {
         goto RELEASE_CALLBACK;
