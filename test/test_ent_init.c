@@ -1149,6 +1149,7 @@ static int test_ent_close_waits_for_running_worker_before_free(void)
         free(handle);
         return 1;
     }
+    reset_close_counters();
     reset_handle_lifecycle_observer(handle);
 #endif
     enable_blocking_wait(handle->ctx.entCV);
@@ -1161,6 +1162,9 @@ static int test_ent_close_waits_for_running_worker_before_free(void)
     if(expect_true(start_test_thread(&runTh, &runCtx) == 0,
                    "thread start should start the ENT_Run worker for close-wait testing") != 0)
     {
+#ifdef ENT_INIT_TEST_HOOKS
+        clear_handle_lifecycle_observer();
+#endif
         free(handle);
         return 1;
     }
@@ -1172,6 +1176,9 @@ static int test_ent_close_waits_for_running_worker_before_free(void)
     {
         release_blocking_wait();
         join_test_thread(runTh);
+#ifdef ENT_INIT_TEST_HOOKS
+        clear_handle_lifecycle_observer();
+#endif
         free(handle);
         return 1;
     }
