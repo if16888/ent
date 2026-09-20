@@ -42,8 +42,8 @@
 #include "ent_utility.h"
 
 #ifdef ENT_INIT_TEST_HOOKS
-extern void ENT_InitTestHandleCtxFreed(void);
-extern void ENT_InitTestHandleCallEnded(void);
+extern void ENT_InitTestHandleCtxFreed(ENT_HANDLE_CTX_T* handleCtx);
+extern void ENT_InitTestHandleCallEnded(ENT_HANDLE_CTX_T* handleCtx);
 #endif
 
 #if defined(_MSC_VER)
@@ -211,7 +211,7 @@ static MSG_ID_T iENT_HandleClose(ENT_HANDLE* handle)
     {
         handleCtx->magic = 0u;
 #ifdef ENT_INIT_TEST_HOOKS
-        ENT_InitTestHandleCtxFreed();
+        ENT_InitTestHandleCtxFreed(handleCtx);
 #endif
         free(handleCtx);
         *handle = NULL;
@@ -401,7 +401,7 @@ static void iENT_HandleEndCall(ENT_HANDLE_CTX_T* handleCtx)
         UTL_CVWakeAll(handleCtx->ctx.entCV);
     }
 #ifdef ENT_INIT_TEST_HOOKS
-    ENT_InitTestHandleCallEnded();
+    ENT_InitTestHandleCallEnded(handleCtx);
 #endif
     UTL_LockLeave(handleCtx->ctx.entLock);
 }
