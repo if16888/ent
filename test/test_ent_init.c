@@ -69,8 +69,10 @@ static uintptr_t s_next_lock_handle = 0x2000;
 static uintptr_t s_next_cv_handle = 0x3000;
 #ifdef ENT_INIT_TEST_HOOKS
 static int s_handle_ctx_free_calls = 0;
+static ENT_HANDLE_CTX_T* s_handle_lifecycle_target = NULL;
 static volatile int s_handle_call_ended = 0;
 static volatile int s_handle_freed_before_call_end = 0;
+static volatile int s_suppress_handle_call_ended = 0;
 #endif
 static ENT_LOG s_ent_log_at_lock_init = NULL;
 static const char* s_last_log_init_handle_module = NULL;
@@ -246,18 +248,65 @@ static void close_handle_if_needed(ENT_HANDLE* handle)
 }
 
 #ifdef ENT_INIT_TEST_HOOKS
-void ENT_InitTestHandleCallEnded(void)
+static void reset_handle_lifecycle_observer(ENT_HANDLE handle)
 {
-    test_flag_store(&s_handle_call_ended, 1);
+    s_handle_lifecycle_target = (ENT_HANDLE_CTX_T*)handle;
+    test_flag_store(&s_handle_call_ended, 0);
+    test_flag_store(&s_handle_freed_before_call_end, 0);
+    test_flag_store(&s_suppress_handle_call_ended, 0);
 }
 
-void ENT_InitTestHandleCtxFreed(void)
+static void clear_handle_lifecycle_observer(void)
 {
-    if(!test_flag_load(&s_handle_call_ended))
+    s_handle_lifecycle_target = NULL;
+    test_flag_store(&s_suppress_handle_call_ended, 0);
+}
+
+static int handle_lifecycle_observer_valid(void)
+{
+    return test_flag_load(&s_handle_call_ended) == 1 &&
+           test_flag_load(&s_handle_freed_before_call_end) == 0;
+}
+
+void ENT_InitTestHandleCallEnded(ENT_HANDLE_CTX_T* handleCtx)
+{
+    if(handleCtx == s_handle_lifecycle_target &&
+       !test_flag_load(&s_suppress_handle_call_ended))
+    {
+        test_flag_store(&s_handle_call_ended, 1);
+    }
+}
+
+void ENT_InitTestHandleCtxFreed(ENT_HANDLE_CTX_T* handleCtx)
+{
+    if(handleCtx == s_handle_lifecycle_target &&
+       !test_flag_load(&s_handle_call_ended))
     {
         test_flag_store(&s_handle_freed_before_call_end, 1);
     }
     s_handle_ctx_free_calls += 1;
+}
+
+static int verify_handle_lifecycle_observer_negative_control(ENT_HANDLE handle)
+{
+    reset_handle_lifecycle_observer(handle);
+    test_flag_store(&s_suppress_handle_call_ended, 1);
+
+    ENT_InitTestHandleCallEnded((ENT_HANDLE_CTX_T*)handle);
+    ENT_InitTestHandleCtxFreed((ENT_HANDLE_CTX_T*)handle);
+
+    if(handle_lifecycle_observer_valid())
+    {
+        return 1;
+    }
+    if(test_flag_load(&s_handle_call_ended) != 0 ||
+       test_flag_load(&s_handle_freed_before_call_end) != 1)
+    {
+        return 1;
+    }
+
+    reset_handle_lifecycle_observer(handle);
+    return 0;
 }
 #endif
 
@@ -1091,6 +1140,17 @@ static int test_ent_close_waits_for_running_worker_before_free(void)
     handle->ctx.handleState = ENT_HANDLE_STATE_ACTIVE_E;
     handle->ctx.activeCalls = 0u;
     reset_wait_capture();
+    reset_close_counters();
+#ifdef ENT_INIT_TEST_HOOKS
+    if(expect_true(verify_handle_lifecycle_observer_negative_control(handle) == 0,
+                   "lifecycle observer negative control should fail when this call-end event is suppressed") != 0)
+    {
+        clear_handle_lifecycle_observer();
+        free(handle);
+        return 1;
+    }
+    reset_handle_lifecycle_observer(handle);
+#endif
     enable_blocking_wait(handle->ctx.entCV);
 
     runCtx.handle = handle;
@@ -1158,14 +1218,8 @@ static int test_ent_close_waits_for_running_worker_before_free(void)
     }
 
 #ifdef ENT_INIT_TEST_HOOKS
-    if(expect_true(test_flag_load(&s_handle_call_ended) == 1,
-                   "the admitted ENT_Run call should end before handle reclamation") != 0)
-    {
-        failed = 1;
-    }
-
-    if(expect_true(test_flag_load(&s_handle_freed_before_call_end) == 0,
-                   "ENT_Close must not free the outer handle before the admitted call ends") != 0)
+    if(expect_true(handle_lifecycle_observer_valid(),
+                   "the target handle should record this admitted ENT_Run call before reclamation") != 0)
     {
         failed = 1;
     }
@@ -1175,6 +1229,8 @@ static int test_ent_close_waits_for_running_worker_before_free(void)
     {
         failed = 1;
     }
+
+    clear_handle_lifecycle_observer();
 #endif
 
     return failed;
