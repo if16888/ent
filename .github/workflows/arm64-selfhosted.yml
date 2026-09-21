@@ -3,7 +3,14 @@ name: ARM64 Self-hosted Validation
 on:
   push:
     branches:
-      - ci/arm64-selfhosted-validation
+      - master
+    paths:
+      - "comm/**"
+      - "include/**"
+      - "test/**"
+      - "scripts/**"
+      - "CMakeLists.txt"
+      - ".github/workflows/arm64-selfhosted.yml"
   pull_request:
     branches:
       - master
@@ -49,27 +56,20 @@ jobs:
           test "$arch" = "aarch64" || test "$arch" = "arm64"
           test "${RUNNER_ARCH:-}" = "ARM64"
 
-      - name: Detect available build dependencies
+      - name: Verify build dependencies
         shell: bash
         run: |
           set -euxo pipefail
           command -v gcc
           command -v cmake
           command -v make
-
-          sqlite=OFF
-          mysql=OFF
-          pgsql=OFF
-
-          test -f /usr/include/sqlite3.h && sqlite=ON || true
-          test -f /usr/include/mysql/mysql.h && mysql=ON || true
-          test -f /usr/include/postgresql/libpq-fe.h && pgsql=ON || true
-
-          echo "ENT_ENABLE_SQLITE=$sqlite" >> "$GITHUB_ENV"
-          echo "ENT_ENABLE_MYSQL=$mysql" >> "$GITHUB_ENV"
-          echo "ENT_ENABLE_PGSQL=$pgsql" >> "$GITHUB_ENV"
-
-          echo "Detected DB backends: SQLite=$sqlite MySQL=$mysql PostgreSQL=$pgsql"
+          test -f /usr/include/sqlite3.h
+          test -f /usr/include/mysql/mysql.h
+          test -f /usr/include/postgresql/libpq-fe.h
+          echo "ENT_ENABLE_SQLITE=ON" >> "$GITHUB_ENV"
+          echo "ENT_ENABLE_MYSQL=ON" >> "$GITHUB_ENV"
+          echo "ENT_ENABLE_PGSQL=ON" >> "$GITHUB_ENV"
+          echo "Required DB backends: SQLite=ON MySQL=ON PostgreSQL=ON"
 
       - name: Resource preflight
         shell: bash
