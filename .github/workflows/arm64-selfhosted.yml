@@ -1,6 +1,9 @@
 name: ARM64 Self-hosted Validation
 
 on:
+  push:
+    branches:
+      - ci/arm64-selfhosted-validation
   pull_request:
     branches:
       - master
