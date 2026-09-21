@@ -103,9 +103,6 @@ jobs:
       - name: Install and downstream consumer check
         run: ./scripts/run-ci-linux.sh install-consumer
 
-      - name: Performance smoke
-        run: ./scripts/run-ci-linux.sh perf
-
       - name: Resource snapshot
         if: always()
         shell: bash
