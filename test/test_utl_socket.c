@@ -19,6 +19,13 @@
 
 ENT_CTX gEntCtx;
 
+#ifndef _WIN32
+void iENT_SocketTestInjectCloseEintr(void);
+unsigned int iENT_SocketTestCloseCallCount(void);
+void iENT_SocketTestInjectGetSockOptEintr(void);
+unsigned int iENT_SocketTestGetSockOptCallCount(void);
+#endif
+
 static int expect_true(int condition, const char* message)
 {
     if(!condition)
@@ -207,6 +214,23 @@ static int test_socket_bind_and_connect_reject_null_addr(void)
             UTL_CloseSocket(sock);
             return 1;
         }
+
+#ifndef _WIN32
+        optionLength = (int)sizeof(optionValue);
+        iENT_SocketTestInjectGetSockOptEintr();
+        if(expect_true(UTL_GetSockOpt(sock,
+                                     SOL_SOCKET,
+                                     SO_KEEPALIVE,
+                                     (char*)&optionValue,
+                                     &optionLength) == ENT_SYS_NORMAL,
+                       "UTL_GetSockOpt should retry after EINTR") != 0 ||
+           expect_true(iENT_SocketTestGetSockOptCallCount() == 2,
+                       "UTL_GetSockOpt should make one retry after EINTR") != 0)
+        {
+            UTL_CloseSocket(sock);
+            return 1;
+        }
+#endif
     }
 
     if(expect_true(UTL_Recv(sock, NULL, 0, 0, NULL) == ENT_SOCK_BAD_ARGUMENT,
@@ -220,6 +244,31 @@ static int test_socket_bind_and_connect_reject_null_addr(void)
 
     return expect_true(UTL_CloseSocket(sock) == 0, "UTL_CloseSocket should close a created socket");
 }
+
+#ifndef _WIN32
+static int test_socket_close_does_not_retry_eintr(void)
+{
+    UTL_D_SOCKET sock = -1;
+
+    if(expect_true(UTL_SocketInit() == ENT_SYS_NORMAL,
+                   "UTL_SocketInit should succeed before testing close interruption") != 0 ||
+       expect_true(UTL_Socket(AF_INET, SOCK_STREAM, 0, &sock) == ENT_SYS_NORMAL,
+                   "UTL_Socket should create a socket before testing close interruption") != 0)
+    {
+        return 1;
+    }
+
+    iENT_SocketTestInjectCloseEintr();
+    if(expect_true(UTL_CloseSocket(sock) == ENT_SOCK_CLOSE_FAILED,
+                   "UTL_CloseSocket should report an interrupted close") != 0 ||
+       expect_true(iENT_SocketTestCloseCallCount() == 1,
+                   "UTL_CloseSocket must not retry close after EINTR") != 0)
+    {
+        return 1;
+    }
+    return 0;
+}
+#endif
 
 static int test_socket_local_roundtrip_send_and_recv(void)
 {
@@ -672,6 +721,9 @@ int main(void)
 
     failures += test_socket_rejects_uninitialized_use();
     failures += test_socket_bind_and_connect_reject_null_addr();
+#ifndef _WIN32
+    failures += test_socket_close_does_not_retry_eintr();
+#endif
     failures += test_socket_local_roundtrip_send_and_recv();
     failures += test_socket_reports_peer_close_without_crashing();
     failures += test_socket_large_payload_roundtrip();

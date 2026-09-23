@@ -378,13 +378,32 @@ static MSG_ID_T iENT_LogInitCtx(ENT_LOG_CTX_INTERNAL* log,
 
 #ifdef _WIN32
     InitializeCriticalSection(&log->cs);
+    InitializeCriticalSection(&log->ioCs);
     InitializeConditionVariable(&log->closeCv);
     InitializeConditionVariable(&log->bufferCv);
     log->bufferThread = NULL;
 #else
-    pthread_mutex_init(&log->cs, NULL);
+    if(pthread_mutex_init(&log->cs, NULL) != 0)
+    {
+        free(log->moduleName);
+        log->moduleName = NULL;
+        free(log->logPath);
+        log->logPath = NULL;
+        return ENT_LOG_ALLOC_FAILED;
+    }
+    if(pthread_mutex_init(&log->ioCs, NULL) != 0)
+    {
+        pthread_mutex_destroy(&log->cs);
+        free(log->moduleName);
+        log->moduleName = NULL;
+        free(log->logPath);
+        log->logPath = NULL;
+        return ENT_LOG_ALLOC_FAILED;
+    }
     if(pthread_cond_init(&log->closeCv, NULL) != 0)
     {
+        pthread_mutex_destroy(&log->ioCs);
+        pthread_mutex_destroy(&log->cs);
         free(log->moduleName);
         log->moduleName = NULL;
         free(log->logPath);
@@ -394,6 +413,7 @@ static MSG_ID_T iENT_LogInitCtx(ENT_LOG_CTX_INTERNAL* log,
     if(pthread_cond_init(&log->bufferCv, NULL) != 0)
     {
         pthread_cond_destroy(&log->closeCv);
+        pthread_mutex_destroy(&log->ioCs);
         pthread_mutex_destroy(&log->cs);
         free(log->moduleName);
         log->moduleName = NULL;
@@ -408,6 +428,7 @@ static MSG_ID_T iENT_LogInitCtx(ENT_LOG_CTX_INTERNAL* log,
     log->bufferThreadStop = false;
     log->closeAttemptActive = false;
     log->pendingFlushes = 0;
+    log->bufferIoStatus = ENT_SYS_NORMAL;
     log->flushBatch = 256;
     log->flushIntervalMs = 0;
     log->lastFlushMs = 0;
@@ -1210,7 +1231,9 @@ END_OF_ROUTINE:
 MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
 {
     MSG_ID_T sts = ENT_SYS_NORMAL;
+    MSG_ID_T closeIoStatus = ENT_SYS_NORMAL;
     bool closeStarted = false;
+    bool closeCompleted = false;
 
     if(sLogMutexInit == false)
     {
@@ -1295,24 +1318,31 @@ MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
     }
     iENT_LogFreePoolNodes(log);
 
+    iENT_LogIoLock(log);
     if(log->logFp)
     {
         if(fclose(log->logFp) != 0)
         {
-            log->logFp = NULL;
-            sts = ENT_LOG_IO_FAILED;
-            goto END_OF_ROUTINE;
+            closeIoStatus = ENT_LOG_IO_FAILED;
         }
         log->logFp = NULL;
     }
+    if(log->bufferIoStatus < 0 && closeIoStatus >= 0)
+    {
+        closeIoStatus = log->bufferIoStatus;
+    }
+    iENT_LogIoUnlock(log);
 
     log->isInit = false;
     iENT_LogStateSet(log, ENT_LOG_HANDLE_CLOSED_E);
     iENT_LogHandleUnlinkLocked(log);
+    closeCompleted = true;
 #ifdef _WIN32
     DeleteCriticalSection(&log->cs);
+    DeleteCriticalSection(&log->ioCs);
 #else
     pthread_mutex_destroy(&log->cs);
+    pthread_mutex_destroy(&log->ioCs);
     pthread_cond_destroy(&log->closeCv);
     pthread_cond_destroy(&log->bufferCv);
 #endif
@@ -1337,9 +1367,10 @@ MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
         free(log);
     }
     sLogNum--;
+    sts = closeIoStatus;
 
 END_OF_ROUTINE:
-    if(sts < 0 && closeStarted)
+    if(sts < 0 && closeStarted && !closeCompleted)
     {
         log->closeAttemptActive = false;
     }

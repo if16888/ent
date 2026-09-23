@@ -15,6 +15,11 @@ ENT_CTX gEntCtx;
 
 int iUTL_TimerTestClosing(void);
 unsigned int iUTL_TimerTestCloseEpoch(void);
+void iUTL_TimerTestInjectCloseDeleteFailureAfter(unsigned int successfulDeletes);
+#ifdef _WIN32
+unsigned int iUTL_TimerTestWindowsLastKillStatus(void);
+unsigned int iUTL_TimerTestWindowsLastWaitStatus(void);
+#endif
 
 static volatile int s_timer_hits = 0;
 
@@ -626,6 +631,55 @@ static int test_timer_init_and_close_are_idempotent(void)
     return expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should shut down the timer subsystem");
 }
 
+static int test_timer_close_retry_keeps_partial_close_unavailable(void)
+{
+    UTL_TIMER_T first_timer = NULL;
+    UTL_TIMER_T second_timer = NULL;
+    int hits = 0;
+    MSG_ID_T close_status;
+    int failures = 0;
+
+    if(expect_true(UTL_TimerInit() == ENT_SYS_NORMAL,
+                   "UTL_TimerInit should initialize before partial-close retry testing") != 0)
+    {
+        return 1;
+    }
+    if(expect_true(UTL_TimerCreate(&first_timer, UTL_TIMER_E_ONESHOT, 5000, timer_cb, &hits) == ENT_SYS_NORMAL,
+                   "first timer should be created before partial-close retry testing") != 0 ||
+       expect_true(UTL_TimerCreate(&second_timer, UTL_TIMER_E_ONESHOT, 5000, timer_cb, &hits) == ENT_SYS_NORMAL,
+                   "second timer should be created before partial-close retry testing") != 0)
+    {
+        if(first_timer != NULL)
+        {
+            UTL_TimerDelete(&first_timer);
+        }
+        UTL_TimerClose();
+        return 1;
+    }
+
+    iUTL_TimerTestInjectCloseDeleteFailureAfter(1);
+    close_status = UTL_TimerClose();
+    failures += expect_true(close_status == ENT_TMR_DELETE_FAILED,
+                            "timer close should report an injected delete failure after partial cleanup");
+    if(close_status != ENT_TMR_DELETE_FAILED)
+    {
+        UTL_TimerClose();
+        return failures;
+    }
+
+    failures += expect_true(iUTL_TimerTestClosing() == 1,
+                            "timer service should stay unavailable after partial close failure");
+    failures += expect_true(UTL_TimerDelete(&first_timer) == ENT_TMR_NOT_INITIALIZED,
+                            "timer delete should reject handles until close retry completes");
+    failures += expect_true(UTL_TimerInit() == ENT_TMR_DELETE_FAILED,
+                            "timer init should reject a partially closed service");
+    failures += expect_true(UTL_TimerClose() == ENT_SYS_NORMAL,
+                            "a later close call should retry and finish partial cleanup");
+    failures += expect_true(iUTL_TimerTestClosing() == 0,
+                            "successful close retry should clear the closing state");
+    return failures;
+}
+
 static int test_oneshot_timer_fires_once(void)
 {
     UTL_TIMER_T timer = NULL;
@@ -655,10 +709,22 @@ static int test_oneshot_timer_fires_once(void)
         goto CLEANUP;
     }
 
-    if(expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should clean up a oneshot timer") != 0 ||
-       expect_true(timer_wait_probe_hits(&probe) == 1, "A oneshot timer should fire exactly once") != 0)
     {
-        goto CLEANUP;
+        MSG_ID_T closeStatus = UTL_TimerClose();
+        if(closeStatus != ENT_SYS_NORMAL)
+        {
+            fprintf(stderr, "UTL_TimerClose oneshot status: %d\n", closeStatus);
+#ifdef _WIN32
+            fprintf(stderr, "Windows timer kill/wait status: %u/%u\n",
+                    iUTL_TimerTestWindowsLastKillStatus(),
+                    iUTL_TimerTestWindowsLastWaitStatus());
+#endif
+        }
+        if(expect_true(closeStatus == ENT_SYS_NORMAL, "UTL_TimerClose should clean up a oneshot timer") != 0 ||
+           expect_true(timer_wait_probe_hits(&probe) == 1, "A oneshot timer should fire exactly once") != 0)
+        {
+            goto CLEANUP;
+        }
     }
 
     rc = 0;
@@ -1106,6 +1172,7 @@ int main(void)
     failures += test_timer_rejects_uninitialized_use();
     failures += test_timer_rejects_non_positive_period();
     failures += test_timer_init_and_close_are_idempotent();
+    failures += test_timer_close_retry_keeps_partial_close_unavailable();
     failures += test_oneshot_timer_fires_once();
     failures += test_periodic_timer_fires_until_deleted();
     failures += test_periodic_timer_remains_stable_with_slow_callback();

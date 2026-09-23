@@ -18,10 +18,13 @@
 #ifdef _WIN32
 #pragma warning(disable : 4996)
 #include <Winsock2.h>
+#include <Windows.h>
 #else
 #include <sys/socket.h>
 #include <stdlib.h>	 /* Required by getenv()			     */
 #include <errno.h>
+#include <limits.h>
+#include <stdint.h>
 #include <sys/types.h>	 /* Required by socket.h			     */
 #include <unistd.h>
 #include <string.h>
@@ -33,7 +36,74 @@
 static bool sUtlInitFlag  = false;
 static bool sUtlRetryFlag = true;
 
+#if !defined(_WIN32) && defined(ENT_SOCKET_TEST_HOOKS)
+static unsigned int sSocketCloseEintrInject = 0;
+static unsigned int sSocketCloseCallCount = 0;
+static unsigned int sSocketGetSockOptEintrInject = 0;
+static unsigned int sSocketGetSockOptCallCount = 0;
+
+void iENT_SocketTestInjectCloseEintr(void)
+{
+    sSocketCloseEintrInject = 1;
+    sSocketCloseCallCount = 0;
+}
+
+unsigned int iENT_SocketTestCloseCallCount(void)
+{
+    return sSocketCloseCallCount;
+}
+
+void iENT_SocketTestInjectGetSockOptEintr(void)
+{
+    sSocketGetSockOptEintrInject = 1;
+    sSocketGetSockOptCallCount = 0;
+}
+
+unsigned int iENT_SocketTestGetSockOptCallCount(void)
+{
+    return sSocketGetSockOptCallCount;
+}
+
+int iENT_SocketTestClose(int socketDesc)
+{
+    int rc;
+    sSocketCloseCallCount++;
+    rc = close(socketDesc);
+    if(sSocketCloseEintrInject > 0)
+    {
+        sSocketCloseEintrInject--;
+        if(rc == 0)
+        {
+            errno = EINTR;
+            return -1;
+        }
+    }
+    return rc;
+}
+
+int iENT_SocketTestGetSockOpt(int socketDesc,
+                              int protocolLevel,
+                              int optionName,
+                              void* optionValue,
+                              socklen_t* optionLength)
+{
+    sSocketGetSockOptCallCount++;
+    if(sSocketGetSockOptEintrInject > 0)
+    {
+        sSocketGetSockOptEintrInject--;
+        errno = EINTR;
+        return -1;
+    }
+    return getsockopt(socketDesc,
+                      protocolLevel,
+                      optionName,
+                      optionValue,
+                      optionLength);
+}
+#endif
+
 #ifdef _WIN32
+static SRWLOCK sUtlInitLock = SRWLOCK_INIT;
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
  *
  * NAME        :UTL_SocketInit
@@ -56,20 +126,21 @@ ENT_PUBLIC MSG_ID_T UTL_SocketInit()
     WSADATA wsaData;
     int err;
     
+    AcquireSRWLockExclusive(&sUtlInitLock);
     if(sUtlInitFlag)
     {
+        ReleaseSRWLockExclusive(&sUtlInitLock);
         return ENT_SYS_NORMAL;
     }
 
-    sUtlInitFlag = true;
     wVersionRequested = MAKEWORD( 2, 2 );
      
     err = WSAStartup( wVersionRequested, &wsaData );
     if ( err != 0 ) {
         /* Tell the user that we could not find a usable */
         /* WinSock DLL.                                  */
-        IENT_LOG_ERROR("WSAStartup failed,error [%d]\n",GetLastError());
-        sUtlInitFlag = false;
+        IENT_LOG_ERROR("WSAStartup failed,error [%d]\n",err);
+        ReleaseSRWLockExclusive(&sUtlInitLock);
         return ENT_SOCK_INIT_FAILED;
     }
      
@@ -85,9 +156,11 @@ ENT_PUBLIC MSG_ID_T UTL_SocketInit()
         /* WinSock DLL.                                  */
         WSACleanup( );
         IENT_LOG_ERROR("win sock do not support 2.2\n");
-        sUtlInitFlag = false;
+        ReleaseSRWLockExclusive(&sUtlInitLock);
         return ENT_SOCK_VERSION_UNSUPPORTED; 
     }
+    sUtlInitFlag = true;
+    ReleaseSRWLockExclusive(&sUtlInitLock);
     return ENT_SYS_NORMAL;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
@@ -359,10 +432,10 @@ ENT_PUBLIC MSG_ID_T  UTL_Accept(
  *-----------------------------------------------------------------------------
  */
 ENT_PUBLIC MSG_ID_T  UTL_CloseSocket(
-    UTL_D_SOCKET  SocketDesc) 
+    UTL_D_SOCKET  SocketDesc)
 {
-    MSG_ID_T  sts = 0;	       
-    int       stat;		       
+    MSG_ID_T  sts = 0;
+    int       stat;
 
     if (!sUtlInitFlag) 
     {
@@ -607,14 +680,15 @@ ENT_PUBLIC MSG_ID_T  UTL_Shutdown(
  *-----------------------------------------------------------------------------
  */
 ENT_PUBLIC MSG_ID_T  UTL_GetSockOpt(
-    UTL_D_SOCKET SocketDesc,	  
+    UTL_D_SOCKET SocketDesc,
     int          ProtocolLevel,	  
     int          OptionName,	      
     char        *pOptionValue,	  
     int	        *pOptionLength)	  
 {
-    MSG_ID_T  sts = 0;	       
+    MSG_ID_T  sts = 0;
     int       stat;
+    int       requestedOptionLength;
 
     if (!sUtlInitFlag)
     {
@@ -628,15 +702,17 @@ ENT_PUBLIC MSG_ID_T  UTL_GetSockOpt(
         return ENT_SOCK_BAD_ARGUMENT;
     }
 
-    if ( ( (stat = getsockopt (
-	     SocketDesc,
-	     ProtocolLevel,
-	     OptionName,
-	     pOptionValue,
-	     pOptionLength)) < 0 )
-	     && ( (WSAGetLastError() == WSAEINTR) && sUtlRetryFlag )  )
+    requestedOptionLength = *pOptionLength;
+    do
     {
+        *pOptionLength = requestedOptionLength;
+        stat = getsockopt(SocketDesc,
+                          ProtocolLevel,
+                          OptionName,
+                          pOptionValue,
+                          pOptionLength);
     }
+    while(stat == SOCKET_ERROR && WSAGetLastError() == WSAEINTR && sUtlRetryFlag);
 
     if (stat < 0)
     {
@@ -969,8 +1045,14 @@ ENT_PUBLIC MSG_ID_T  UTL_CloseSocket(
         return ENT_SOCK_NOT_INITIALIZED;
     }
 
-    while ( ( (stat = close(SocketDesc)) < 0 )
-	&& ( (errno == EINTR) && sUtlRetryFlag )  );
+    /* POSIX close may already have released the descriptor when EINTR is
+     * reported. Retrying can close a different descriptor reused by another
+     * thread, so make exactly one close attempt. */
+#ifdef ENT_SOCKET_TEST_HOOKS
+    stat = iENT_SocketTestClose(SocketDesc);
+#else
+    stat = close(SocketDesc);
+#endif
 
     if ( stat < 0 )
     {
@@ -1206,14 +1288,16 @@ ENT_PUBLIC MSG_ID_T  UTL_Shutdown(
  *-----------------------------------------------------------------------------
  */
 ENT_PUBLIC MSG_ID_T  UTL_GetSockOpt(
-    UTL_D_SOCKET SocketDesc,	  
+    UTL_D_SOCKET SocketDesc,
     int          ProtocolLevel,	  
     int          OptionName,	      
     char        *pOptionValue,	  
     int	        *pOptionLength)	  
 {
-    MSG_ID_T  sts = 0;	       
+    MSG_ID_T  sts = 0;
     int       stat;
+    socklen_t nativeOptionLength;
+    socklen_t requestedOptionLength;
 
     if (!sUtlInitFlag)
     {
@@ -1227,20 +1311,43 @@ ENT_PUBLIC MSG_ID_T  UTL_GetSockOpt(
         return ENT_SOCK_BAD_ARGUMENT;
     }
 
-    if ( ( (stat = getsockopt(
-	     SocketDesc,
-	     ProtocolLevel,
-	     OptionName,
-	     pOptionValue,
-	     (socklen_t*)pOptionLength)) < 0 )
-	     && ( (errno == EINTR) && sUtlRetryFlag )  )
+    requestedOptionLength = (socklen_t)*pOptionLength;
+    if((uintmax_t)requestedOptionLength != (uintmax_t)*pOptionLength)
     {
+        return ENT_SOCK_BAD_ARGUMENT;
     }
+
+    do
+    {
+        nativeOptionLength = requestedOptionLength;
+#ifdef ENT_SOCKET_TEST_HOOKS
+        stat = iENT_SocketTestGetSockOpt(SocketDesc,
+                                         ProtocolLevel,
+                                         OptionName,
+                                         pOptionValue,
+                                         &nativeOptionLength);
+#else
+        stat = getsockopt(SocketDesc,
+                          ProtocolLevel,
+                          OptionName,
+                          pOptionValue,
+                          &nativeOptionLength);
+#endif
+    }
+    while(stat < 0 && errno == EINTR && sUtlRetryFlag);
 
     if (stat < 0)
     {
         sts = ENT_SOCK_GETOPT_FAILED;
         IENT_LOG_ERROR("getsockopt failed,error [%d]->[%s].\n",errno,strerror(errno));
+    }
+    else if((uintmax_t)nativeOptionLength > (uintmax_t)INT_MAX)
+    {
+        return ENT_SOCK_GETOPT_FAILED;
+    }
+    else
+    {
+        *pOptionLength = (int)nativeOptionLength;
     }
 
     return sts;

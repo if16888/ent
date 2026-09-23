@@ -1294,6 +1294,59 @@ static int test_sqlite_write_and_read_roundtrip(void)
         return 1;
     }
 
+#if ENT_ENABLE_SQLITE && ENT_SQLITE_FOUND && SQLITE_VERSION_NUMBER >= 3035000
+    {
+        MSG_ID_T returningStatus = ENT_DbWriteParams(db_handle,
+                                                     "INSERT INTO test_user(name) VALUES('bob'),('carol') RETURNING id;",
+                                                     NULL,
+                                                     0,
+                                                     NULL,
+                                                     NULL);
+        if(returningStatus != ENT_SYS_NORMAL)
+        {
+            fprintf(stderr, "SQLite RETURNING write status: %d\n", returningStatus);
+        }
+        if(expect_true(returningStatus == ENT_SYS_NORMAL,
+                   "ENT_DbWriteParams should finish a SQLite write statement that returns rows") != 0)
+        {
+            ENT_DbCloseHandle(&db_handle);
+            ENT_DbClose();
+            cleanup_temp_db_path(db_path);
+            return 1;
+        }
+    }
+
+    memset(&capture, 0, sizeof(capture));
+    if(expect_true(ENT_DbRead(db_handle,
+                              "SELECT CAST(COUNT(*) AS TEXT) AS name FROM test_user;",
+                              capture_single_name_row,
+                              &capture) == 0,
+                   "ENT_DbRead should work after draining a SQLite RETURNING statement") != 0 ||
+       expect_true(strcmp(capture.name, "3") == 0,
+                   "ENT_DbWrite should retain every row from a multi-row RETURNING statement") != 0)
+    {
+        ENT_DbCloseHandle(&db_handle);
+        ENT_DbClose();
+        cleanup_temp_db_path(db_path);
+        return 1;
+    }
+#endif
+
+    if(expect_true(ENT_DbWriteParams(db_handle,
+                                    "SELECT 1 UNION ALL SELECT abs(-9223372036854775808);",
+                                    NULL,
+                                    0,
+                                    NULL,
+                                    NULL) == ENT_DBS_EXEC_FAILED,
+                   "ENT_DbWriteParams should report errors raised after the first returned row") != 0)
+    {
+        ENT_DbCloseHandle(&db_handle);
+        ENT_DbClose();
+        cleanup_temp_db_path(db_path);
+        return 1;
+    }
+
+    memset(&capture, 0, sizeof(capture));
     if(expect_true(ENT_DbRead(db_handle,
                               "SELECT name FROM test_user WHERE id = 1;",
                               capture_single_name_row,

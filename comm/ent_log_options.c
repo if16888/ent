@@ -52,6 +52,7 @@ MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const voi
         return ENT_LOG_BAD_HANDLE;
     }
 
+    iENT_LogIoLock(log);
 #ifdef _WIN32
     EnterCriticalSection(&log->cs);
 #else
@@ -169,6 +170,7 @@ END_OF_ROUTINE:
 #else
     pthread_mutex_unlock(&log->cs);
 #endif
+    iENT_LogIoUnlock(log);
     if(sts == ENT_SYS_NORMAL && startBufferThread)
     {
         bufferSts = iENT_LogStartBufferThread(log);

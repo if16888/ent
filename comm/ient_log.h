@@ -68,7 +68,8 @@ typedef struct ENT_LOG_CTX_INTERNAL_TAG
     ENT_LOG_LEV_E    logLevel;
     FILE*            logFp;
 #ifdef _WIN32
-    CRITICAL_SECTION cs;
+    CRITICAL_SECTION cs;   /* Queue and option state. */
+    CRITICAL_SECTION ioCs; /* File I/O; acquire before cs when both are needed. */
     CONDITION_VARIABLE closeCv;
     CONDITION_VARIABLE bufferCv;
     HANDLE            bufferThread;
@@ -77,7 +78,8 @@ typedef struct ENT_LOG_CTX_INTERNAL_TAG
     volatile LONG     isDebugFast;
     volatile LONG     isBufferFast;
 #else
-    pthread_mutex_t   cs;
+    pthread_mutex_t   cs;   /* Queue and option state. */
+    pthread_mutex_t   ioCs; /* File I/O; acquire before cs when both are needed. */
     pthread_cond_t    closeCv;
     pthread_cond_t    bufferCv;
     pthread_t         bufferThread;
@@ -90,6 +92,7 @@ typedef struct ENT_LOG_CTX_INTERNAL_TAG
     bool             bufferThreadStop;
     bool             closeAttemptActive;
     int              pendingFlushes;
+    MSG_ID_T         bufferIoStatus;
     int              flushBatch;
     int              flushIntervalMs;
     long long        lastFlushMs;
@@ -145,7 +148,10 @@ MSG_ID_T      iENT_LogFormatMessage(const char* format,
                                     size_t stackBufLen,
                                     char** msgBuf,
                                     size_t* msgLen);
+/* File writers hold ioCs; this helper briefly locks cs for flush state. */
 MSG_ID_T      iENT_LogFlushMaybe(ENT_LOG_CTX_INTERNAL* log, FILE* fp, bool forceFlush);
+void          iENT_LogIoLock(ENT_LOG_CTX_INTERNAL* log);
+void          iENT_LogIoUnlock(ENT_LOG_CTX_INTERNAL* log);
 int           iENT_LogFastFlagGet(
 #ifdef _WIN32
                                const volatile LONG* flag
