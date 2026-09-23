@@ -644,9 +644,9 @@ static int test_timer_close_retry_keeps_partial_close_unavailable(void)
     {
         return 1;
     }
-    if(expect_true(UTL_TimerCreate(&first_timer, UTL_TIMER_E_ONESHOT, 60000, timer_cb, &hits) == ENT_SYS_NORMAL,
+    if(expect_true(UTL_TimerCreate(&first_timer, UTL_TIMER_E_ONESHOT, 5000, timer_cb, &hits) == ENT_SYS_NORMAL,
                    "first timer should be created before partial-close retry testing") != 0 ||
-       expect_true(UTL_TimerCreate(&second_timer, UTL_TIMER_E_ONESHOT, 60000, timer_cb, &hits) == ENT_SYS_NORMAL,
+       expect_true(UTL_TimerCreate(&second_timer, UTL_TIMER_E_ONESHOT, 5000, timer_cb, &hits) == ENT_SYS_NORMAL,
                    "second timer should be created before partial-close retry testing") != 0)
     {
         if(first_timer != NULL)
