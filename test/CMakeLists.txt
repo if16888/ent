@@ -507,6 +507,8 @@ add_executable(
   test_ent_shm.c
 )
 
+target_compile_definitions(test_utl_socket PRIVATE ENT_SOCKET_TEST_HOOKS=1)
+
 target_include_directories(
   test_ent_shm
   PRIVATE

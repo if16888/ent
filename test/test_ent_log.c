@@ -1,3 +1,7 @@
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -2419,6 +2423,68 @@ cleanup:
     return rc;
 }
 
+#if defined(__linux__)
+static ssize_t test_fail_cookie_write(void* cookie, const char* buffer, size_t size)
+{
+    (void)cookie;
+    (void)buffer;
+    (void)size;
+    errno = ENOSPC;
+    return -1;
+}
+
+static int test_failed_force_flush_preserves_pending_count(void)
+{
+    ENT_LOG_CTX_INTERNAL log;
+    char ioBuffer[64];
+    cookie_io_functions_t ioFunctions;
+    FILE* fp = NULL;
+    MSG_ID_T flushStatus;
+    int failures = 0;
+
+    memset(&log, 0, sizeof(log));
+    if(expect_true(pthread_mutex_init(&log.cs, NULL) == 0,
+                   "logger mutex should initialize for failed-flush regression test") != 0)
+    {
+        return 1;
+    }
+    log.isBuffer = true;
+    log.pendingFlushes = 3;
+    log.flushBatch = 100;
+    log.flushIntervalMs = 25;
+
+    memset(&ioFunctions, 0, sizeof(ioFunctions));
+    ioFunctions.write = test_fail_cookie_write;
+    fp = fopencookie(NULL, "w", ioFunctions);
+    if(expect_true(fp != NULL, "failing cookie stream should open for failed-flush regression test") != 0)
+    {
+        pthread_mutex_destroy(&log.cs);
+        return 1;
+    }
+    if(expect_true(setvbuf(fp, ioBuffer, _IOFBF, sizeof(ioBuffer)) == 0,
+                   "test stream should use a buffer") != 0 ||
+       expect_true(fwrite("x", 1, 1, fp) == 1,
+                   "test byte should remain buffered before flush") != 0)
+    {
+        fclose(fp);
+        pthread_mutex_destroy(&log.cs);
+        return 1;
+    }
+
+    flushStatus = iENT_LogFlushMaybe(&log, fp, true);
+    failures += expect_true(flushStatus == ENT_LOG_IO_FAILED,
+                            "forced flush to a failing stream should report an I/O failure");
+    failures += expect_true(log.pendingFlushes == 3,
+                            "failed forced flush should preserve pending flush state");
+    failures += expect_true(log.lastFlushMs > 0,
+                            "failed buffered flush should record an attempt time for retry backoff");
+
+    fclose(fp);
+    pthread_mutex_destroy(&log.cs);
+    return failures;
+}
+#endif
+
 int main(void)
 {
     int failures = 0;
@@ -2445,6 +2511,9 @@ int main(void)
     failures += test_buffered_log_close_flushes_queued_messages();
     failures += test_buffered_log_interval_zero_flushes_on_close();
     failures += test_buffered_log_flush_interval_writes_without_close();
+#if defined(__linux__)
+    failures += test_failed_force_flush_preserves_pending_count();
+#endif
 
     if(failures != 0)
     {

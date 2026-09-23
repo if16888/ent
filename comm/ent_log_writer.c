@@ -223,6 +223,10 @@ MSG_ID_T iENT_LogFlushMaybe(ENT_LOG_CTX_INTERNAL* log, FILE* fp, bool forceFlush
     long long nowMs = 0;
     int flushBatch = 0;
     int flushIntervalMs = 0;
+    int pendingFlushes = 0;
+    long long lastFlushMs = 0;
+    bool isBuffer = false;
+    bool shouldFlush = false;
 
     if(log == NULL || fp == NULL)
     {
@@ -230,38 +234,90 @@ MSG_ID_T iENT_LogFlushMaybe(ENT_LOG_CTX_INTERNAL* log, FILE* fp, bool forceFlush
     }
 
     nowMs = iENT_LogNowMs();
+#ifdef _WIN32
+    EnterCriticalSection(&log->cs);
+#else
+    pthread_mutex_lock(&log->cs);
+#endif
     flushBatch = log->flushBatch > 0 ? log->flushBatch : 256;
     flushIntervalMs = log->flushIntervalMs;
+    isBuffer = log->isBuffer;
+    lastFlushMs = log->lastFlushMs;
+    if(!forceFlush && isBuffer)
+    {
+        if(log->pendingFlushes < INT_MAX)
+        {
+            log->pendingFlushes++;
+        }
+        if(log->lastFlushMs == 0)
+        {
+            log->lastFlushMs = nowMs;
+            lastFlushMs = nowMs;
+        }
+        pendingFlushes = log->pendingFlushes;
+        shouldFlush = pendingFlushes >= flushBatch ||
+                      (flushIntervalMs > 0 && nowMs - lastFlushMs >= (long long)flushIntervalMs);
+    }
+#ifdef _WIN32
+    LeaveCriticalSection(&log->cs);
+#else
+    pthread_mutex_unlock(&log->cs);
+#endif
 
-    if(forceFlush || !log->isBuffer)
+    if(forceFlush || !isBuffer || shouldFlush)
     {
         if(fflush(fp) != 0)
         {
+#ifdef _WIN32
+            EnterCriticalSection(&log->cs);
+#else
+            pthread_mutex_lock(&log->cs);
+#endif
+            if(isBuffer)
+            {
+                /* Keep pending work, but delay the next timed retry. */
+                log->lastFlushMs = nowMs;
+            }
+#ifdef _WIN32
+            LeaveCriticalSection(&log->cs);
+#else
+            pthread_mutex_unlock(&log->cs);
+#endif
             return ENT_LOG_IO_FAILED;
         }
+#ifdef _WIN32
+        EnterCriticalSection(&log->cs);
+#else
+        pthread_mutex_lock(&log->cs);
+#endif
         log->pendingFlushes = 0;
         log->lastFlushMs = nowMs;
-        return ENT_SYS_NORMAL;
-    }
-
-    log->pendingFlushes++;
-    if(log->lastFlushMs == 0)
-    {
-        log->lastFlushMs = nowMs;
-    }
-
-    if(log->pendingFlushes >= flushBatch ||
-       (flushIntervalMs > 0 && nowMs - log->lastFlushMs >= (long long)flushIntervalMs))
-    {
-        if(fflush(fp) != 0)
-        {
-            return ENT_LOG_IO_FAILED;
-        }
-        log->pendingFlushes = 0;
-        log->lastFlushMs = nowMs;
+#ifdef _WIN32
+        LeaveCriticalSection(&log->cs);
+#else
+        pthread_mutex_unlock(&log->cs);
+#endif
     }
 
     return ENT_SYS_NORMAL;
+}
+
+void iENT_LogIoLock(ENT_LOG_CTX_INTERNAL* log)
+{
+#ifdef _WIN32
+    EnterCriticalSection(&log->ioCs);
+#else
+    pthread_mutex_lock(&log->ioCs);
+#endif
+}
+
+void iENT_LogIoUnlock(ENT_LOG_CTX_INTERNAL* log)
+{
+#ifdef _WIN32
+    LeaveCriticalSection(&log->ioCs);
+#else
+    pthread_mutex_unlock(&log->ioCs);
+#endif
 }
 
 int iENT_LogFastFlagGet(
@@ -440,6 +496,7 @@ static void* iENT_LogBufferThreadMain(void* data)
 
     for(;;)
     {
+        bool timedFlushDue = false;
 #ifdef _WIN32
         EnterCriticalSection(&log->cs);
         while(log->bufferHead == NULL && !log->bufferThreadStop)
@@ -451,11 +508,8 @@ static void* iENT_LogBufferThreadMain(void* data)
                 long long elapsedMs = nowMs - log->lastFlushMs;
                 if(log->lastFlushMs == 0 || elapsedMs >= (long long)log->flushIntervalMs)
                 {
-                    FILE* flushFp = log->logFp == NULL ? stderr : log->logFp;
-                    fflush(flushFp);
-                    log->pendingFlushes = 0;
-                    log->lastFlushMs = nowMs;
-                    continue;
+                    timedFlushDue = true;
+                    break;
                 }
                 waitMs = (DWORD)(log->flushIntervalMs - (int)elapsedMs);
                 if(waitMs == 0)
@@ -471,6 +525,26 @@ static void* iENT_LogBufferThreadMain(void* data)
             LeaveCriticalSection(&log->cs);
             break;
         }
+        if(timedFlushDue)
+        {
+            MSG_ID_T flushSts;
+            FILE* flushFp;
+            LeaveCriticalSection(&log->cs);
+            iENT_LogIoLock(log);
+            flushFp = log->logFp == NULL ? stderr : log->logFp;
+            flushSts = iENT_LogFlushMaybe(log, flushFp, true);
+            iENT_LogIoUnlock(log);
+            if(flushSts < 0)
+            {
+                EnterCriticalSection(&log->cs);
+                if(log->bufferIoStatus >= 0)
+                {
+                    log->bufferIoStatus = flushSts;
+                }
+                LeaveCriticalSection(&log->cs);
+            }
+            continue;
+        }
 #else
         pthread_mutex_lock(&log->cs);
         while(log->bufferHead == NULL && !log->bufferThreadStop)
@@ -481,11 +555,8 @@ static void* iENT_LogBufferThreadMain(void* data)
                 long long elapsedMs = nowMs - log->lastFlushMs;
                 if(log->lastFlushMs == 0 || elapsedMs >= (long long)log->flushIntervalMs)
                 {
-                    FILE* flushFp = log->logFp == NULL ? stderr : log->logFp;
-                    fflush(flushFp);
-                    log->pendingFlushes = 0;
-                    log->lastFlushMs = nowMs;
-                    continue;
+                    timedFlushDue = true;
+                    break;
                 }
                 else
                 {
@@ -516,6 +587,26 @@ static void* iENT_LogBufferThreadMain(void* data)
             pthread_mutex_unlock(&log->cs);
             break;
         }
+        if(timedFlushDue)
+        {
+            MSG_ID_T flushSts;
+            FILE* flushFp;
+            pthread_mutex_unlock(&log->cs);
+            iENT_LogIoLock(log);
+            flushFp = log->logFp == NULL ? stderr : log->logFp;
+            flushSts = iENT_LogFlushMaybe(log, flushFp, true);
+            iENT_LogIoUnlock(log);
+            if(flushSts < 0)
+            {
+                pthread_mutex_lock(&log->cs);
+                if(log->bufferIoStatus >= 0)
+                {
+                    log->bufferIoStatus = flushSts;
+                }
+                pthread_mutex_unlock(&log->cs);
+            }
+            continue;
+        }
 #endif
         head = log->bufferHead;
         log->bufferHead = NULL;
@@ -529,6 +620,7 @@ static void* iENT_LogBufferThreadMain(void* data)
         while(head != NULL)
         {
             ENT_LOG_MSG_NODE* freeHead = NULL;
+            MSG_ID_T batchIoStatus = ENT_SYS_NORMAL;
             batchHead = head;
             batchTail = NULL;
             batchCount = 0;
@@ -543,19 +635,37 @@ static void* iENT_LogBufferThreadMain(void* data)
                 batchTail->next = NULL;
             }
 
+            iENT_LogIoLock(log);
+            for(node = batchHead; node != NULL; node = node->next)
+            {
+                MSG_ID_T rollSts = iENT_LogRollCheck(log, node->rollTime);
+                if(rollSts < 0 && batchIoStatus >= 0)
+                {
+                    batchIoStatus = rollSts;
+                }
+                {
+                    FILE* fp = log->logFp == NULL ? stderr : log->logFp;
+                    if(fwrite(node->msg, 1, node->msgLen, fp) != node->msgLen && batchIoStatus >= 0)
+                    {
+                        batchIoStatus = ENT_LOG_IO_FAILED;
+                    }
+                    rollSts = iENT_LogFlushMaybe(log, fp, node->forceFlush || fp == stderr);
+                    if(rollSts < 0 && batchIoStatus >= 0)
+                    {
+                        batchIoStatus = rollSts;
+                    }
+                }
+            }
+            iENT_LogIoUnlock(log);
+
 #ifdef _WIN32
             EnterCriticalSection(&log->cs);
 #else
             pthread_mutex_lock(&log->cs);
 #endif
-            for(node = batchHead; node != NULL; node = node->next)
+            if(batchIoStatus < 0 && log->bufferIoStatus >= 0)
             {
-                iENT_LogRollCheck(log, node->rollTime);
-                {
-                    FILE* fp = log->logFp == NULL ? stderr : log->logFp;
-                    fwrite(node->msg, 1, node->msgLen, fp);
-                    iENT_LogFlushMaybe(log, fp, node->forceFlush || fp == stderr);
-                }
+                log->bufferIoStatus = batchIoStatus;
             }
 
             node = batchHead;
@@ -860,11 +970,7 @@ MSG_ID_T iENT_LogVRaw(ENT_LOG_CTX_INTERNAL* log, const char* format, va_list va_
         return ENT_SYS_NORMAL;
     }
 
-#ifdef _WIN32
-    EnterCriticalSection(&log->cs);
-#else
-    pthread_mutex_lock(&log->cs);
-#endif
+    iENT_LogIoLock(log);
 
     time_t nowTime = time(NULL);
     sts = iENT_LogRollCheck(log, nowTime);
@@ -885,24 +991,13 @@ MSG_ID_T iENT_LogVRaw(ENT_LOG_CTX_INTERNAL* log, const char* format, va_list va_
     {
         goto END_OF_ROUTINE;
     }
-#ifdef _WIN32
-    LeaveCriticalSection(&log->cs);
-#else
-    pthread_mutex_unlock(&log->cs);
-#endif
+    iENT_LogIoUnlock(log);
 
 END_OF_ROUTINE:
-#ifdef _WIN32
     if(sts < 0)
     {
-        LeaveCriticalSection(&log->cs);
+        iENT_LogIoUnlock(log);
     }
-#else
-    if(sts < 0)
-    {
-        pthread_mutex_unlock(&log->cs);
-    }
-#endif
 
     if(msgBuf != stackBuf)
     {
@@ -981,11 +1076,7 @@ MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_LEV_E logLevel, const
         }
     }
 
-#ifdef _WIN32
-    EnterCriticalSection(&log->cs);
-#else
-    pthread_mutex_lock(&log->cs);
-#endif
+    iENT_LogIoLock(log);
 
     sts = iENT_LogRollCheck(log, rollTime);
     if(sts < 0)
@@ -1004,24 +1095,13 @@ MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_LEV_E logLevel, const
     {
         goto END_OF_ROUTINE;
     }
-#ifdef _WIN32
-    LeaveCriticalSection(&log->cs);
-#else
-    pthread_mutex_unlock(&log->cs);
-#endif
+    iENT_LogIoUnlock(log);
 
 END_OF_ROUTINE:
-#ifdef _WIN32
     if(sts < 0)
     {
-        LeaveCriticalSection(&log->cs);
+        iENT_LogIoUnlock(log);
     }
-#else
-    if(sts < 0)
-    {
-        pthread_mutex_unlock(&log->cs);
-    }
-#endif
 
     if(lineBuf != lineStackBuf)
     {

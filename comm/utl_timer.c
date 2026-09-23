@@ -56,6 +56,8 @@ typedef struct
     unsigned int      timerType;
 #if ENT_TMR_IMPL_WINDOWS
     UINT              timerId;
+    HANDLE            callbackDoneEvent;
+    BOOL              timerStopped;
 #elif ENT_TMR_IMPL_LINUX
     pthread_t         timerThread;
     BOOL              selfDeleteRequested;
@@ -92,14 +94,18 @@ static TIMER_TH_CTX  sTimerCtx;
 #ifdef _WIN32
 static SRWLOCK       sTimerLifecycleLock = SRWLOCK_INIT;
 static __declspec(thread) unsigned int sTimerCallbackDepth = 0;
+static __declspec(thread) PTIMER_CTX_T sTimerCurrentCallback = NULL;
 #else
 static pthread_mutex_t sTimerLifecycleLock = PTHREAD_MUTEX_INITIALIZER;
 static __thread unsigned int sTimerCallbackDepth = 0;
 #endif
 static BOOL          sTimerClosing = FALSE;
+static BOOL          sTimerCloseActive = FALSE;
 static unsigned int  sTimerLifecycleOps = 0;
 #ifdef ENT_TIMER_TEST_HOOKS
 static unsigned int  sTimerCloseEpoch = 0;
+static unsigned int  sTimerCloseDeleteFailAfter = 0;
+static BOOL          sTimerCloseDeleteFailureArmed = FALSE;
 #endif
 #if ENT_TMR_IMPL_LINUX && defined(ENT_TIMER_TEST_HOOKS)
 static unsigned int  sTimerRtLiveContexts = 0;
@@ -258,6 +264,14 @@ unsigned int iUTL_TimerTestCloseEpoch(void)
     epoch = sTimerCloseEpoch;
     iUTL_TimerLifecycleLockLeave();
     return epoch;
+}
+
+void iUTL_TimerTestInjectCloseDeleteFailureAfter(unsigned int successfulDeletes)
+{
+    iUTL_TimerLifecycleLockEnter();
+    sTimerCloseDeleteFailAfter = successfulDeletes;
+    sTimerCloseDeleteFailureArmed = TRUE;
+    iUTL_TimerLifecycleLockLeave();
 }
 
 #if ENT_TMR_IMPL_LINUX || ENT_TMR_IMPL_POSIX_FALLBACK
@@ -543,6 +557,9 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerClose()
 {
     MSG_ID_T     sts = ENT_SYS_NORMAL;
     DLL_D_HDR*   tmpDll = NULL;
+#ifdef ENT_TIMER_TEST_HOOKS
+    BOOL         injectDeleteFailure = FALSE;
+#endif
 
     if(sTimerCallbackDepth > 0)
     {
@@ -557,13 +574,14 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerClose()
         IENT_LOG_ERROR("uninitialized\n");
         return ENT_TMR_NOT_INITIALIZED;
     }
-    if(sTimerClosing)
+    if(sTimerCloseActive)
     {
         iUTL_TimerLifecycleLockLeave();
         IENT_LOG_WARN("timer close in progress\n");
         return ENT_SYS_NORMAL;
     }
     sTimerClosing = TRUE;
+    sTimerCloseActive = TRUE;
 #ifdef ENT_TIMER_TEST_HOOKS
     sTimerCloseEpoch++;
 #endif
@@ -581,10 +599,44 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerClose()
             break;
         }
 
+#ifdef ENT_TIMER_TEST_HOOKS
+        iUTL_TimerLifecycleLockEnter();
+        if(sTimerCloseDeleteFailureArmed)
+        {
+            if(sTimerCloseDeleteFailAfter == 0)
+            {
+                sTimerCloseDeleteFailureArmed = FALSE;
+                injectDeleteFailure = TRUE;
+            }
+            else
+            {
+                sTimerCloseDeleteFailAfter--;
+            }
+        }
+        iUTL_TimerLifecycleLockLeave();
+        if(injectDeleteFailure)
+        {
+            sts = ENT_TMR_DELETE_FAILED;
+            injectDeleteFailure = FALSE;
+        }
+        else
+        {
+            sts = iUTL_TimerDeleteTimer((UTL_TIMER_T*)&tmpDll);
+        }
+#else
         sts = iUTL_TimerDeleteTimer((UTL_TIMER_T*)&tmpDll);
+#endif
         if(sts < 0)
         {
             IENT_LOG_ERROR("UTL_TimerDelete failed,sts [%d]\n",sts);
+            iUTL_TimerLifecycleLockEnter();
+            sTimerCloseActive = FALSE;
+#ifdef ENT_TIMER_TEST_HOOKS
+            sTimerCloseDeleteFailAfter = 0;
+            sTimerCloseDeleteFailureArmed = FALSE;
+#endif
+            iUTL_TimerLifecycleLockLeave();
+            return sts;
         }
     }
 
@@ -593,6 +645,11 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerClose()
     memset(&sTimerCtx,0,sizeof(sTimerCtx));
     sUtilTimerInit = false;
     sTimerClosing = FALSE;
+    sTimerCloseActive = FALSE;
+#ifdef ENT_TIMER_TEST_HOOKS
+    sTimerCloseDeleteFailAfter = 0;
+    sTimerCloseDeleteFailureArmed = FALSE;
+#endif
     iUTL_TimerLifecycleLockLeave();
     return ENT_SYS_NORMAL;
 }
@@ -601,6 +658,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerClose()
 static void CALLBACK iUTL_TimerWinCb(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2)
 {
     PTIMER_CTX_T timerCtx = (PTIMER_CTX_T)dwUser;
+    PTIMER_CTX_T previousCallback = sTimerCurrentCallback;
     (void)uTimerID;
     (void)uMsg;
     (void)dw1;
@@ -611,9 +669,15 @@ static void CALLBACK iUTL_TimerWinCb(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser,
         return;
     }
 
+    sTimerCurrentCallback = timerCtx;
     if(timerCtx->timer_ev_cb)
     {
         iUTL_TimerInvokeCallback(timerCtx->timer_ev_cb, timerCtx->data);
+    }
+    sTimerCurrentCallback = previousCallback;
+    if((timerCtx->timerType & UTL_TIMER_E_ONESHOT) != 0 && timerCtx->callbackDoneEvent != NULL)
+    {
+        SetEvent(timerCtx->callbackDoneEvent);
     }
 }
 
@@ -622,6 +686,12 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerInit()
     MSG_ID_T  sts = 0;
 
     iUTL_TimerLifecycleLockEnter();
+    if(sTimerClosing)
+    {
+        iUTL_TimerLifecycleLockLeave();
+        IENT_LOG_WARN("timer runtime is closing and must be closed before reinitialization\n");
+        return ENT_TMR_DELETE_FAILED;
+    }
     if(!sUtilTimerInit)
     {
         sts = UTL_LockInit(&sTimerCtx.dllLock,"UTL_TimerInit");
@@ -680,6 +750,17 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int m
     timerCtx->timer_ev_cb = evCb;
     timerCtx->data        = data;
     timerCtx->ms          = ms;
+    if((type & UTL_TIMER_E_ONESHOT) != 0)
+    {
+        timerCtx->callbackDoneEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+        if(timerCtx->callbackDoneEvent == NULL)
+        {
+            free(timerCtx);
+            iUTL_TimerLifecycleEndOp();
+            IENT_LOG_ERROR("CreateEvent failed,error [%lu]\n",GetLastError());
+            return ENT_TMR_CREATE_FAILED;
+        }
+    }
     if(type&UTL_TIMER_E_ONESHOT)
         fuEvent = TIME_ONESHOT;
 
@@ -688,6 +769,10 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int m
     UTL_LockLeave(sTimerCtx.dllLock);
     if(sts < 0)
     {
+        if(timerCtx->callbackDoneEvent != NULL)
+        {
+            CloseHandle(timerCtx->callbackDoneEvent);
+        }
         iUTL_TimerLifecycleEndOp();
         free(timerCtx);
         return ENT_TMR_LIST_FAILED;
@@ -701,6 +786,10 @@ ENT_PUBLIC MSG_ID_T UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int m
         UTL_LockEnter(sTimerCtx.dllLock);
         UTL_DllRemCurr((DLL_D_HDR*)timerCtx,&tmpDll);
         UTL_LockLeave(sTimerCtx.dllLock);
+        if(timerCtx->callbackDoneEvent != NULL)
+        {
+            CloseHandle(timerCtx->callbackDoneEvent);
+        }
         memset(timerCtx,0,sizeof(TIMER_CTX_T));
         free(timerCtx);
         iUTL_TimerLifecycleEndOp();
@@ -720,6 +809,8 @@ static MSG_ID_T iUTL_TimerDeleteTimer(UTL_TIMER_T* pTimer)
     MSG_ID_T      sts = 0;
     PTIMER_CTX_T  timerCtx = NULL;
     DLL_D_HDR*    tmpDll;
+    MMRESULT      killStatus;
+    DWORD         waitStatus;
     if(pTimer == NULL)
     {
         IENT_LOG_ERROR("unvalid arg\n");
@@ -733,22 +824,54 @@ static MSG_ID_T iUTL_TimerDeleteTimer(UTL_TIMER_T* pTimer)
         return ENT_TMR_BAD_ARGUMENT;
     }
 
-    if(timeKillEvent(timerCtx->timerId)== MMSYSERR_INVALPARAM )
+    if(sTimerCurrentCallback == timerCtx)
     {
-        IENT_LOG_ERROR("timeKillEvent failed,error [%d]\n",errno);
+        IENT_LOG_ERROR("a Windows timer cannot delete itself from its callback\n");
         return ENT_TMR_DELETE_FAILED;
+    }
+    if(!timerCtx->timerStopped)
+    {
+        killStatus = timeKillEvent(timerCtx->timerId);
+        if(killStatus == TIMERR_NOERROR)
+        {
+            timerCtx->timerStopped = TRUE;
+        }
+        else if(killStatus == MMSYSERR_INVALPARAM &&
+                (timerCtx->timerType & UTL_TIMER_E_ONESHOT) != 0)
+        {
+            if(timerCtx->callbackDoneEvent == NULL)
+            {
+                return ENT_TMR_DELETE_FAILED;
+            }
+            waitStatus = WaitForSingleObject(timerCtx->callbackDoneEvent, INFINITE);
+            if(waitStatus != WAIT_OBJECT_0)
+            {
+                IENT_LOG_ERROR("waiting for one-shot timer callback failed,error [%lu]\n",GetLastError());
+                return ENT_TMR_DELETE_FAILED;
+            }
+            timerCtx->timerStopped = TRUE;
+        }
+        else
+        {
+            IENT_LOG_ERROR("timeKillEvent failed,status [%u]\n",(unsigned int)killStatus);
+            return ENT_TMR_DELETE_FAILED;
+        }
     }
     UTL_LockEnter(sTimerCtx.dllLock);
     sts = UTL_DllRemCurr((DLL_D_HDR*)timerCtx,&tmpDll);
     UTL_LockLeave(sTimerCtx.dllLock);
 
-    memset(timerCtx,0,sizeof(TIMER_CTX_T));
-    free(timerCtx);
-    *pTimer = NULL;
     if(sts < 0)
     {
         return ENT_TMR_LIST_FAILED;
     }
+    if(timerCtx->callbackDoneEvent != NULL)
+    {
+        CloseHandle(timerCtx->callbackDoneEvent);
+    }
+    memset(timerCtx,0,sizeof(TIMER_CTX_T));
+    free(timerCtx);
+    *pTimer = NULL;
     return ENT_SYS_NORMAL;
 }
 
@@ -1164,6 +1287,12 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerInit()
     MSG_ID_T  sts = 0;
 
     iUTL_TimerLifecycleLockEnter();
+    if(sTimerClosing)
+    {
+        iUTL_TimerLifecycleLockLeave();
+        IENT_LOG_WARN("timer runtime is closing and must be closed before reinitialization\n");
+        return ENT_TMR_DELETE_FAILED;
+    }
     if(sUtilTimerInit)
     {
         iUTL_TimerLifecycleLockLeave();
@@ -1379,6 +1508,12 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerInit()
     MSG_ID_T  sts = 0;
 
     iUTL_TimerLifecycleLockEnter();
+    if(sTimerClosing)
+    {
+        iUTL_TimerLifecycleLockLeave();
+        IENT_LOG_WARN("timer runtime is closing and must be closed before reinitialization\n");
+        return ENT_TMR_DELETE_FAILED;
+    }
     if(sUtilTimerInit)
     {
         iUTL_TimerLifecycleLockLeave();

@@ -424,8 +424,13 @@ static MSG_ID_T iENT_DbSqliteExecWrite(sqlite3* dbHandle,
     int rc;
     long long rows;
 
-    rc = sqlite3_step(stmt);
-    if(rc != SQLITE_DONE && rc != SQLITE_ROW)
+    do
+    {
+        rc = sqlite3_step(stmt);
+    }
+    while(rc == SQLITE_ROW);
+
+    if(rc != SQLITE_DONE)
     {
         IENT_LOG_ERROR("sqlite write step failed:[%d]->[%s]\n", rc, sqlite3_errmsg(dbHandle));
         return ENT_DBS_EXEC_FAILED;
@@ -478,7 +483,12 @@ static MSG_ID_T iENT_DbSqliteExecPrepared(sqlite3* dbHandle,
     sts = iENT_DbSqliteCollectRows(dbHandle, stmt, userCb, userData);
 
 END_OF_ROUTINE:
-    sqlite3_finalize(stmt);
+    rc = sqlite3_finalize(stmt);
+    if(sts >= 0 && rc != SQLITE_OK)
+    {
+        IENT_LOG_ERROR("sqlite statement finalize failed:[%d]->[%s]\n", rc, sqlite3_errmsg(dbHandle));
+        sts = ENT_DBS_EXEC_FAILED;
+    }
     return sts;
 }
 
