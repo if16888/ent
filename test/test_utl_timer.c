@@ -16,6 +16,10 @@ ENT_CTX gEntCtx;
 int iUTL_TimerTestClosing(void);
 unsigned int iUTL_TimerTestCloseEpoch(void);
 void iUTL_TimerTestInjectCloseDeleteFailureAfter(unsigned int successfulDeletes);
+#ifdef _WIN32
+unsigned int iUTL_TimerTestWindowsLastKillStatus(void);
+unsigned int iUTL_TimerTestWindowsLastWaitStatus(void);
+#endif
 
 static volatile int s_timer_hits = 0;
 
@@ -710,6 +714,11 @@ static int test_oneshot_timer_fires_once(void)
         if(closeStatus != ENT_SYS_NORMAL)
         {
             fprintf(stderr, "UTL_TimerClose oneshot status: %d\n", closeStatus);
+#ifdef _WIN32
+            fprintf(stderr, "Windows timer kill/wait status: %u/%u\n",
+                    iUTL_TimerTestWindowsLastKillStatus(),
+                    iUTL_TimerTestWindowsLastWaitStatus());
+#endif
         }
         if(expect_true(closeStatus == ENT_SYS_NORMAL, "UTL_TimerClose should clean up a oneshot timer") != 0 ||
            expect_true(timer_wait_probe_hits(&probe) == 1, "A oneshot timer should fire exactly once") != 0)

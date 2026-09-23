@@ -107,6 +107,20 @@ static unsigned int  sTimerCloseEpoch = 0;
 static unsigned int  sTimerCloseDeleteFailAfter = 0;
 static BOOL          sTimerCloseDeleteFailureArmed = FALSE;
 #endif
+#if ENT_TMR_IMPL_WINDOWS && defined(ENT_TIMER_TEST_HOOKS)
+static unsigned int  sTimerTestWinLastKillStatus = 0xFFFFFFFFu;
+static unsigned int  sTimerTestWinLastWaitStatus = 0xFFFFFFFFu;
+
+unsigned int iUTL_TimerTestWindowsLastKillStatus(void)
+{
+    return sTimerTestWinLastKillStatus;
+}
+
+unsigned int iUTL_TimerTestWindowsLastWaitStatus(void)
+{
+    return sTimerTestWinLastWaitStatus;
+}
+#endif
 #if ENT_TMR_IMPL_LINUX && defined(ENT_TIMER_TEST_HOOKS)
 static unsigned int  sTimerRtLiveContexts = 0;
 #endif
@@ -818,6 +832,10 @@ static MSG_ID_T iUTL_TimerDeleteTimer(UTL_TIMER_T* pTimer)
     }
 
     timerCtx = (PTIMER_CTX_T)*pTimer;
+#if ENT_TMR_IMPL_WINDOWS && defined(ENT_TIMER_TEST_HOOKS)
+    sTimerTestWinLastKillStatus = 0xFFFFFFFFu;
+    sTimerTestWinLastWaitStatus = 0xFFFFFFFFu;
+#endif
     if(timerCtx == NULL )
     {
         IENT_LOG_WARN("unvalid timer\n");
@@ -832,6 +850,9 @@ static MSG_ID_T iUTL_TimerDeleteTimer(UTL_TIMER_T* pTimer)
     if(!timerCtx->timerStopped)
     {
         killStatus = timeKillEvent(timerCtx->timerId);
+#if ENT_TMR_IMPL_WINDOWS && defined(ENT_TIMER_TEST_HOOKS)
+        sTimerTestWinLastKillStatus = (unsigned int)killStatus;
+#endif
         if(killStatus == TIMERR_NOERROR)
         {
             timerCtx->timerStopped = TRUE;
@@ -844,6 +865,9 @@ static MSG_ID_T iUTL_TimerDeleteTimer(UTL_TIMER_T* pTimer)
                 return ENT_TMR_DELETE_FAILED;
             }
             waitStatus = WaitForSingleObject(timerCtx->callbackDoneEvent, INFINITE);
+#if ENT_TMR_IMPL_WINDOWS && defined(ENT_TIMER_TEST_HOOKS)
+            sTimerTestWinLastWaitStatus = (unsigned int)waitStatus;
+#endif
             if(waitStatus != WAIT_OBJECT_0)
             {
                 IENT_LOG_ERROR("waiting for one-shot timer callback failed,error [%lu]\n",GetLastError());
