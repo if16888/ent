@@ -705,10 +705,17 @@ static int test_oneshot_timer_fires_once(void)
         goto CLEANUP;
     }
 
-    if(expect_true(UTL_TimerClose() == 0, "UTL_TimerClose should clean up a oneshot timer") != 0 ||
-       expect_true(timer_wait_probe_hits(&probe) == 1, "A oneshot timer should fire exactly once") != 0)
     {
-        goto CLEANUP;
+        MSG_ID_T closeStatus = UTL_TimerClose();
+        if(closeStatus != ENT_SYS_NORMAL)
+        {
+            fprintf(stderr, "UTL_TimerClose oneshot status: %d\n", closeStatus);
+        }
+        if(expect_true(closeStatus == ENT_SYS_NORMAL, "UTL_TimerClose should clean up a oneshot timer") != 0 ||
+           expect_true(timer_wait_probe_hits(&probe) == 1, "A oneshot timer should fire exactly once") != 0)
+        {
+            goto CLEANUP;
+        }
     }
 
     rc = 0;
