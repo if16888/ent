@@ -857,9 +857,10 @@ static MSG_ID_T iUTL_TimerDeleteTimer(UTL_TIMER_T* pTimer)
         {
             timerCtx->timerStopped = TRUE;
         }
-        else if(killStatus == MMSYSERR_INVALPARAM &&
+        else if((killStatus == MMSYSERR_INVALPARAM || killStatus == TIMERR_NOCANDO) &&
                 (timerCtx->timerType & UTL_TIMER_E_ONESHOT) != 0)
         {
+            /* A one-shot may already have fired; wait for its callback before freeing the context. */
             if(timerCtx->callbackDoneEvent == NULL)
             {
                 return ENT_TMR_DELETE_FAILED;
