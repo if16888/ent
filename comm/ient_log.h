@@ -65,7 +65,6 @@ typedef struct ENT_LOG_CTX_INTERNAL_TAG
     bool             isInit;
     bool             isDebug;
     bool             isBuffer;
-    ENT_LOG_LEV_E    logLevel;
     FILE*            logFp;
 #ifdef _WIN32
     CRITICAL_SECTION cs;   /* Queue and option state. */
@@ -77,6 +76,7 @@ typedef struct ENT_LOG_CTX_INTERNAL_TAG
     volatile LONG     activeWriters;
     volatile LONG     isDebugFast;
     volatile LONG     isBufferFast;
+    volatile LONG     logLevelFast;
 #else
     pthread_mutex_t   cs;   /* Queue and option state. */
     pthread_mutex_t   ioCs; /* File I/O; acquire before cs when both are needed. */
@@ -87,6 +87,7 @@ typedef struct ENT_LOG_CTX_INTERNAL_TAG
     volatile int      activeWriters;
     volatile int      isDebugFast;
     volatile int      isBufferFast;
+    volatile int      logLevelFast;
 #endif
     bool             bufferThreadStarted;
     bool             bufferThreadStop;
@@ -166,6 +167,8 @@ void          iENT_LogFastFlagSet(
                                 volatile int* flag,
 #endif
                                 int value);
+ENT_LOG_LEV_E  iENT_LogLevelGet(const ENT_LOG_CTX_INTERNAL* log);
+void           iENT_LogLevelSet(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_LEV_E level);
 long long     iENT_LogNowMs(void);
 bool          iENT_LogBufferReady(const ENT_LOG_CTX_INTERNAL* log);
 ENT_LOG_MSG_NODE* iENT_LogAllocNode(size_t msgCap, bool pooled);

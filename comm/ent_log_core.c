@@ -442,7 +442,7 @@ static MSG_ID_T iENT_LogInitCtx(ENT_LOG_CTX_INTERNAL* log,
     log->isBuffer = false;
     iENT_LogFastFlagSet(&log->isDebugFast, 0);
     iENT_LogFastFlagSet(&log->isBufferFast, 0);
-    log->logLevel = LOG_LEV_WARN_E;
+    iENT_LogLevelSet(log, LOG_LEV_WARN_E);
     log->maxNum = DEF_MAX_NUM_LOG;
     log->tag = ENTLOG_TAG;
     log->registryNext = sLogHandleHead;
@@ -607,20 +607,30 @@ MSG_ID_T iENT_LogAcquireWriter(ENT_LOG_CTX_INTERNAL** logCtx, ENT_LOG logHandle)
 
 void iENT_LogReleaseWriter(ENT_LOG_CTX_INTERNAL* log)
 {
-    if(iENT_LogActiveDec(log) == 0 && iENT_LogStateGet(log) == ENT_LOG_HANDLE_CLOSING_E)
+    int activeWriters = 0;
+
+    /* Keep the handle alive until both the reference decrement and close
+     * notification are protected by the registry lock. Close waits on this
+     * same lock before it can unlink and free the handle. */
+#ifdef _WIN32
+    iENT_LogGlobalLock();
+#else
+    pthread_mutex_lock(&sLogMutex);
+#endif
+    activeWriters = iENT_LogActiveDec(log);
+    if(activeWriters == 0 && iENT_LogStateGet(log) == ENT_LOG_HANDLE_CLOSING_E)
     {
 #ifdef _WIN32
-        iENT_LogGlobalLock();
-        if(iENT_LogStateGet(log) == ENT_LOG_HANDLE_CLOSING_E && iENT_LogActiveGet(log) == 0)
-            WakeAllConditionVariable(&log->closeCv);
-        iENT_LogGlobalUnlock();
+        WakeAllConditionVariable(&log->closeCv);
 #else
-        pthread_mutex_lock(&sLogMutex);
-        if(iENT_LogStateGet(log) == ENT_LOG_HANDLE_CLOSING_E && iENT_LogActiveGet(log) == 0)
-            pthread_cond_broadcast(&log->closeCv);
-        pthread_mutex_unlock(&sLogMutex);
+        pthread_cond_broadcast(&log->closeCv);
 #endif
     }
+#ifdef _WIN32
+    iENT_LogGlobalUnlock();
+#else
+    pthread_mutex_unlock(&sLogMutex);
+#endif
 }
 
 MSG_ID_T iENT_LogInit(void)
@@ -982,7 +992,7 @@ MSG_ID_T ENT_LogCtxFatal(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
         iENT_LogCtxEndCall(ownerCtx);
         return sts;
     }
-    if(LOG_LEV_FATAL_E > logCtx->logLevel)
+    if(LOG_LEV_FATAL_E > iENT_LogLevelGet(logCtx))
     {
         iENT_LogReleaseWriter(logCtx);
         iENT_LogCtxEndCall(ownerCtx);
@@ -1022,7 +1032,7 @@ MSG_ID_T ENT_LogCtxError(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
         iENT_LogCtxEndCall(ownerCtx);
         return sts;
     }
-    if(LOG_LEV_ERROR_E > logCtx->logLevel)
+    if(LOG_LEV_ERROR_E > iENT_LogLevelGet(logCtx))
     {
         iENT_LogReleaseWriter(logCtx);
         iENT_LogCtxEndCall(ownerCtx);
@@ -1062,7 +1072,7 @@ MSG_ID_T ENT_LogCtxWarn(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format, 
         iENT_LogCtxEndCall(ownerCtx);
         return sts;
     }
-    if(LOG_LEV_WARN_E > logCtx->logLevel)
+    if(LOG_LEV_WARN_E > iENT_LogLevelGet(logCtx))
     {
         iENT_LogReleaseWriter(logCtx);
         iENT_LogCtxEndCall(ownerCtx);
@@ -1102,7 +1112,7 @@ MSG_ID_T ENT_LogCtxPrint(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
         iENT_LogCtxEndCall(ownerCtx);
         return sts;
     }
-    if(LOG_LEV_INFO_E > logCtx->logLevel)
+    if(LOG_LEV_INFO_E > iENT_LogLevelGet(logCtx))
     {
         iENT_LogReleaseWriter(logCtx);
         iENT_LogCtxEndCall(ownerCtx);
@@ -1142,7 +1152,7 @@ MSG_ID_T ENT_LogCtxDebug(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
         iENT_LogCtxEndCall(ownerCtx);
         return sts;
     }
-    if(LOG_LEV_DEBUG_E > logCtx->logLevel)
+    if(LOG_LEV_DEBUG_E > iENT_LogLevelGet(logCtx))
     {
         iENT_LogReleaseWriter(logCtx);
         iENT_LogCtxEndCall(ownerCtx);

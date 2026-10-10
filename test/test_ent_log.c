@@ -1187,6 +1187,371 @@ typedef struct TEST_CLOSE_THREAD_CTX_TAG
     MSG_ID_T closeRc;
 } TEST_CLOSE_THREAD_CTX;
 
+typedef struct TEST_BUFFER_ENABLE_THREAD_CTX_TAG
+{
+    ENT_LOG logHandle;
+    TEST_EVENT* start;
+    const bool* enabled;
+    MSG_ID_T status;
+} TEST_BUFFER_ENABLE_THREAD_CTX;
+
+#ifdef _WIN32
+static DWORD WINAPI buffer_enable_thread_proc(LPVOID data)
+#else
+static void* buffer_enable_thread_proc(void* data)
+#endif
+{
+    TEST_BUFFER_ENABLE_THREAD_CTX* ctx = (TEST_BUFFER_ENABLE_THREAD_CTX*)data;
+    test_event_wait(ctx->start, -1);
+    ctx->status = ENT_LogSetOption(ctx->logHandle, ENT_LOG_BUFFER_E, ctx->enabled);
+#ifdef _WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
+static int test_concurrent_buffer_enable_starts_one_worker(void)
+{
+    enum { THREAD_COUNT = 12 };
+    ENT_LOG logHandle = NULL;
+    TEST_EVENT start;
+    TEST_BUFFER_ENABLE_THREAD_CTX threadCtx[THREAD_COUNT];
+    bool bufferEnabled = true;
+    char dirPath[256];
+    int threadsStarted = 0;
+    int serviceOpen = 0;
+    int startEventReady = 0;
+    int rc = 1;
+#ifdef _WIN32
+    HANDLE threads[THREAD_COUNT];
+#else
+    pthread_t threads[THREAD_COUNT];
+#endif
+
+    memset(threadCtx, 0, sizeof(threadCtx));
+    memset(threads, 0, sizeof(threads));
+    if(make_temp_dir(dirPath, sizeof(dirPath)) != 0)
+    {
+        fprintf(stderr, "failed to create temp concurrent-buffer directory\n");
+        return 1;
+    }
+    if(test_event_init(&start) != 0)
+    {
+        remove_dir_contents(dirPath);
+        return expect_true(0, "test_event_init should create the concurrent-buffer start gate");
+    }
+    startEventReady = 1;
+
+    if(expect_true(ENT_LogInit() == ENT_SYS_NORMAL,
+                   "ENT_LogInit should initialize before concurrent buffer enable") != 0)
+    {
+        goto cleanup;
+    }
+    serviceOpen = 1;
+    if(expect_true(ENT_LogInitHandle(&logHandle, "ConcurrentBufferModule", dirPath) == ENT_SYS_NORMAL,
+                   "ENT_LogInitHandle should create the concurrent-buffer test handle") != 0)
+    {
+        goto cleanup;
+    }
+
+    for(threadsStarted = 0; threadsStarted < THREAD_COUNT; ++threadsStarted)
+    {
+        threadCtx[threadsStarted].logHandle = logHandle;
+        threadCtx[threadsStarted].start = &start;
+        threadCtx[threadsStarted].enabled = &bufferEnabled;
+#ifdef _WIN32
+        threads[threadsStarted] = CreateThread(NULL, 0, buffer_enable_thread_proc, &threadCtx[threadsStarted], 0, NULL);
+        if(threads[threadsStarted] == NULL)
+#else
+        if(pthread_create(&threads[threadsStarted], NULL, buffer_enable_thread_proc, &threadCtx[threadsStarted]) != 0)
+#endif
+        {
+            expect_true(0, "all concurrent buffer enable threads should start");
+            break;
+        }
+    }
+
+    test_event_signal(&start);
+    {
+        int joinIdx;
+        for(joinIdx = 0; joinIdx < threadsStarted; ++joinIdx)
+        {
+#ifdef _WIN32
+            WaitForSingleObject(threads[joinIdx], INFINITE);
+            CloseHandle(threads[joinIdx]);
+#else
+            pthread_join(threads[joinIdx], NULL);
+#endif
+        }
+    }
+    if(threadsStarted != THREAD_COUNT)
+    {
+        goto cleanup;
+    }
+    {
+        int threadIdx;
+        for(threadIdx = 0; threadIdx < THREAD_COUNT; ++threadIdx)
+        {
+            if(expect_true(threadCtx[threadIdx].status == ENT_SYS_NORMAL,
+                           "concurrent buffer enable should return success for every caller") != 0)
+            {
+                goto cleanup;
+            }
+        }
+    }
+    if(expect_true(((ENT_LOG_CTX_INTERNAL*)logHandle)->bufferThreadStarted &&
+                   ((ENT_LOG_CTX_INTERNAL*)logHandle)->bufferThreadStop == false,
+                   "one buffer worker should be started and running after concurrent enable") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogCloseHandle(logHandle) == ENT_SYS_NORMAL,
+                   "closing the handle should join its single buffer worker") != 0)
+    {
+        goto cleanup;
+    }
+    logHandle = NULL;
+    if(expect_true(ENT_LogClose() == ENT_SYS_NORMAL,
+                   "ENT_LogClose should succeed after concurrent buffer enable") != 0)
+    {
+        goto cleanup;
+    }
+    serviceOpen = 0;
+    rc = 0;
+
+cleanup:
+    if(startEventReady)
+    {
+        test_event_signal(&start);
+    }
+    if(logHandle != NULL)
+    {
+        ENT_LogCloseHandle(logHandle);
+    }
+    if(serviceOpen)
+    {
+        ENT_LogClose();
+    }
+    if(startEventReady)
+    {
+        test_event_destroy(&start);
+    }
+    remove_dir_contents(dirPath);
+    return rc;
+}
+
+typedef struct TEST_LOG_LEVEL_RACE_CTX_TAG
+{
+    ENT_LOG logHandle;
+    TEST_EVENT* start;
+    int iterations;
+    int failed;
+} TEST_LOG_LEVEL_RACE_CTX;
+
+#ifdef _WIN32
+static DWORD WINAPI set_log_level_thread_proc(LPVOID data)
+#else
+static void* set_log_level_thread_proc(void* data)
+#endif
+{
+    TEST_LOG_LEVEL_RACE_CTX* ctx = (TEST_LOG_LEVEL_RACE_CTX*)data;
+    int i;
+    test_event_wait(ctx->start, -1);
+    for(i = 0; i < ctx->iterations; ++i)
+    {
+        ENT_LOG_LEV_E level = (i % 2 == 0) ? LOG_LEV_INFO_E : LOG_LEV_DEBUG_E;
+        if(ENT_LogSetOption(ctx->logHandle, ENT_LOG_LEVEL_E, &level) != ENT_SYS_NORMAL)
+        {
+            ctx->failed = 1;
+            break;
+        }
+    }
+#ifdef _WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
+#ifdef _WIN32
+static DWORD WINAPI write_while_setting_log_level_thread_proc(LPVOID data)
+#else
+static void* write_while_setting_log_level_thread_proc(void* data)
+#endif
+{
+    TEST_LOG_LEVEL_RACE_CTX* ctx = (TEST_LOG_LEVEL_RACE_CTX*)data;
+    int i;
+    test_event_wait(ctx->start, -1);
+    for(i = 0; i < ctx->iterations; ++i)
+    {
+        MSG_ID_T status = ENT_LogPrint(ctx->logHandle, "level-race-%d\n", i);
+        if(status < 0)
+        {
+            ctx->failed = 1;
+            break;
+        }
+    }
+#ifdef _WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
+static int test_log_level_updates_are_safe_during_writes(void)
+{
+    ENT_LOG logHandle = NULL;
+    TEST_EVENT start;
+    TEST_LOG_LEVEL_RACE_CTX setterCtx;
+    TEST_LOG_LEVEL_RACE_CTX writerCtx;
+    ENT_LOG_LEV_E initialLevel = LOG_LEV_INFO_E;
+    char dirPath[256];
+    int serviceOpen = 0;
+    int startEventReady = 0;
+    int setterStarted = 0;
+    int writerStarted = 0;
+    int rc = 1;
+#ifdef _WIN32
+    HANDLE setterThread = NULL;
+    HANDLE writerThread = NULL;
+#else
+    pthread_t setterThread;
+    pthread_t writerThread;
+#endif
+
+    memset(&setterCtx, 0, sizeof(setterCtx));
+    memset(&writerCtx, 0, sizeof(writerCtx));
+    if(make_temp_dir(dirPath, sizeof(dirPath)) != 0)
+    {
+        fprintf(stderr, "failed to create temp log-level race directory\n");
+        return 1;
+    }
+    if(test_event_init(&start) != 0)
+    {
+        remove_dir_contents(dirPath);
+        return expect_true(0, "test_event_init should create the log-level race start gate");
+    }
+    startEventReady = 1;
+
+    if(expect_true(ENT_LogInit() == ENT_SYS_NORMAL,
+                   "ENT_LogInit should initialize before concurrent log-level checks") != 0)
+    {
+        goto cleanup;
+    }
+    serviceOpen = 1;
+    if(expect_true(ENT_LogInitHandle(&logHandle, "LogLevelRaceModule", dirPath) == ENT_SYS_NORMAL,
+                   "ENT_LogInitHandle should create the log-level race handle") != 0 ||
+       expect_true(ENT_LogSetOption(logHandle, ENT_LOG_LEVEL_E, &initialLevel) == ENT_SYS_NORMAL,
+                   "ENT_LogSetOption should enable INFO writes for the log-level race") != 0)
+    {
+        goto cleanup;
+    }
+
+    setterCtx.logHandle = logHandle;
+    setterCtx.start = &start;
+    setterCtx.iterations = 1000;
+    writerCtx.logHandle = logHandle;
+    writerCtx.start = &start;
+    writerCtx.iterations = 1000;
+#ifdef _WIN32
+    setterThread = CreateThread(NULL, 0, set_log_level_thread_proc, &setterCtx, 0, NULL);
+    setterStarted = setterThread != NULL;
+#else
+    setterStarted = pthread_create(&setterThread, NULL, set_log_level_thread_proc, &setterCtx) == 0;
+#endif
+    if(!setterStarted)
+    {
+        expect_true(0, "log-level setter thread should start");
+        goto cleanup;
+    }
+#ifdef _WIN32
+    writerThread = CreateThread(NULL, 0, write_while_setting_log_level_thread_proc, &writerCtx, 0, NULL);
+    writerStarted = writerThread != NULL;
+#else
+    writerStarted = pthread_create(&writerThread, NULL, write_while_setting_log_level_thread_proc, &writerCtx) == 0;
+#endif
+    if(!writerStarted)
+    {
+        expect_true(0, "log writer thread should start during log-level updates");
+        goto cleanup;
+    }
+
+    test_event_signal(&start);
+#ifdef _WIN32
+    WaitForSingleObject(setterThread, INFINITE);
+    WaitForSingleObject(writerThread, INFINITE);
+    CloseHandle(setterThread);
+    CloseHandle(writerThread);
+    setterThread = NULL;
+    writerThread = NULL;
+#else
+    pthread_join(setterThread, NULL);
+    pthread_join(writerThread, NULL);
+#endif
+    setterStarted = 0;
+    writerStarted = 0;
+
+    if(expect_true(!setterCtx.failed && !writerCtx.failed,
+                   "concurrent log-level changes and writes should both succeed") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogCloseHandle(logHandle) == ENT_SYS_NORMAL,
+                   "ENT_LogCloseHandle should close the log-level race handle") != 0)
+    {
+        goto cleanup;
+    }
+    logHandle = NULL;
+    if(expect_true(ENT_LogClose() == ENT_SYS_NORMAL,
+                   "ENT_LogClose should succeed after concurrent log-level checks") != 0)
+    {
+        goto cleanup;
+    }
+    serviceOpen = 0;
+    rc = 0;
+
+cleanup:
+    if(startEventReady)
+    {
+        test_event_signal(&start);
+    }
+    if(setterStarted)
+    {
+#ifdef _WIN32
+        WaitForSingleObject(setterThread, INFINITE);
+        CloseHandle(setterThread);
+#else
+        pthread_join(setterThread, NULL);
+#endif
+    }
+    if(writerStarted)
+    {
+#ifdef _WIN32
+        WaitForSingleObject(writerThread, INFINITE);
+        CloseHandle(writerThread);
+#else
+        pthread_join(writerThread, NULL);
+#endif
+    }
+    if(logHandle != NULL)
+    {
+        ENT_LogCloseHandle(logHandle);
+    }
+    if(serviceOpen)
+    {
+        ENT_LogClose();
+    }
+    if(startEventReady)
+    {
+        test_event_destroy(&start);
+    }
+    remove_dir_contents(dirPath);
+    return rc;
+}
+
 #ifdef _WIN32
 static DWORD WINAPI close_handle_thread_proc(LPVOID data)
 #else
@@ -1613,6 +1978,7 @@ static int test_log_close_rejects_invalid_handle(void)
 static int test_log_set_option_validates_arguments(void)
 {
     ENT_LOG logHandle = NULL;
+    ENT_LOG staleHandle = NULL;
     ENT_LOG_LEV_E level = LOG_LEV_WARN_E;
     TEST_BAD_LOG_CTX badLog;
 
@@ -1664,7 +2030,16 @@ static int test_log_set_option_validates_arguments(void)
         return 1;
     }
 
+    staleHandle = logHandle;
     if(expect_true(ENT_LogCloseHandle(logHandle) == 0, "ENT_LogCloseHandle should close the private handle") != 0)
+    {
+        ENT_LogClose();
+        return 1;
+    }
+    logHandle = NULL;
+
+    if(expect_true(ENT_LogSetOption(staleHandle, ENT_LOG_LEVEL_E, &level) == ENT_LOG_BAD_HANDLE,
+                   "ENT_LogSetOption should reject a closed handle without dereferencing freed storage") != 0)
     {
         ENT_LogClose();
         return 1;
@@ -2505,6 +2880,8 @@ int main(void)
     failures += test_log_ctx_close_race_after_reclamation();
     failures += test_log_close_rejects_invalid_handle();
     failures += test_log_set_option_validates_arguments();
+    failures += test_concurrent_buffer_enable_starts_one_worker();
+    failures += test_log_level_updates_are_safe_during_writes();
     failures += test_log_path_option_trims_trailing_separator_and_writes_file();
     failures += test_log_level_filters_debug_messages();
     failures += test_log_close_handle_waits_for_active_writers();

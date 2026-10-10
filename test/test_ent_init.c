@@ -8,6 +8,9 @@
 #else
 #include <pthread.h>
 #include <time.h>
+#ifdef __linux__
+#include <sched.h>
+#endif
 #endif
 
 #include "ient_comm.h"
@@ -73,6 +76,21 @@ static ENT_HANDLE_CTX_T* s_handle_lifecycle_target = NULL;
 static volatile int s_handle_call_ended = 0;
 static volatile int s_handle_freed_before_call_end = 0;
 static volatile int s_suppress_handle_call_ended = 0;
+#endif
+#if defined(ENT_INIT_TEST_HOOKS) && defined(__linux__)
+static int s_sched_param_call_count = 0;
+static int s_sched_param_policy = -1;
+static int s_sched_param_priority = -1;
+
+int ENT_InitTestSetSchedParam(pthread_t thread,
+                              int policy,
+                              const struct sched_param* schedParam)
+{
+    s_sched_param_call_count++;
+    s_sched_param_policy = policy;
+    s_sched_param_priority = schedParam->sched_priority;
+    return pthread_setschedparam(thread, policy, schedParam);
+}
 #endif
 static ENT_LOG s_ent_log_at_lock_init = NULL;
 static const char* s_last_log_init_handle_module = NULL;
@@ -1740,6 +1758,11 @@ static int test_ent_set_rt_attributes_allows_noop_after_init(void)
     ENT_HANDLE handle = NULL;
     reset_close_counters();
     reset_log_failures();
+#if defined(ENT_INIT_TEST_HOOKS) && defined(__linux__)
+    s_sched_param_call_count = 0;
+    s_sched_param_policy = -1;
+    s_sched_param_priority = -1;
+#endif
 
     if(expect_true(ENT_Init(&handle, "demo", "/tmp/demo", LOG_LEV_WARN_E, ENT_MODE_REALTIME_E) == ENT_SYS_NORMAL,
                    "ENT_Init should succeed before applying RT attributes") != 0)
@@ -1753,6 +1776,17 @@ static int test_ent_set_rt_attributes_allows_noop_after_init(void)
         close_handle_if_needed(&handle);
         return 1;
     }
+
+#if defined(ENT_INIT_TEST_HOOKS) && defined(__linux__)
+    if(expect_true(s_sched_param_call_count == 1 &&
+                   s_sched_param_policy == SCHED_OTHER &&
+                   s_sched_param_priority == 0,
+                   "ENT_SetRtAttributes should explicitly restore SCHED_OTHER with priority zero") != 0)
+    {
+        close_handle_if_needed(&handle);
+        return 1;
+    }
+#endif
 
     return expect_true(ENT_Close(&handle) == ENT_SYS_NORMAL && handle == NULL,
                        "ENT_Close should succeed after ENT_SetRtAttributes noop");

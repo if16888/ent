@@ -46,6 +46,12 @@ extern void ENT_InitTestHandleCtxFreed(ENT_HANDLE_CTX_T* handleCtx);
 extern void ENT_InitTestHandleCallEnded(ENT_HANDLE_CTX_T* handleCtx);
 #endif
 
+#if defined(ENT_INIT_TEST_HOOKS) && defined(__linux__)
+extern int ENT_InitTestSetSchedParam(pthread_t thread,
+                                     int policy,
+                                     const struct sched_param* schedParam);
+#endif
+
 #if defined(_MSC_VER)
 #define ENT_THREAD_LOCAL __declspec(thread)
 #else
@@ -653,32 +659,42 @@ static MSG_ID_T iENT_CTXApplyRtAttributes(ENT_CTX* ctx,
         }
     }
 
-    if(rtPolicy == ENT_RT_POLICY_FIFO_E || rtPolicy == ENT_RT_POLICY_RR_E)
     {
-        int nativePolicy = (rtPolicy == ENT_RT_POLICY_FIFO_E) ? SCHED_FIFO : SCHED_RR;
-        int minPrio = sched_get_priority_min(nativePolicy);
-        int maxPrio = sched_get_priority_max(nativePolicy);
-        int targetPrio = rtPriority;
+        int nativePolicy = SCHED_OTHER;
+        int targetPrio = 0;
         struct sched_param sch;
         int ret = 0;
 
-        if(minPrio == -1 || maxPrio == -1)
+        if(rtPolicy == ENT_RT_POLICY_FIFO_E || rtPolicy == ENT_RT_POLICY_RR_E)
         {
-            ctx->rtLastError = errno;
-            IENT_LOG_WARN("sched priority range query failed,error [%d]->[%s]\n",errno,strerror(errno));
-            return ENT_RT_SCHED_QUERYFAIL;
+            nativePolicy = (rtPolicy == ENT_RT_POLICY_FIFO_E) ? SCHED_FIFO : SCHED_RR;
+            int minPrio = sched_get_priority_min(nativePolicy);
+            int maxPrio = sched_get_priority_max(nativePolicy);
+            targetPrio = rtPriority;
+
+            if(minPrio == -1 || maxPrio == -1)
+            {
+                ctx->rtLastError = errno;
+                IENT_LOG_WARN("sched priority range query failed,error [%d]->[%s]\n",errno,strerror(errno));
+                return ENT_RT_SCHED_QUERYFAIL;
+            }
+            if(targetPrio < minPrio)
+            {
+                targetPrio = minPrio;
+            }
+            if(targetPrio > maxPrio)
+            {
+                targetPrio = maxPrio;
+            }
         }
-        if(targetPrio < minPrio)
-        {
-            targetPrio = minPrio;
-        }
-        if(targetPrio > maxPrio)
-        {
-            targetPrio = maxPrio;
-        }
+
         memset(&sch,0,sizeof(sch));
         sch.sched_priority = targetPrio;
+#if defined(ENT_INIT_TEST_HOOKS) && defined(__linux__)
+        ret = ENT_InitTestSetSchedParam(pthread_self(),nativePolicy,&sch);
+#else
         ret = pthread_setschedparam(pthread_self(),nativePolicy,&sch);
+#endif
         if(ret != 0)
         {
             ctx->rtLastError = ret;

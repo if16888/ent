@@ -7,6 +7,7 @@
 #include <ws2tcpip.h>
 #else
 #include <arpa/inet.h>
+#include <signal.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -624,6 +625,61 @@ static int test_socket_reports_peer_close_without_crashing(void)
     return 0;
 }
 
+#ifdef __linux__
+static volatile sig_atomic_t s_sigpipeRaised = 0;
+
+static void record_sigpipe(int signalNumber)
+{
+    (void)signalNumber;
+    s_sigpipeRaised++;
+}
+
+static int test_send_to_closed_peer_does_not_raise_sigpipe(void)
+{
+    int sockets[2] = {-1, -1};
+    int bytesSent = -1;
+    char payload = 'x';
+    struct sigaction action;
+    struct sigaction previousAction;
+    MSG_ID_T sendStatus = ENT_SYS_NORMAL;
+
+    if(expect_true(UTL_SocketInit() == ENT_SYS_NORMAL,
+                   "UTL_SocketInit should be ready before closed-peer send check") != 0)
+    {
+        return 1;
+    }
+    if(expect_true(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0,
+                   "socketpair should create a local stream pair") != 0)
+    {
+        return 1;
+    }
+
+    memset(&action, 0, sizeof(action));
+    action.sa_handler = record_sigpipe;
+    sigemptyset(&action.sa_mask);
+    s_sigpipeRaised = 0;
+    if(sigaction(SIGPIPE, &action, &previousAction) != 0)
+    {
+        close(sockets[0]);
+        close(sockets[1]);
+        return expect_true(0, "sigaction should install the SIGPIPE test handler");
+    }
+
+    close(sockets[1]);
+    sendStatus = UTL_Send(sockets[0], &payload, 1, 0, &bytesSent);
+    sigaction(SIGPIPE, &previousAction, NULL);
+    close(sockets[0]);
+
+    if(expect_true(sendStatus == ENT_SOCK_SEND_FAILED,
+                   "UTL_Send should report an error for a closed peer") != 0)
+    {
+        return 1;
+    }
+    return expect_true(s_sigpipeRaised == 0,
+                       "UTL_Send should suppress SIGPIPE when the peer has closed");
+}
+#endif
+
 static int test_socket_large_payload_roundtrip(void)
 {
     UTL_D_SOCKET server = -1;
@@ -726,6 +782,9 @@ int main(void)
 #endif
     failures += test_socket_local_roundtrip_send_and_recv();
     failures += test_socket_reports_peer_close_without_crashing();
+#ifdef __linux__
+    failures += test_send_to_closed_peer_does_not_raise_sigpipe();
+#endif
     failures += test_socket_large_payload_roundtrip();
 
     if(failures != 0)

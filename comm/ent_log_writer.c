@@ -350,6 +350,24 @@ void iENT_LogFastFlagSet(
 #endif
 }
 
+ENT_LOG_LEV_E iENT_LogLevelGet(const ENT_LOG_CTX_INTERNAL* log)
+{
+#ifdef _WIN32
+    return (ENT_LOG_LEV_E)InterlockedCompareExchange((volatile LONG*)&log->logLevelFast, 0, 0);
+#else
+    return (ENT_LOG_LEV_E)__sync_val_compare_and_swap((volatile int*)&log->logLevelFast, 0, 0);
+#endif
+}
+
+void iENT_LogLevelSet(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_LEV_E level)
+{
+#ifdef _WIN32
+    InterlockedExchange(&log->logLevelFast, (LONG)level);
+#else
+    __sync_lock_test_and_set(&log->logLevelFast, (int)level);
+#endif
+}
+
 long long iENT_LogNowMs(void)
 {
 #ifdef _WIN32
@@ -726,11 +744,6 @@ MSG_ID_T iENT_LogStartBufferThread(ENT_LOG_CTX_INTERNAL* log)
         return ENT_SYS_NORMAL;
     }
     log->bufferThreadStop = false;
-#ifdef _WIN32
-    LeaveCriticalSection(&log->cs);
-#else
-    pthread_mutex_unlock(&log->cs);
-#endif
 
 #ifdef _WIN32
     log->bufferThread = CreateThread(NULL, 0, iENT_LogBufferThreadMain, log, 0, NULL);
@@ -745,11 +758,6 @@ MSG_ID_T iENT_LogStartBufferThread(ENT_LOG_CTX_INTERNAL* log)
     }
 #endif
 
-#ifdef _WIN32
-    EnterCriticalSection(&log->cs);
-#else
-    pthread_mutex_lock(&log->cs);
-#endif
     if(sts == ENT_SYS_NORMAL)
     {
         log->bufferThreadStarted = true;
