@@ -138,6 +138,7 @@ MSG_ID_T      iENT_LogInit(void);
 MSG_ID_T      iENT_LogClose(void);
 MSG_ID_T      iENT_LogInitHandle(ENT_LOG* pLogHandle, const char* moduleName, const char* logPath);
 MSG_ID_T      iENT_LogCloseHandle(ENT_LOG logHandle);
+MSG_ID_T      iENT_LogCloseHandleEx(ENT_LOG logHandle, bool* closed);
 MSG_ID_T      iENT_LogCtxValidate(const struct ENT_LOG_CTX_TAG* ctx, ENT_LOG logHandle);
 MSG_ID_T      iENT_LogPathCheck(const char* path);
 MSG_ID_T      iENT_LogGetCtx(ENT_LOG_CTX_INTERNAL** logCtx, ENT_LOG logHandle);

@@ -510,6 +510,67 @@ cleanup:
     return rc;
 }
 
+static int test_log_close_error_reports_completed_disposition(void)
+{
+    char dirPath[512];
+    ENT_LOG logHandle = NULL;
+    bool closed = false;
+    int serviceOpen = 0;
+    MSG_ID_T closeSts = ENT_SYS_NORMAL;
+    int rc = 1;
+
+    if(make_temp_dir(dirPath, sizeof(dirPath)) != 0)
+    {
+        return expect_true(0, "temporary log directory should be created for close disposition test");
+    }
+
+    if(expect_true(ENT_LogInit() == ENT_SYS_NORMAL,
+                   "ENT_LogInit should initialize for close disposition test") != 0)
+    {
+        goto cleanup;
+    }
+    serviceOpen = 1;
+
+    if(expect_true(ENT_LogInitHandle(&logHandle, "CloseDisposition", dirPath) == ENT_SYS_NORMAL,
+                   "ENT_LogInitHandle should create a handle for close disposition test") != 0)
+    {
+        goto cleanup;
+    }
+
+    ((ENT_LOG_CTX_INTERNAL*)logHandle)->bufferIoStatus = ENT_LOG_IO_FAILED;
+    closeSts = iENT_LogCloseHandleEx(logHandle, &closed);
+    if(expect_true(closeSts == ENT_LOG_IO_FAILED && closed,
+                   "close should report the I/O failure and confirm that the handle was released") != 0)
+    {
+        if(closed)
+        {
+            logHandle = NULL;
+        }
+        goto cleanup;
+    }
+    logHandle = NULL;
+
+    if(expect_true(ENT_LogClose() == ENT_SYS_NORMAL,
+                   "service should close after the failed-I/O handle was released") != 0)
+    {
+        goto cleanup;
+    }
+    serviceOpen = 0;
+    rc = 0;
+
+cleanup:
+    if(logHandle != NULL)
+    {
+        ENT_LogCloseHandle(logHandle);
+    }
+    if(serviceOpen)
+    {
+        ENT_LogClose();
+    }
+    remove_dir_contents(dirPath);
+    return rc;
+}
+
 static int test_explicit_context_isolated_from_default(void)
 {
     ENT_LOG_CTX ctx = NULL;
@@ -3212,6 +3273,7 @@ int main(void)
 
     failures += test_log_rejects_uninitialized_calls();
     failures += test_log_close_service_boundaries();
+    failures += test_log_close_error_reports_completed_disposition();
     failures += test_explicit_context_isolated_from_default();
     failures += test_log_service_close_rejects_live_empty_context();
     failures += test_log_ctx_close_auto_closes_owned_handle();
