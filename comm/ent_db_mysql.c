@@ -59,11 +59,21 @@ static void defSqlResultCb(char** fields,char** rowRes,long long rowNum,int colu
 }
 
 #if ENT_ENABLE_MYSQL && ENT_MYSQL_FOUND
+/* MariaDB and pre-8.0 MySQL use my_bool; MySQL 8.0+ uses bool. */
+#if defined(MARIADB_BASE_VERSION) || (defined(MYSQL_VERSION_ID) && MYSQL_VERSION_ID < 80000)
+typedef my_bool ENT_MYSQL_BOOL;
+#else
+typedef bool ENT_MYSQL_BOOL;
+#endif
+
+typedef char ENT_MYSQL_NULL_FLAG_SIZE_CHECK[
+    sizeof(ENT_MYSQL_BOOL) == sizeof(((MYSQL_BIND*)0)->is_null[0]) ? 1 : -1];
+
 typedef struct MYSQL_PARAM_BIND_CTX
 {
     MYSQL_BIND* binds;
     unsigned long* lengths;
-    bool* isNull;
+    ENT_MYSQL_BOOL* isNull;
     int* int32Values;
     long long* int64Values;
     double* doubleValues;
@@ -73,7 +83,7 @@ typedef struct MYSQL_RESULT_BIND_CTX
 {
     MYSQL_BIND* binds;
     unsigned long* lengths;
-    bool* isNull;
+    ENT_MYSQL_BOOL* isNull;
     char** buffers;
     size_t* bufferSizes;
 } MYSQL_RESULT_BIND_CTX;
@@ -122,7 +132,7 @@ static void iENT_DbMySQLFreeResultBindCtx(MYSQL_RESULT_BIND_CTX* ctx, size_t fie
 static MSG_ID_T iENT_DbMySQLBindParam(const ENT_DB_PARAM* param,
                                       MYSQL_BIND* bind,
                                       unsigned long* length,
-                                      bool* isNull,
+                                      ENT_MYSQL_BOOL* isNull,
                                       int* int32Value,
                                       long long* int64Value,
                                       double* doubleValue)
@@ -254,7 +264,7 @@ static MSG_ID_T iENT_DbMySQLBindParams(const ENT_DB_PARAM* params,
 
     bindCtx->binds = (MYSQL_BIND*)calloc(paramCount, sizeof(MYSQL_BIND));
     bindCtx->lengths = (unsigned long*)calloc(paramCount, sizeof(unsigned long));
-    bindCtx->isNull = (bool*)calloc(paramCount, sizeof(bool));
+    bindCtx->isNull = (ENT_MYSQL_BOOL*)calloc(paramCount, sizeof(ENT_MYSQL_BOOL));
     bindCtx->int32Values = (int*)calloc(paramCount, sizeof(int));
     bindCtx->int64Values = (long long*)calloc(paramCount, sizeof(long long));
     bindCtx->doubleValues = (double*)calloc(paramCount, sizeof(double));
@@ -340,7 +350,7 @@ static MSG_ID_T iENT_DbMySQLBindResults(MYSQL_STMT* stmt,
 
     resultCtx->binds = (MYSQL_BIND*)calloc(fieldCount, sizeof(MYSQL_BIND));
     resultCtx->lengths = (unsigned long*)calloc(fieldCount, sizeof(unsigned long));
-    resultCtx->isNull = (bool*)calloc(fieldCount, sizeof(bool));
+    resultCtx->isNull = (ENT_MYSQL_BOOL*)calloc(fieldCount, sizeof(ENT_MYSQL_BOOL));
     resultCtx->buffers = (char**)calloc(fieldCount, sizeof(char*));
     resultCtx->bufferSizes = (size_t*)calloc(fieldCount, sizeof(size_t));
     if(resultCtx->binds == NULL || resultCtx->lengths == NULL ||

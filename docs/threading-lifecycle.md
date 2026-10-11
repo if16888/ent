@@ -48,6 +48,13 @@ Use `ENT_ThreadWaitById()` when the caller needs to wait for a specific thread e
 
 `UTL_TPoolAddTask()` stores the caller-provided `MSG_ID_T* retVal` pointer and writes the task return value to it when the worker runs the task.
 
+`UTL_TPoolInit()` limits the pending queue to
+`UTL_TPOOL_DEFAULT_MAX_PENDING_TASKS` (4096) tasks. Use
+`UTL_TPoolInitEx(pool, workers, maxPendingTasks)` to choose a positive limit.
+When all pending slots are occupied, `UTL_TPoolAddTask()` returns
+`ENT_TPL_QUEUE_FULL`; it does not block waiting for capacity. If a worker
+fails at runtime, further submissions return `ENT_TPL_WORKER_FAILED`.
+
 The caller must guarantee that:
 
 - `retVal` remains valid until the task has completed;
@@ -64,12 +71,23 @@ Current semantics:
 
 - new task submissions are rejected once close begins;
 - tasks already running are allowed to complete;
+- tasks accepted before close begins are drained and their end callbacks run;
 - workers are woken and joined;
-- queued tasks that have not started are discarded during pool cleanup;
-- end callbacks are not called for discarded queued tasks;
 - the pool handle must not be reused after close returns.
 
-This is intentionally not a full drain operation. The close operation guarantees that running tasks finish and the worker threads are joined; it does not guarantee that all queued tasks will execute.
+If joining a worker or closing the underlying thread service returns an error,
+`UTL_TPoolClose()` returns that error and leaves the caller's pool handle valid
+in the `CLOSING` state. Submissions remain rejected; call
+`UTL_TPoolClose()` again to retry the unfinished cleanup. A second close that
+overlaps an active close attempt returns `ENT_THRD_IN_USE`.
+
+Close waits until all work accepted before shutdown has completed. Like the
+existing running-task behavior, this wait has no timeout: a task callback or
+end callback that never returns can block `UTL_TPoolClose()` indefinitely.
+If a worker failure strands queued tasks, close sets their return values to
+`ENT_TPL_WORKER_FAILED`, invokes their end callbacks, reclaims the pool, and
+returns `ENT_TPL_WORKER_FAILED` after cleanup. Those callbacks run on the
+thread calling `UTL_TPoolClose()` because no worker remains to claim the tasks.
 
 ### Concurrent close/add behavior
 
@@ -97,9 +115,22 @@ if(UTL_TPoolInit(&pool, 4) != ENT_SYS_NORMAL)
 /* Ensure ret remains alive until the task completes. */
 UTL_TPoolAddTask(pool, task_cb, task_end_cb, task_data, &ret);
 
-/* Close waits for running tasks, rejects new tasks, and releases workers. */
-UTL_TPoolClose(pool);
+/* Close drains accepted work, rejects new tasks, and releases workers. */
+UTL_TPoolClose(&pool);
 pool = NULL;
 ```
 
-For workloads requiring guaranteed execution of all queued tasks, introduce an explicit drain API or an application-level shutdown protocol before calling `UTL_TPoolClose()`.
+## Timers
+
+`UTL_TimerCreate()` uses a fixed-delay model: it waits for the configured
+period, runs the callback, then waits for the next period. Callback duration
+therefore extends the interval; callbacks from the same timer do not overlap.
+
+On Linux, `UTL_TimerCreateUs()` schedules against monotonic absolute deadlines.
+It keeps at most one callback pending. Ticks that arrive while that slot is
+occupied are coalesced instead of queued for later catch-up. This bounds
+callback backlog, but it does not guarantee a deadline or hard real-time
+latency. Measure jitter on the target kernel and CPU with `perf_utl_timer_rt`.
+Its optional fifth argument sets a maximum jitter threshold for that run; when
+omitted, the tool reports measurements without a pass threshold. No universal
+threshold is applied by default CTest.

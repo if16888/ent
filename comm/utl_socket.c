@@ -1156,11 +1156,17 @@ ENT_PUBLIC MSG_ID_T  UTL_Send(
         return ENT_SOCK_BAD_ARGUMENT;
     }
 
+    int sendFlags = Flags;
+
+#ifdef MSG_NOSIGNAL
+    sendFlags |= MSG_NOSIGNAL;
+#endif
+
     while ( ((TempBytesSent=send (
 	SocketDesc,
 	pBuffer,
 	BufferLength,
-	Flags)) < 0 )
+	sendFlags)) < 0 )
 	&& ( (errno == EINTR) && sUtlRetryFlag ) );
 
     if ( TempBytesSent < 0 )

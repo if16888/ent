@@ -452,6 +452,29 @@ if(ENT_SQLITE_FOUND)
     target_link_libraries(test_ent_db PRIVATE pthread)
   endif()
   add_test(NAME test_ent_db COMMAND test_ent_db)
+
+  add_executable(
+    test_ent_db_sqlite_partial_row
+    test_ent_db_sqlite_partial_row.c
+    test_runtime_stub.c
+    ../comm/ent_db_sqlite.c
+  )
+
+  target_compile_definitions(
+    test_ent_db_sqlite_partial_row
+    PRIVATE
+      ENT_DB_MAX_RESULT_BYTES=8
+  )
+
+  target_include_directories(
+    test_ent_db_sqlite_partial_row
+    PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+      ${CMAKE_CURRENT_SOURCE_DIR}/../comm
+  )
+
+  ent_test_link_db_deps(test_ent_db_sqlite_partial_row)
+  add_test(NAME test_ent_db_sqlite_partial_row COMMAND test_ent_db_sqlite_partial_row)
 endif()
 
 add_executable(

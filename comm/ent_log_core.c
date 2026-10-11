@@ -429,6 +429,9 @@ static MSG_ID_T iENT_LogInitCtx(ENT_LOG_CTX_INTERNAL* log,
     log->closeAttemptActive = false;
     log->pendingFlushes = 0;
     log->bufferIoStatus = ENT_SYS_NORMAL;
+    log->bufferQueuedBytes = 0;
+    log->bufferQueueLimitBytes = ENT_LOG_DEFAULT_BUFFER_LIMIT_BYTES;
+    log->bufferRejectedMessages = 0;
     log->flushBatch = 256;
     log->flushIntervalMs = 0;
     log->lastFlushMs = 0;
@@ -442,7 +445,7 @@ static MSG_ID_T iENT_LogInitCtx(ENT_LOG_CTX_INTERNAL* log,
     log->isBuffer = false;
     iENT_LogFastFlagSet(&log->isDebugFast, 0);
     iENT_LogFastFlagSet(&log->isBufferFast, 0);
-    log->logLevel = LOG_LEV_WARN_E;
+    iENT_LogLevelSet(log, LOG_LEV_WARN_E);
     log->maxNum = DEF_MAX_NUM_LOG;
     log->tag = ENTLOG_TAG;
     log->registryNext = sLogHandleHead;
@@ -607,20 +610,30 @@ MSG_ID_T iENT_LogAcquireWriter(ENT_LOG_CTX_INTERNAL** logCtx, ENT_LOG logHandle)
 
 void iENT_LogReleaseWriter(ENT_LOG_CTX_INTERNAL* log)
 {
-    if(iENT_LogActiveDec(log) == 0 && iENT_LogStateGet(log) == ENT_LOG_HANDLE_CLOSING_E)
+    int activeWriters = 0;
+
+    /* Keep the handle alive until both the reference decrement and close
+     * notification are protected by the registry lock. Close waits on this
+     * same lock before it can unlink and free the handle. */
+#ifdef _WIN32
+    iENT_LogGlobalLock();
+#else
+    pthread_mutex_lock(&sLogMutex);
+#endif
+    activeWriters = iENT_LogActiveDec(log);
+    if(activeWriters == 0 && iENT_LogStateGet(log) == ENT_LOG_HANDLE_CLOSING_E)
     {
 #ifdef _WIN32
-        iENT_LogGlobalLock();
-        if(iENT_LogStateGet(log) == ENT_LOG_HANDLE_CLOSING_E && iENT_LogActiveGet(log) == 0)
-            WakeAllConditionVariable(&log->closeCv);
-        iENT_LogGlobalUnlock();
+        WakeAllConditionVariable(&log->closeCv);
 #else
-        pthread_mutex_lock(&sLogMutex);
-        if(iENT_LogStateGet(log) == ENT_LOG_HANDLE_CLOSING_E && iENT_LogActiveGet(log) == 0)
-            pthread_cond_broadcast(&log->closeCv);
-        pthread_mutex_unlock(&sLogMutex);
+        pthread_cond_broadcast(&log->closeCv);
 #endif
     }
+#ifdef _WIN32
+    iENT_LogGlobalUnlock();
+#else
+    pthread_mutex_unlock(&sLogMutex);
+#endif
 }
 
 MSG_ID_T iENT_LogInit(void)
@@ -896,6 +909,31 @@ MSG_ID_T ENT_LogCtxSetOption(ENT_LOG_CTX ctx, ENT_LOG logHandle, ENT_LOG_OPTIONS
     }
 }
 
+MSG_ID_T ENT_LogCtxGetBufferStats(ENT_LOG_CTX ctx,
+                                  ENT_LOG logHandle,
+                                  ENT_LOG_BUFFER_STATS_T* stats)
+{
+    struct ENT_LOG_CTX_TAG* logCtx = (struct ENT_LOG_CTX_TAG*)ctx;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
+
+    if(sLogMutexInit == false)
+    {
+        return ENT_LOG_NOT_INITIALIZED;
+    }
+    if(stats == NULL)
+    {
+        return ENT_LOG_BAD_ARGUMENT;
+    }
+    if(iENT_LogCtxBeginCall(logCtx, logHandle, true, false) != ENT_SYS_NORMAL)
+    {
+        return ENT_LOG_BAD_HANDLE;
+    }
+
+    sts = ENT_LogGetBufferStats(logHandle, stats);
+    iENT_LogCtxEndCall(logCtx);
+    return sts;
+}
+
 MSG_ID_T ENT_LogCtxCloseHandle(ENT_LOG_CTX ctx, ENT_LOG logHandle)
 {
     struct ENT_LOG_CTX_TAG* logCtx = (struct ENT_LOG_CTX_TAG*)ctx;
@@ -982,7 +1020,7 @@ MSG_ID_T ENT_LogCtxFatal(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
         iENT_LogCtxEndCall(ownerCtx);
         return sts;
     }
-    if(LOG_LEV_FATAL_E > logCtx->logLevel)
+    if(LOG_LEV_FATAL_E > iENT_LogLevelGet(logCtx))
     {
         iENT_LogReleaseWriter(logCtx);
         iENT_LogCtxEndCall(ownerCtx);
@@ -1022,7 +1060,7 @@ MSG_ID_T ENT_LogCtxError(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
         iENT_LogCtxEndCall(ownerCtx);
         return sts;
     }
-    if(LOG_LEV_ERROR_E > logCtx->logLevel)
+    if(LOG_LEV_ERROR_E > iENT_LogLevelGet(logCtx))
     {
         iENT_LogReleaseWriter(logCtx);
         iENT_LogCtxEndCall(ownerCtx);
@@ -1062,7 +1100,7 @@ MSG_ID_T ENT_LogCtxWarn(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format, 
         iENT_LogCtxEndCall(ownerCtx);
         return sts;
     }
-    if(LOG_LEV_WARN_E > logCtx->logLevel)
+    if(LOG_LEV_WARN_E > iENT_LogLevelGet(logCtx))
     {
         iENT_LogReleaseWriter(logCtx);
         iENT_LogCtxEndCall(ownerCtx);
@@ -1102,7 +1140,7 @@ MSG_ID_T ENT_LogCtxPrint(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
         iENT_LogCtxEndCall(ownerCtx);
         return sts;
     }
-    if(LOG_LEV_INFO_E > logCtx->logLevel)
+    if(LOG_LEV_INFO_E > iENT_LogLevelGet(logCtx))
     {
         iENT_LogReleaseWriter(logCtx);
         iENT_LogCtxEndCall(ownerCtx);
@@ -1142,7 +1180,7 @@ MSG_ID_T ENT_LogCtxDebug(ENT_LOG_CTX ctx, ENT_LOG logHandle, const char* format,
         iENT_LogCtxEndCall(ownerCtx);
         return sts;
     }
-    if(LOG_LEV_DEBUG_E > logCtx->logLevel)
+    if(LOG_LEV_DEBUG_E > iENT_LogLevelGet(logCtx))
     {
         iENT_LogReleaseWriter(logCtx);
         iENT_LogCtxEndCall(ownerCtx);
@@ -1228,12 +1266,18 @@ END_OF_ROUTINE:
     return sts;
 }
 
-MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
+MSG_ID_T iENT_LogCloseHandleEx(ENT_LOG logHandle, bool* closed)
 {
     MSG_ID_T sts = ENT_SYS_NORMAL;
     MSG_ID_T closeIoStatus = ENT_SYS_NORMAL;
     bool closeStarted = false;
     bool closeCompleted = false;
+    bool globalLocked = false;
+
+    if(closed != NULL)
+    {
+        *closed = false;
+    }
 
     if(sLogMutexInit == false)
     {
@@ -1241,11 +1285,8 @@ MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
         return ENT_LOG_NOT_INITIALIZED;
     }
 
-#ifdef _WIN32
     iENT_LogGlobalLock();
-#else
-    pthread_mutex_lock(&sLogMutex);
-#endif
+    globalLocked = true;
 
     ENT_LOG_CTX_INTERNAL* log = (ENT_LOG_CTX_INTERNAL*)logHandle;
     if(log == NULL)
@@ -1296,6 +1337,11 @@ MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
 #endif
     }
 
+    /* Keep the handle registered in CLOSING while slow worker and file I/O
+     * cleanup runs, but let unrelated log handles enter the service. */
+    iENT_LogGlobalUnlock();
+    globalLocked = false;
+
 #ifdef _WIN32
     EnterCriticalSection(&log->cs);
 #else
@@ -1333,10 +1379,16 @@ MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
     }
     iENT_LogIoUnlock(log);
 
+    iENT_LogGlobalLock();
+    globalLocked = true;
     log->isInit = false;
     iENT_LogStateSet(log, ENT_LOG_HANDLE_CLOSED_E);
     iENT_LogHandleUnlinkLocked(log);
     closeCompleted = true;
+    if(closed != NULL)
+    {
+        *closed = true;
+    }
 #ifdef _WIN32
     DeleteCriticalSection(&log->cs);
     DeleteCriticalSection(&log->ioCs);
@@ -1370,15 +1422,21 @@ MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
     sts = closeIoStatus;
 
 END_OF_ROUTINE:
+    if(!globalLocked)
+    {
+        iENT_LogGlobalLock();
+        globalLocked = true;
+    }
     if(sts < 0 && closeStarted && !closeCompleted)
     {
         log->closeAttemptActive = false;
     }
-#ifdef _WIN32
     iENT_LogGlobalUnlock();
-#else
-    pthread_mutex_unlock(&sLogMutex);
-#endif
 
     return sts;
+}
+
+MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
+{
+    return iENT_LogCloseHandleEx(logHandle, NULL);
 }

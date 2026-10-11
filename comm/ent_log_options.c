@@ -18,11 +18,12 @@
 
 MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const void* arg)
 {
-    ENT_LOG_CTX_INTERNAL* log = (ENT_LOG_CTX_INTERNAL*)logHandle;
+    ENT_LOG_CTX_INTERNAL* log = NULL;
     size_t len;
     MSG_ID_T sts = ENT_SYS_NORMAL;
     MSG_ID_T bufferSts = ENT_SYS_NORMAL;
     bool startBufferThread = false;
+    bool acquired = false;
 
     if(sLogMutexInit == false)
     {
@@ -36,21 +37,12 @@ MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const voi
         return ENT_LOG_BAD_ARGUMENT;
     }
 
-    if(log == NULL)
+    sts = iENT_LogAcquireWriter(&log, logHandle);
+    if(sts < 0)
     {
-        if(iENT_LogDefaultCtx()->isInit)
-            log = iENT_LogDefaultCtx();
-        else
-        {
-            fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogSetOption", __LINE__);
-            return ENT_LOG_BAD_HANDLE;
-        }
+        return sts;
     }
-    else if(log->tag != ENTLOG_TAG || log->isInit == false)
-    {
-        fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogSetOption", __LINE__);
-        return ENT_LOG_BAD_HANDLE;
-    }
+    acquired = true;
 
     iENT_LogIoLock(log);
 #ifdef _WIN32
@@ -131,7 +123,7 @@ MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const voi
                 sts = ENT_LOG_BAD_ARGUMENT;
                 break;
             }
-            log->logLevel = level;
+            iENT_LogLevelSet(log, level);
             break;
         }
 
@@ -160,6 +152,18 @@ MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const voi
             break;
         }
 
+        case ENT_LOG_BUFFER_LIMIT_E:
+        {
+            size_t limitBytes = *(const size_t*)arg;
+            if(limitBytes == 0)
+            {
+                sts = ENT_LOG_BAD_ARGUMENT;
+                break;
+            }
+            log->bufferQueueLimitBytes = limitBytes;
+            break;
+        }
+
         default:
             sts = ENT_LOG_BAD_ARGUMENT;
             break;
@@ -170,7 +174,6 @@ END_OF_ROUTINE:
 #else
     pthread_mutex_unlock(&log->cs);
 #endif
-    iENT_LogIoUnlock(log);
     if(sts == ENT_SYS_NORMAL && startBufferThread)
     {
         bufferSts = iENT_LogStartBufferThread(log);
@@ -179,5 +182,48 @@ END_OF_ROUTINE:
             sts = bufferSts;
         }
     }
+    iENT_LogIoUnlock(log);
+    if(acquired)
+    {
+        iENT_LogReleaseWriter(log);
+    }
     return sts;
+}
+
+MSG_ID_T ENT_LogGetBufferStats(ENT_LOG logHandle, ENT_LOG_BUFFER_STATS_T* stats)
+{
+    ENT_LOG_CTX_INTERNAL* log = NULL;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
+
+    if(stats == NULL)
+    {
+        return ENT_LOG_BAD_ARGUMENT;
+    }
+    if(sLogMutexInit == false)
+    {
+        return ENT_LOG_NOT_INITIALIZED;
+    }
+
+    sts = iENT_LogAcquireWriter(&log, logHandle);
+    if(sts < 0)
+    {
+        return sts;
+    }
+
+#ifdef _WIN32
+    EnterCriticalSection(&log->cs);
+#else
+    pthread_mutex_lock(&log->cs);
+#endif
+    stats->queuedBytes = log->bufferQueuedBytes;
+    stats->limitBytes = log->bufferQueueLimitBytes;
+    stats->rejectedMessages = log->bufferRejectedMessages;
+#ifdef _WIN32
+    LeaveCriticalSection(&log->cs);
+#else
+    pthread_mutex_unlock(&log->cs);
+#endif
+
+    iENT_LogReleaseWriter(log);
+    return ENT_SYS_NORMAL;
 }

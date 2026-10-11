@@ -25,6 +25,9 @@ static int s_use_real_threads = 0;
 
 #ifdef ENT_TPOOL_TEST_HOOKS
 extern void UTL_TPoolTestSetThreadListInsertFailure(BOOL enable);
+extern void UTL_TPoolTestSetWorkerWaitFailure(UTL_TPOOL pool, BOOL enable);
+extern void UTL_TPoolTestSetTaskRemoveFailure(UTL_TPOOL pool, BOOL enable);
+extern BOOL UTL_TPoolTestWorkerFailed(UTL_TPOOL pool);
 #endif
 
 typedef struct
@@ -337,8 +340,26 @@ static MSG_ID_T slow_task_cb(void* data)
 
 static int test_tpool_init_rejects_null_output_pointer(void)
 {
-    return expect_true(UTL_TPoolInit(NULL, 1) == ENT_TPL_BAD_ARGUMENT,
-                       "UTL_TPoolInit should reject a NULL output pointer");
+    if(expect_true(UTL_TPoolInit(NULL, 1) == ENT_TPL_BAD_ARGUMENT,
+                   "UTL_TPoolInit should reject a NULL output pointer") != 0)
+    {
+        return 1;
+    }
+    return expect_true(UTL_TPoolInitEx(NULL, 1, 1) == ENT_TPL_BAD_ARGUMENT,
+                       "UTL_TPoolInitEx should reject a NULL output pointer");
+}
+
+static int test_tpool_init_ex_rejects_invalid_capacity(void)
+{
+    UTL_TPOOL pool = (UTL_TPOOL)0x1;
+
+    if(expect_true(UTL_TPoolInitEx(&pool, 1, 0) == ENT_TPL_BAD_ARGUMENT,
+                   "UTL_TPoolInitEx should reject a non-positive pending-task limit") != 0)
+    {
+        return 1;
+    }
+    return expect_true(pool == NULL,
+                       "UTL_TPoolInitEx should clear the output handle for an invalid capacity");
 }
 
 static int test_tpool_add_task_rejects_invalid_arguments(void)
@@ -574,40 +595,17 @@ static int test_tpool_executes_task_and_end_callback(void)
         return 1;
     }
 
-    for(int i = 0; i < 100 && probe.end_hits == 0; ++i)
-    {
-        UTL_Sleep(10);
-    }
-
-    if(expect_true(probe.task_hits == 1, "task callback should run exactly once") != 0)
-    {
-        UTL_TPoolClose(&pool);
-        return 1;
-    }
-
-    if(expect_true(probe.end_hits == 1, "task end callback should run exactly once") != 0)
-    {
-        UTL_TPoolClose(&pool);
-        return 1;
-    }
-
-    if(expect_true(retVal == 42 && probe.observed_ret == 42,
-                   "task return value should be observed by both caller and end callback") != 0)
-    {
-        UTL_TPoolClose(&pool);
-        s_use_real_threads = 0;
-        return 1;
-    }
-
     if(expect_true(UTL_TPoolClose(&pool) == 0,
-                   "UTL_TPoolClose should succeed after task execution") != 0)
+                   "UTL_TPoolClose should drain an accepted task and join its worker") != 0)
     {
         s_use_real_threads = 0;
         return 1;
     }
 
     s_use_real_threads = 0;
-    return 0;
+    return expect_true(probe.task_hits == 1 && probe.end_hits == 1 &&
+                       retVal == 42 && probe.observed_ret == 42,
+                       "task and end callbacks should complete exactly once before close returns");
 }
 
 static int test_tpool_close_waits_for_running_task_completion(void)
@@ -633,20 +631,9 @@ static int test_tpool_close_waits_for_running_task_completion(void)
         return 1;
     }
 
-    for(int i = 0; i < 50 && probe.task_started == 0; ++i)
-    {
-        UTL_Sleep(10);
-    }
-
-    if(expect_true(probe.task_started == 1, "slow task should begin before pool close") != 0)
-    {
-        UTL_TPoolClose(&pool);
-        s_use_real_threads = 0;
-        return 1;
-    }
-
+    UTL_Sleep(10);
     if(expect_true(UTL_TPoolClose(&pool) == 0,
-                   "UTL_TPoolClose should wait for the running task to finish without deadlock") != 0)
+                   "UTL_TPoolClose should wait for accepted slow work to finish without deadlock") != 0)
     {
         s_use_real_threads = 0;
         return 1;
@@ -688,11 +675,120 @@ static int test_tpool_close_wakes_idle_workers(void)
                        "UTL_TPoolClose should wait for each idle worker exactly once");
 }
 
+static int test_tpool_reports_runtime_worker_failure(void)
+{
+#ifdef ENT_TPOOL_TEST_HOOKS
+    UTL_TPOOL pool = NULL;
+    TPOOL_TEST_PROBE probe;
+    MSG_ID_T retVal = -1;
+    MSG_ID_T addStatus = ENT_SYS_NORMAL;
+    int attempts = 0;
+
+    reset_thread_counters();
+    memset(&probe, 0, sizeof(probe));
+    s_use_real_threads = 1;
+    if(expect_true(UTL_TPoolInit(&pool, 1) == ENT_SYS_NORMAL,
+                   "UTL_TPoolInit should start a worker for runtime failure testing") != 0)
+    {
+        s_use_real_threads = 0;
+        return 1;
+    }
+    UTL_TPoolTestSetWorkerWaitFailure(pool, TRUE);
+
+    for(attempts = 0; attempts < 100 && !UTL_TPoolTestWorkerFailed(pool); ++attempts)
+    {
+        UTL_Sleep(1);
+    }
+    if(expect_true(UTL_TPoolTestWorkerFailed(pool),
+                   "worker wait failure should transition the pool into failed state") != 0)
+    {
+        UTL_TPoolClose(&pool);
+        s_use_real_threads = 0;
+        return 1;
+    }
+
+    addStatus = UTL_TPoolAddTask(pool, test_task_cb, NULL, &probe, &retVal);
+    if(expect_true(addStatus == ENT_TPL_WORKER_FAILED,
+                   "task submission should report a failed worker instead of accepting stranded work") != 0)
+    {
+        UTL_TPoolClose(&pool);
+        s_use_real_threads = 0;
+        return 1;
+    }
+    if(expect_true(UTL_TPoolClose(&pool) == ENT_TPL_WORKER_FAILED,
+                   "close should report the worker failure after reclaiming the pool") != 0 ||
+       expect_true(pool == NULL,
+                   "close should clear the pool handle even when it reports worker failure") != 0)
+    {
+        s_use_real_threads = 0;
+        return 1;
+    }
+
+    s_use_real_threads = 0;
+    return 0;
+#else
+    return 0;
+#endif
+}
+
+static int test_tpool_close_completes_stranded_task_with_worker_error(void)
+{
+#ifdef ENT_TPOOL_TEST_HOOKS
+    UTL_TPOOL pool = NULL;
+    TPOOL_TEST_PROBE probe;
+    MSG_ID_T retVal = -1;
+    MSG_ID_T addStatus = ENT_SYS_NORMAL;
+    MSG_ID_T closeStatus = ENT_SYS_NORMAL;
+    int attempts = 0;
+
+    reset_thread_counters();
+    memset(&probe, 0, sizeof(probe));
+    s_use_real_threads = 1;
+    if(expect_true(UTL_TPoolInit(&pool, 1) == ENT_SYS_NORMAL,
+                   "UTL_TPoolInit should create a worker for stranded-task failure testing") != 0)
+    {
+        s_use_real_threads = 0;
+        return 1;
+    }
+
+    UTL_TPoolTestSetTaskRemoveFailure(pool, TRUE);
+    addStatus = UTL_TPoolAddTask(pool, test_task_cb, test_task_end_cb, &probe, &retVal);
+    if(expect_true(addStatus == ENT_SYS_NORMAL,
+                   "pool should accept a task before the worker removal failure is triggered") != 0)
+    {
+        UTL_TPoolClose(&pool);
+        s_use_real_threads = 0;
+        return 1;
+    }
+    for(attempts = 0; attempts < 100 && !UTL_TPoolTestWorkerFailed(pool); ++attempts)
+    {
+        UTL_Sleep(1);
+    }
+    if(expect_true(UTL_TPoolTestWorkerFailed(pool),
+                   "failed queue removal should transition the worker pool to failed state") != 0)
+    {
+        UTL_TPoolClose(&pool);
+        s_use_real_threads = 0;
+        return 1;
+    }
+
+    closeStatus = UTL_TPoolClose(&pool);
+    s_use_real_threads = 0;
+    return expect_true(closeStatus == ENT_TPL_WORKER_FAILED && pool == NULL &&
+                       retVal == ENT_TPL_WORKER_FAILED && probe.task_hits == 0 &&
+                       probe.end_hits == 1 && probe.observed_ret == ENT_TPL_WORKER_FAILED,
+                       "close should report and complete a stranded task through its end callback");
+#else
+    return 0;
+#endif
+}
+
 int main(void)
 {
     int failures = 0;
 
     failures += test_tpool_init_rejects_null_output_pointer();
+    failures += test_tpool_init_ex_rejects_invalid_capacity();
     failures += test_tpool_add_task_rejects_invalid_arguments();
     failures += test_tpool_init_fails_when_no_worker_threads_start();
     failures += test_tpool_init_cleans_up_when_worker_list_insert_fails();
@@ -702,6 +798,8 @@ int main(void)
     failures += test_tpool_executes_task_and_end_callback();
     failures += test_tpool_close_waits_for_running_task_completion();
     failures += test_tpool_close_wakes_idle_workers();
+    failures += test_tpool_reports_runtime_worker_failure();
+    failures += test_tpool_close_completes_stranded_task_with_worker_error();
 
     if(failures != 0)
     {

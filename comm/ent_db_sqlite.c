@@ -287,15 +287,18 @@ static MSG_ID_T iENT_DbSqliteCollectRows(sqlite3* dbHandle,
             }
         }
 
+        /* Include the current row in cleanup before any cell allocation. The
+         * row storage is zeroed when the capacity grows, so unfilled cells
+         * are safe to free if materialization fails partway through a row. */
+        result.rowCount++;
         for(colIdx = 0; colIdx < result.columnCount; colIdx++)
         {
-            sts = iENT_DbSqliteAppendCell(&result, stmt, result.rowCount, colIdx);
+            sts = iENT_DbSqliteAppendCell(&result, stmt, result.rowCount - 1, colIdx);
             if(sts < 0)
             {
                 goto END_OF_ROUTINE;
             }
         }
-        result.rowCount++;
     }
 
     if(rc != SQLITE_DONE)

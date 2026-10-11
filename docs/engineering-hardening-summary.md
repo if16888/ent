@@ -264,6 +264,8 @@ Windows CI 已显式纳入该测试。
 - `UTL_TPoolClose()` 一开始就切换到不再接单状态
 - `UTL_TPoolAddTask()` 在真正入队前二次检查是否 closing
 - close 开始后新任务会被拒绝
+- pending 队列有默认上限，也可通过 `UTL_TPoolInitEx()` 配置；满载时返回 `ENT_TPL_QUEUE_FULL`
+- close 会排空关闭前接收的任务并调用结束回调；运行时 worker 失败时，未执行任务收到 `ENT_TPL_WORKER_FAILED`
 
 ### 7.2 cleanup 锁顺序收口
 
@@ -342,9 +344,9 @@ Linux 侧直接跑 `ctest`，也会覆盖到这些新增测试。
    - 例如 `WaitById(timeout)` 后再次等待成功的场景
    - 多线程 wait/close 更细粒度组合
 
-2. **线程池未执行任务的取消语义**
-   - 当前 close 时未执行任务会被清理，但取消语义仍可进一步明确
-   - 可考虑增加 cancel callback 或文档明确约定
+2. **线程池异常退出后的应用恢复策略**
+   - 正常 close 会排空已接收任务；worker 失败时结束回调会收到失败码
+   - 调用方仍需决定失败任务是否重试，以及如何管理关联数据的恢复
 
 3. **更多句柄 tag / magic 防御**
    - 某些上下文已增加 tag，但仍可继续统一化

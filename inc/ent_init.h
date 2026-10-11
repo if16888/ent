@@ -46,6 +46,11 @@ ENT_PUBLIC MSG_ID_T  ENT_Init(ENT_HANDLE* handle,
                               ENT_LOG_LEV_E logLevel,
                               ENT_MODE_E mode);
 
+/*
+ * A retryable close failure leaves *handle valid. If logger I/O or service
+ * shutdown fails after teardown completes, the error is returned and
+ * *handle is cleared.
+ */
 ENT_PUBLIC MSG_ID_T  ENT_Close(ENT_HANDLE* handle);
 
 ENT_PUBLIC MSG_ID_T  ENT_SetRtAttributes(ENT_HANDLE handle,

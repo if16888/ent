@@ -57,7 +57,7 @@ MSG_ID_T ENT_LogFatal(ENT_LOG logHandle, const char* format, ...)
     {
         return sts;
     }
-    if(LOG_LEV_FATAL_E > logCtx->logLevel)
+    if(LOG_LEV_FATAL_E > iENT_LogLevelGet(logCtx))
     {
         iENT_LogReleaseWriter(logCtx);
         return ENT_LOG_NON_FATAL;
@@ -81,7 +81,7 @@ MSG_ID_T ENT_LogError(ENT_LOG logHandle, const char* format, ...)
     {
         return sts;
     }
-    if(LOG_LEV_ERROR_E > logCtx->logLevel)
+    if(LOG_LEV_ERROR_E > iENT_LogLevelGet(logCtx))
     {
         iENT_LogReleaseWriter(logCtx);
         return ENT_LOG_NON_FATAL;
@@ -105,7 +105,7 @@ MSG_ID_T ENT_LogWarn(ENT_LOG logHandle, const char* format, ...)
     {
         return sts;
     }
-    if(LOG_LEV_WARN_E > logCtx->logLevel)
+    if(LOG_LEV_WARN_E > iENT_LogLevelGet(logCtx))
     {
         iENT_LogReleaseWriter(logCtx);
         return ENT_LOG_NON_FATAL;
@@ -129,7 +129,7 @@ MSG_ID_T ENT_LogPrint(ENT_LOG logHandle, const char* format, ...)
     {
         return sts;
     }
-    if(LOG_LEV_INFO_E > logCtx->logLevel)
+    if(LOG_LEV_INFO_E > iENT_LogLevelGet(logCtx))
     {
         iENT_LogReleaseWriter(logCtx);
         return ENT_LOG_NON_FATAL;
@@ -153,7 +153,7 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle, const char* format, ...)
     {
         return sts;
     }
-    if(LOG_LEV_DEBUG_E > logCtx->logLevel)
+    if(LOG_LEV_DEBUG_E > iENT_LogLevelGet(logCtx))
     {
         iENT_LogReleaseWriter(logCtx);
         return ENT_LOG_NON_FATAL;
