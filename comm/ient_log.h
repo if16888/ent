@@ -19,6 +19,7 @@
 #define _I_ENT_LOG_H_
 
 #include <stdio.h>
+#include <stdint.h>
 #include <time.h>
 
 #ifdef _WIN32
@@ -34,6 +35,7 @@
 #define ENT_LOG_FILE_BUFFER_SIZE  (64 * 1024)
 #define ENT_LOG_POOL_MSG_SIZE    1024
 #define ENT_LOG_POOL_MAX_FREE_NODES 512
+#define ENT_LOG_DEFAULT_BUFFER_LIMIT_BYTES (8u * 1024u * 1024u)
 
 #define ENTLOG_TAG     (0x6AFEFE6A)
 #define ENTLOG_CTX_TAG (0x6AFEFE6B)
@@ -94,6 +96,9 @@ typedef struct ENT_LOG_CTX_INTERNAL_TAG
     bool             closeAttemptActive;
     int              pendingFlushes;
     MSG_ID_T         bufferIoStatus;
+    size_t           bufferQueuedBytes;
+    size_t           bufferQueueLimitBytes;
+    uint64_t         bufferRejectedMessages;
     int              flushBatch;
     int              flushIntervalMs;
     long long        lastFlushMs;

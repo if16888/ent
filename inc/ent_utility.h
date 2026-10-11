@@ -90,7 +90,11 @@ typedef void*  UTL_TPOOL;
 typedef MSG_ID_T (*UTL_TP_TASK_F)(void*);
 typedef MSG_ID_T (*UTL_TP_TASK_END_F)(void*,MSG_ID_T*);
 
+#define UTL_TPOOL_DEFAULT_MAX_PENDING_TASKS 4096
+
 ENT_PUBLIC MSG_ID_T  UTL_TPoolInit(UTL_TPOOL*  pool,int num);
+/* maxPendingTasks bounds queued tasks; zero or negative values are invalid. */
+ENT_PUBLIC MSG_ID_T  UTL_TPoolInitEx(UTL_TPOOL* pool,int num,int maxPendingTasks);
 ENT_PUBLIC MSG_ID_T  UTL_TPoolClose(UTL_TPOOL* pool);
 ENT_PUBLIC MSG_ID_T  UTL_TPoolAddTask(UTL_TPOOL pool,UTL_TP_TASK_F taskCb,UTL_TP_TASK_END_F taskEndCb,void* taskData,MSG_ID_T* retVal);
 

@@ -192,6 +192,7 @@ int main(int argc, char** argv)
     int requested_cpu = 0;
     int requested_priority = 80;
     int requested_policy = SCHED_FIFO;
+    int max_jitter_limit_us = -1;
 
     UTL_TIMER_T timer = NULL;
     PERF_RT_PROBE probe;
@@ -232,17 +233,22 @@ int main(int argc, char** argv)
     {
         requested_priority = parse_int_arg(argv[4], requested_priority, &parse_ok);
     }
+    if(argc > 5)
+    {
+        max_jitter_limit_us = parse_int_arg(argv[5], max_jitter_limit_us, &parse_ok);
+    }
 
-    printf("env target_period_us=%d samples=%d requested_cpu=%d requested_policy=%s requested_priority=%d\n",
+    printf("env target_period_us=%d samples=%d requested_cpu=%d requested_policy=%s requested_priority=%d max_jitter_limit_us=%d\n",
            target_period_us,
            sample_count,
            requested_cpu,
            policy_name(requested_policy),
-           requested_priority);
+           requested_priority,
+           max_jitter_limit_us);
 
-    if(!parse_ok)
+    if(!parse_ok || argc > 6 || (argc > 5 && max_jitter_limit_us < 0))
     {
-        fprintf(stderr, "invalid numeric argument\n");
+        fprintf(stderr, "invalid numeric argument or extra argument\n");
         return EXIT_FAILURE;
     }
 
@@ -429,7 +435,19 @@ int main(int argc, char** argv)
            over_100us_count,
            over_100us_ratio);
 
-    exit_code = EXIT_SUCCESS;
+    if(max_jitter_limit_us >= 0)
+    {
+        int withinLimit = max_jitter_us <= (double)max_jitter_limit_us;
+        printf("threshold max_jitter_limit_us=%d observed_max_jitter_us=%.3f status=%s\n",
+               max_jitter_limit_us,
+               max_jitter_us,
+               withinLimit ? "PASS" : "FAIL");
+        exit_code = withinLimit ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+    else
+    {
+        exit_code = EXIT_SUCCESS;
+    }
 
 CLEANUP:
     if(timer_created)

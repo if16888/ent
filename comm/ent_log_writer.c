@@ -690,6 +690,14 @@ static void* iENT_LogBufferThreadMain(void* data)
             while(node != NULL)
             {
                 nextNode = node->next;
+                if(log->bufferQueuedBytes >= sizeof(*node) + node->msgCap)
+                {
+                    log->bufferQueuedBytes -= sizeof(*node) + node->msgCap;
+                }
+                else
+                {
+                    log->bufferQueuedBytes = 0;
+                }
                 if(node->pooled && log->poolFreeCount < 512)
                 {
                     node->next = log->poolFreeHead;
@@ -839,6 +847,8 @@ MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX_INTERNAL* log,
 {
     ENT_LOG_MSG_NODE* node = NULL;
     bool usePool = false;
+    size_t nodeCap = 0;
+    size_t allocBytes = 0;
 
     if(log == NULL || msg == NULL || msgLen == 0)
     {
@@ -851,6 +861,12 @@ MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX_INTERNAL* log,
     }
 
     usePool = msgLen <= 1024;
+    nodeCap = usePool ? 1024 : msgLen;
+    if(nodeCap > (size_t)-1 - sizeof(ENT_LOG_MSG_NODE))
+    {
+        return ENT_LOG_ALLOC_FAILED;
+    }
+    allocBytes = sizeof(ENT_LOG_MSG_NODE) + nodeCap;
 
 #ifdef _WIN32
     EnterCriticalSection(&log->cs);
@@ -866,6 +882,22 @@ MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX_INTERNAL* log,
 #endif
         return ENT_LOG_NON_FATAL;
     }
+
+    if(allocBytes > log->bufferQueueLimitBytes ||
+       log->bufferQueuedBytes > log->bufferQueueLimitBytes - allocBytes)
+    {
+        if(log->bufferRejectedMessages != UINT64_MAX)
+        {
+            log->bufferRejectedMessages++;
+        }
+#ifdef _WIN32
+        LeaveCriticalSection(&log->cs);
+#else
+        pthread_mutex_unlock(&log->cs);
+#endif
+        return ENT_LOG_QUEUE_FULL;
+    }
+    log->bufferQueuedBytes += allocBytes;
 
     if(usePool && log->poolFreeHead != NULL)
     {
@@ -895,6 +927,24 @@ MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX_INTERNAL* log,
         }
         if(node == NULL)
         {
+#ifdef _WIN32
+            EnterCriticalSection(&log->cs);
+#else
+            pthread_mutex_lock(&log->cs);
+#endif
+            if(log->bufferQueuedBytes >= allocBytes)
+            {
+                log->bufferQueuedBytes -= allocBytes;
+            }
+            else
+            {
+                log->bufferQueuedBytes = 0;
+            }
+#ifdef _WIN32
+            LeaveCriticalSection(&log->cs);
+#else
+            pthread_mutex_unlock(&log->cs);
+#endif
             return ENT_LOG_ALLOC_FAILED;
         }
     }
@@ -920,6 +970,14 @@ MSG_ID_T iENT_LogQueueMessage(ENT_LOG_CTX_INTERNAL* log,
             log->poolFreeHead = node;
             log->poolFreeCount++;
             recycled = true;
+        }
+        if(log->bufferQueuedBytes >= allocBytes)
+        {
+            log->bufferQueuedBytes -= allocBytes;
+        }
+        else
+        {
+            log->bufferQueuedBytes = 0;
         }
 #ifdef _WIN32
         LeaveCriticalSection(&log->cs);
@@ -960,6 +1018,7 @@ MSG_ID_T iENT_LogVRaw(ENT_LOG_CTX_INTERNAL* log, const char* format, va_list va_
     size_t msgLen = 0;
     MSG_ID_T sts = ENT_SYS_NORMAL;
     bool useBuffer = false;
+    MSG_ID_T queueSts = ENT_SYS_NORMAL;
 
     sts = iENT_LogFormatMessage(format, va_args, stackBuf, sizeof(stackBuf), &msgBuf, &msgLen);
     if(sts < 0)
@@ -969,13 +1028,25 @@ MSG_ID_T iENT_LogVRaw(ENT_LOG_CTX_INTERNAL* log, const char* format, va_list va_
 
     useBuffer = iENT_LogFastFlagGet(&log->isBufferFast) ? true : false;
 
-    if(useBuffer && iENT_LogQueueMessage(log, msgBuf, msgLen, time(NULL), false) == 0)
+    if(useBuffer)
     {
-        if(msgBuf != stackBuf)
+        queueSts = iENT_LogQueueMessage(log, msgBuf, msgLen, time(NULL), false);
+        if(queueSts == ENT_SYS_NORMAL)
         {
-            free(msgBuf);
+            if(msgBuf != stackBuf)
+            {
+                free(msgBuf);
+            }
+            return ENT_SYS_NORMAL;
         }
-        return ENT_SYS_NORMAL;
+        if(queueSts == ENT_LOG_QUEUE_FULL)
+        {
+            if(msgBuf != stackBuf)
+            {
+                free(msgBuf);
+            }
+            return queueSts;
+        }
     }
 
     iENT_LogIoLock(log);
@@ -1029,6 +1100,7 @@ MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_LEV_E logLevel, const
     MSG_ID_T sts = ENT_SYS_NORMAL;
     bool debugMirror = false;
     bool useBuffer = false;
+    MSG_ID_T queueSts = ENT_SYS_NORMAL;
 
     if(iENT_LogFormatMessage(format, va_args, stackBuf, sizeof(stackBuf), &msgBuf, &msgLen) < 0)
     {
@@ -1070,7 +1142,8 @@ MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_LEV_E logLevel, const
     useBuffer = iENT_LogFastFlagGet(&log->isBufferFast) ? true : false;
     if(useBuffer)
     {
-        if(iENT_LogQueueMessage(log, lineBuf, lineLen, rollTime, logLevel <= LOG_LEV_ERROR_E) == 0)
+        queueSts = iENT_LogQueueMessage(log, lineBuf, lineLen, rollTime, logLevel <= LOG_LEV_ERROR_E);
+        if(queueSts == ENT_SYS_NORMAL)
         {
             if(lineBuf != lineStackBuf)
             {
@@ -1081,6 +1154,18 @@ MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_LEV_E logLevel, const
                 free(msgBuf);
             }
             return ENT_SYS_NORMAL;
+        }
+        if(queueSts == ENT_LOG_QUEUE_FULL)
+        {
+            if(lineBuf != lineStackBuf)
+            {
+                free(lineBuf);
+            }
+            if(msgBuf != stackBuf)
+            {
+                free(msgBuf);
+            }
+            return queueSts;
         }
     }
 

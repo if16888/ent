@@ -152,6 +152,18 @@ MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const voi
             break;
         }
 
+        case ENT_LOG_BUFFER_LIMIT_E:
+        {
+            size_t limitBytes = *(const size_t*)arg;
+            if(limitBytes == 0)
+            {
+                sts = ENT_LOG_BAD_ARGUMENT;
+                break;
+            }
+            log->bufferQueueLimitBytes = limitBytes;
+            break;
+        }
+
         default:
             sts = ENT_LOG_BAD_ARGUMENT;
             break;
@@ -176,4 +188,42 @@ END_OF_ROUTINE:
         iENT_LogReleaseWriter(log);
     }
     return sts;
+}
+
+MSG_ID_T ENT_LogGetBufferStats(ENT_LOG logHandle, ENT_LOG_BUFFER_STATS_T* stats)
+{
+    ENT_LOG_CTX_INTERNAL* log = NULL;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
+
+    if(stats == NULL)
+    {
+        return ENT_LOG_BAD_ARGUMENT;
+    }
+    if(sLogMutexInit == false)
+    {
+        return ENT_LOG_NOT_INITIALIZED;
+    }
+
+    sts = iENT_LogAcquireWriter(&log, logHandle);
+    if(sts < 0)
+    {
+        return sts;
+    }
+
+#ifdef _WIN32
+    EnterCriticalSection(&log->cs);
+#else
+    pthread_mutex_lock(&log->cs);
+#endif
+    stats->queuedBytes = log->bufferQueuedBytes;
+    stats->limitBytes = log->bufferQueueLimitBytes;
+    stats->rejectedMessages = log->bufferRejectedMessages;
+#ifdef _WIN32
+    LeaveCriticalSection(&log->cs);
+#else
+    pthread_mutex_unlock(&log->cs);
+#endif
+
+    iENT_LogReleaseWriter(log);
+    return ENT_SYS_NORMAL;
 }

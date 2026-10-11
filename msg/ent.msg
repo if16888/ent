@@ -150,6 +150,8 @@ CV_INITFAIL       err 6  initialize thread pool condition variable failed
 WORKER_CREATEFAIL err 7  create thread pool worker failed
 NOT_INITIALIZED   err 8  thread pool is not initialized
 TASK_ALLOCFAIL    err 9  allocate thread pool task failed
+QUEUE_FULL        err 10 thread pool pending task limit reached
+WORKER_FAILED     err 11 thread pool worker failed at runtime
 
 # ----------------------------------------------------------------------------
 # DLL: double-linked-list service
@@ -207,6 +209,7 @@ PATH_FAILED     err 6  log path check or creation failed
 FORMAT_FAILED   err 7  log message format failed
 THREAD_FAILED   err 8  log background thread operation failed
 IO_FAILED       err 9  log file io operation failed
+QUEUE_FULL      err 10 log buffer queue limit reached
 
 # ----------------------------------------------------------------------------
 # SHM: shared memory service and mapping lifecycle

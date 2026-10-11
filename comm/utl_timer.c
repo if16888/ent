@@ -69,6 +69,10 @@ typedef struct
     UTL_LOCK          cbLock;
     UTL_CV            cbCv;
     unsigned int      pendingCallbacks;
+#ifdef ENT_TIMER_TEST_HOOKS
+    unsigned int      maxPendingCallbacks;
+    unsigned long long coalescedCallbacks;
+#endif
     BOOL              stopWorker;
     BOOL              stopCallbackWorker;
     BOOL              rtMode;
@@ -123,6 +127,36 @@ unsigned int iUTL_TimerTestWindowsLastWaitStatus(void)
 #endif
 #if ENT_TMR_IMPL_LINUX && defined(ENT_TIMER_TEST_HOOKS)
 static unsigned int  sTimerRtLiveContexts = 0;
+
+unsigned int iUTL_TimerTestRtMaxPendingCallbacks(UTL_TIMER_T timer)
+{
+    PTIMER_CTX_T timerCtx = (PTIMER_CTX_T)timer;
+    unsigned int count = 0;
+
+    if(timerCtx == NULL || timerCtx->tag != UTL_TIMER_TAG)
+    {
+        return 0;
+    }
+    UTL_LockEnter(timerCtx->cbLock);
+    count = timerCtx->maxPendingCallbacks;
+    UTL_LockLeave(timerCtx->cbLock);
+    return count;
+}
+
+unsigned long long iUTL_TimerTestRtCoalescedCallbacks(UTL_TIMER_T timer)
+{
+    PTIMER_CTX_T timerCtx = (PTIMER_CTX_T)timer;
+    unsigned long long count = 0;
+
+    if(timerCtx == NULL || timerCtx->tag != UTL_TIMER_TAG)
+    {
+        return 0;
+    }
+    UTL_LockEnter(timerCtx->cbLock);
+    count = timerCtx->coalescedCallbacks;
+    UTL_LockLeave(timerCtx->cbLock);
+    return count;
+}
 #endif
 #if (ENT_TMR_IMPL_LINUX || ENT_TMR_IMPL_POSIX_FALLBACK) && defined(ENT_TIMER_TEST_HOOKS)
 static unsigned int  sTimerThreadSelfDetachSuccess = 0;
@@ -1020,7 +1054,19 @@ static void* iUTL_TimerRtWorker(void* data)
         }
         {
             BOOL needWake = (timerCtx->pendingCallbacks == 0) ? TRUE : FALSE;
-            timerCtx->pendingCallbacks++;
+            if(needWake)
+            {
+                timerCtx->pendingCallbacks = 1;
+#ifdef ENT_TIMER_TEST_HOOKS
+                timerCtx->maxPendingCallbacks = 1;
+#endif
+            }
+#ifdef ENT_TIMER_TEST_HOOKS
+            else if(timerCtx->coalescedCallbacks != (unsigned long long)-1)
+            {
+                timerCtx->coalescedCallbacks++;
+            }
+#endif
             UTL_LockLeave(timerCtx->cbLock);
             if(needWake)
             {

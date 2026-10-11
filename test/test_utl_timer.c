@@ -19,6 +19,9 @@ void iUTL_TimerTestInjectCloseDeleteFailureAfter(unsigned int successfulDeletes)
 #ifdef _WIN32
 unsigned int iUTL_TimerTestWindowsLastKillStatus(void);
 unsigned int iUTL_TimerTestWindowsLastWaitStatus(void);
+#elif defined(__linux__)
+unsigned int iUTL_TimerTestRtMaxPendingCallbacks(UTL_TIMER_T timer);
+unsigned long long iUTL_TimerTestRtCoalescedCallbacks(UTL_TIMER_T timer);
 #endif
 
 static volatile int s_timer_hits = 0;
@@ -967,6 +970,77 @@ CLEANUP:
     return 0;
 #endif
 }
+
+static int test_timer_create_us_coalesces_overrun_callbacks(void)
+{
+#ifdef __linux__
+    UTL_TIMER_T timer = NULL;
+    TIMER_SLOW_PROBE probe;
+    unsigned int maxPending = 0;
+    unsigned long long coalesced = 0;
+    int rc = 1;
+
+    memset(&probe, 0, sizeof(probe));
+    if(timer_wait_probe_init(&probe.callbacks) != 0)
+    {
+        return 1;
+    }
+    if(expect_true(UTL_TimerInit() == ENT_SYS_NORMAL,
+                   "UTL_TimerInit should initialize before RT overrun coalescing test") != 0)
+    {
+        goto CLEANUP;
+    }
+    if(expect_true(UTL_TimerCreateUs(&timer,
+                                     UTL_TIMER_E_PERIOD,
+                                     1000,
+                                     slow_timer_cb,
+                                     &probe) == ENT_SYS_NORMAL,
+                   "UTL_TimerCreateUs should create a fast periodic timer for overrun testing") != 0)
+    {
+        UTL_TimerClose();
+        goto CLEANUP;
+    }
+    if(expect_true(timer_wait_probe_wait_at_least(&probe.callbacks, 2, 2000) == 0,
+                   "slow RT callback should run multiple times within the bounded wait") != 0)
+    {
+        UTL_TimerDelete(&timer);
+        UTL_TimerClose();
+        goto CLEANUP;
+    }
+
+    UTL_Sleep(10);
+    maxPending = iUTL_TimerTestRtMaxPendingCallbacks(timer);
+    coalesced = iUTL_TimerTestRtCoalescedCallbacks(timer);
+    if(expect_true(maxPending <= 1,
+                   "RT timer should keep at most one callback pending during an overrun") != 0 ||
+       expect_true(coalesced > 0,
+                   "RT timer should coalesce ticks that arrive while a callback is pending") != 0)
+    {
+        UTL_TimerDelete(&timer);
+        UTL_TimerClose();
+        goto CLEANUP;
+    }
+    if(expect_true(UTL_TimerDelete(&timer) == ENT_SYS_NORMAL,
+                   "UTL_TimerDelete should stop the RT overrun test timer") != 0)
+    {
+        UTL_TimerClose();
+        goto CLEANUP;
+    }
+    if(expect_true(UTL_TimerClose() == ENT_SYS_NORMAL,
+                   "UTL_TimerClose should succeed after RT overrun coalescing test") != 0)
+    {
+        goto CLEANUP;
+    }
+
+    rc = 0;
+CLEANUP:
+    timer_wait_probe_destroy(&probe.callbacks);
+    return rc;
+#else
+    return 0;
+#endif
+}
+
 static int test_timer_create_us_callback_can_self_delete_safely(void)
 {
 #ifdef __linux__
@@ -1180,6 +1254,7 @@ int main(void)
     failures += test_timer_create_us_has_consistent_failure_contract();
     failures += test_timer_create_us_delete_does_not_wait_full_period();
     failures += test_timer_create_us_periodic_timer_fires_on_linux();
+    failures += test_timer_create_us_coalesces_overrun_callbacks();
     failures += test_timer_create_us_callback_can_self_delete_safely();
 #ifndef _WIN32
     failures += test_timer_callback_can_self_delete_safely();

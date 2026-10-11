@@ -18,6 +18,9 @@
 #ifndef  _ENT_LOG_H_
 #define  _ENT_LOG_H_
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include "ent_comm.h"
 #include "ent_msg.h"
 #include "ent_types.h"
@@ -34,7 +37,15 @@ typedef enum
     ENT_LOG_LEVEL_E,
     ENT_LOG_FLUSH_BATCH_E,
     ENT_LOG_FLUSH_INTERVAL_E,
+    ENT_LOG_BUFFER_LIMIT_E,
 } ENT_LOG_OPTIONS_E;
+
+typedef struct
+{
+    size_t queuedBytes;
+    size_t limitBytes;
+    uint64_t rejectedMessages;
+} ENT_LOG_BUFFER_STATS_T;
 
 typedef enum
 {
@@ -87,6 +98,13 @@ ENT_PUBLIC MSG_ID_T  ENT_LogCtxPrint(ENT_LOG_CTX ctx,ENT_LOG logHandle,const cha
 ENT_PUBLIC MSG_ID_T  ENT_LogCtxDebug(ENT_LOG_CTX ctx,ENT_LOG logHandle,const char* format,...);
 
 ENT_PUBLIC MSG_ID_T  ENT_LogSetOption(ENT_LOG logHandle,ENT_LOG_OPTIONS_E option,const void* arg);
+
+/*
+ * Buffered logging is bounded by ENT_LOG_BUFFER_LIMIT_E (size_t bytes).
+ * When the limit is reached, writes are rejected with ENT_LOG_QUEUE_FULL.
+ */
+ENT_PUBLIC MSG_ID_T  ENT_LogGetBufferStats(ENT_LOG logHandle,ENT_LOG_BUFFER_STATS_T* stats);
+ENT_PUBLIC MSG_ID_T  ENT_LogCtxGetBufferStats(ENT_LOG_CTX ctx,ENT_LOG logHandle,ENT_LOG_BUFFER_STATS_T* stats);
 
 ENT_PUBLIC MSG_ID_T  ENT_LogCloseHandle(ENT_LOG logHandle);
 

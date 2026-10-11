@@ -71,6 +71,22 @@ flush 语义由内部 writer 线程、flush batch / interval 配置和 close 路
 - `ENT_LogCloseHandle()` 会在退出前确保需要持久化的缓冲被刷出。
 - `ENT_LogClose()` 不负责替代句柄 close 的 flush 责任。
 
+## Bounded asynchronous queue
+
+Buffered handles default to an 8 MiB queue budget. `ENT_LOG_BUFFER_LIMIT_E`
+sets a positive `size_t` byte limit; the budget includes queued records and
+records currently being written by the background worker. When a record would
+exceed the budget, the write returns `ENT_LOG_QUEUE_FULL`, and
+`ENT_LogGetBufferStats()` reports the pending bytes, limit, and cumulative
+rejected-message count. Rejected records are not retried synchronously, so the
+caller can observe overload and choose its own response.
+
+Handle close changes the state to `CLOSING` under the service registry lock,
+then releases that process-wide lock while it drains the handle's writers,
+stops its worker, and closes its file. The handle remains registered until
+cleanup finishes, so other handles can continue logging without resolving or
+using the closing handle.
+
 ## 对调用方的建议
 
 - 默认 handle 和 context-owned handle 不要混用。

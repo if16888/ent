@@ -515,6 +515,7 @@ static int test_explicit_context_isolated_from_default(void)
     ENT_LOG_CTX ctx = NULL;
     ENT_LOG privateLog = NULL;
     ENT_LOG_LEV_E level = LOG_LEV_INFO_E;
+    ENT_LOG_BUFFER_STATS_T bufferStats;
 
     if(expect_true(ENT_LogInit() == 0, "ENT_LogInit should initialize before explicit-context testing") != 0)
     {
@@ -555,6 +556,19 @@ static int test_explicit_context_isolated_from_default(void)
 
     if(expect_true(ENT_LogCtxSetOption(ctx, privateLog, ENT_LOG_LEVEL_E, &level) == 0,
                    "ENT_LogCtxSetOption should accept per-context options") != 0)
+    {
+        ENT_LogCtxCloseHandle(ctx, privateLog);
+        ENT_LogCtxClose(ctx);
+        ENT_LogCloseHandle(NULL);
+        ENT_LogClose();
+        return 1;
+    }
+
+    if(expect_true(ENT_LogCtxGetBufferStats(ctx, privateLog, &bufferStats) == ENT_SYS_NORMAL &&
+                   bufferStats.queuedBytes == 0 &&
+                   bufferStats.limitBytes == ENT_LOG_DEFAULT_BUFFER_LIMIT_BYTES &&
+                   bufferStats.rejectedMessages == 0,
+                   "context stats should report the default bounded queue state") != 0)
     {
         ENT_LogCtxCloseHandle(ctx, privateLog);
         ENT_LogCtxClose(ctx);
@@ -2540,6 +2554,83 @@ cleanup:
     return rc;
 }
 
+static int test_buffered_log_rejects_over_capacity_and_reports_stats(void)
+{
+    ENT_LOG logHandle = NULL;
+    ENT_LOG_LEV_E level = LOG_LEV_INFO_E;
+    ENT_LOG_BUFFER_STATS_T stats;
+    size_t zeroLimit = 0;
+    size_t queueLimit = 1;
+    bool buffered = true;
+    char dirPath[256];
+    int serviceOpen = 0;
+    int rc = 1;
+
+    if(make_temp_dir(dirPath, sizeof(dirPath)) != 0)
+    {
+        fprintf(stderr, "failed to create temp bounded-log directory\n");
+        return 1;
+    }
+    if(expect_true(ENT_LogInit() == ENT_SYS_NORMAL,
+                   "ENT_LogInit should initialize before bounded-log test") != 0)
+    {
+        goto cleanup;
+    }
+    serviceOpen = 1;
+    if(expect_true(ENT_LogInitHandle(&logHandle, "BoundedLogModule", dirPath) == ENT_SYS_NORMAL,
+                   "ENT_LogInitHandle should create a bounded-log test handle") != 0 ||
+       expect_true(ENT_LogSetOption(logHandle, ENT_LOG_LEVEL_E, &level) == ENT_SYS_NORMAL,
+                   "ENT_LogSetOption should enable INFO logs for bounded queue testing") != 0 ||
+       expect_true(ENT_LogSetOption(logHandle, ENT_LOG_BUFFER_LIMIT_E, &zeroLimit) == ENT_LOG_BAD_ARGUMENT,
+                   "ENT_LOG_BUFFER_LIMIT_E should reject a zero-byte queue limit") != 0 ||
+       expect_true(ENT_LogSetOption(logHandle, ENT_LOG_BUFFER_LIMIT_E, &queueLimit) == ENT_SYS_NORMAL,
+                   "ENT_LOG_BUFFER_LIMIT_E should accept a positive byte limit") != 0 ||
+       expect_true(ENT_LogSetOption(logHandle, ENT_LOG_BUFFER_E, &buffered) == ENT_SYS_NORMAL,
+                   "ENT_LogSetOption should start the bounded asynchronous logger") != 0)
+    {
+        goto cleanup;
+    }
+
+    if(expect_true(ENT_LogPrint(logHandle, "rejected by bounded queue\n") == ENT_LOG_QUEUE_FULL,
+                   "a log record larger than the remaining queue budget should be rejected") != 0)
+    {
+        goto cleanup;
+    }
+    if(expect_true(ENT_LogGetBufferStats(logHandle, &stats) == ENT_SYS_NORMAL &&
+                   stats.queuedBytes == 0 &&
+                   stats.limitBytes == queueLimit &&
+                   stats.rejectedMessages == 1,
+                   "buffer stats should expose queued bytes, capacity, and rejected message count") != 0)
+    {
+        goto cleanup;
+    }
+    if(expect_true(ENT_LogCloseHandle(logHandle) == ENT_SYS_NORMAL,
+                   "ENT_LogCloseHandle should stop the bounded logger") != 0)
+    {
+        goto cleanup;
+    }
+    logHandle = NULL;
+    if(expect_true(ENT_LogClose() == ENT_SYS_NORMAL,
+                   "ENT_LogClose should succeed after bounded-log test") != 0)
+    {
+        goto cleanup;
+    }
+    serviceOpen = 0;
+    rc = 0;
+
+cleanup:
+    if(logHandle != NULL)
+    {
+        ENT_LogCloseHandle(logHandle);
+    }
+    if(serviceOpen)
+    {
+        ENT_LogClose();
+    }
+    remove_dir_contents(dirPath);
+    return rc;
+}
+
 static int test_buffered_log_interval_zero_flushes_on_close(void)
 {
     ENT_LOG logHandle = NULL;
@@ -2799,6 +2890,261 @@ cleanup:
 }
 
 #if defined(__linux__)
+typedef struct
+{
+    TEST_EVENT entered;
+    TEST_EVENT release;
+} TEST_BLOCKING_LOG_COOKIE;
+
+typedef struct
+{
+    ENT_LOG logHandle;
+    TEST_EVENT done;
+    MSG_ID_T status;
+} TEST_LOG_WRITE_THREAD_CTX;
+
+static ssize_t test_blocking_cookie_write(void* cookie, const char* buffer, size_t size)
+{
+    TEST_BLOCKING_LOG_COOKIE* state = (TEST_BLOCKING_LOG_COOKIE*)cookie;
+    (void)buffer;
+    test_event_signal(&state->entered);
+    test_event_wait(&state->release, -1);
+    return (ssize_t)size;
+}
+
+static void* test_log_write_thread_proc(void* data)
+{
+    TEST_LOG_WRITE_THREAD_CTX* ctx = (TEST_LOG_WRITE_THREAD_CTX*)data;
+    ctx->status = ENT_LogPrint(ctx->logHandle, "other handle remains writable\n");
+    test_event_signal(&ctx->done);
+    return NULL;
+}
+
+static int test_closing_buffered_handle_does_not_block_other_handles(void)
+{
+    ENT_LOG closingLog = NULL;
+    ENT_LOG otherLog = NULL;
+    ENT_LOG_LEV_E level = LOG_LEV_INFO_E;
+    bool buffered = true;
+    char dirPath[256];
+    TEST_BLOCKING_LOG_COOKIE cookieState;
+    TEST_CLOSE_THREAD_CTX closeCtx;
+    TEST_LOG_WRITE_THREAD_CTX writeCtx;
+    cookie_io_functions_t ioFunctions;
+    FILE* cookieFile = NULL;
+    pthread_t closeThread;
+    pthread_t writeThread;
+    int closeEventsReady = 0;
+    int writeEventsReady = 0;
+    int cookieEnteredReady = 0;
+    int cookieReleaseReady = 0;
+    int closeThreadStarted = 0;
+    int writeThreadStarted = 0;
+    int serviceOpen = 0;
+    int bufferStopObserved = 0;
+    int writerFinishedWhileCloseBlocked = 0;
+    int failures = 0;
+    int rc = 1;
+
+    memset(&cookieState, 0, sizeof(cookieState));
+    memset(&closeCtx, 0, sizeof(closeCtx));
+    memset(&writeCtx, 0, sizeof(writeCtx));
+    memset(&ioFunctions, 0, sizeof(ioFunctions));
+    if(make_temp_dir(dirPath, sizeof(dirPath)) != 0)
+    {
+        fprintf(stderr, "failed to create temp concurrent-close directory\n");
+        return 1;
+    }
+    if(test_event_init(&cookieState.entered) != 0)
+    {
+        remove_dir_contents(dirPath);
+        return expect_true(0, "blocking cookie events should initialize");
+    }
+    cookieEnteredReady = 1;
+    if(test_event_init(&cookieState.release) != 0)
+    {
+        test_event_destroy(&cookieState.entered);
+        remove_dir_contents(dirPath);
+        return expect_true(0, "blocking cookie events should initialize");
+    }
+    cookieReleaseReady = 1;
+    if(test_event_init(&closeCtx.done) != 0)
+    {
+        test_event_destroy(&cookieState.release);
+        test_event_destroy(&cookieState.entered);
+        remove_dir_contents(dirPath);
+        return expect_true(0, "close completion event should initialize");
+    }
+    closeEventsReady = 1;
+    if(test_event_init(&writeCtx.done) != 0)
+    {
+        test_event_destroy(&closeCtx.done);
+        test_event_destroy(&cookieState.release);
+        test_event_destroy(&cookieState.entered);
+        remove_dir_contents(dirPath);
+        return expect_true(0, "other-handle write completion event should initialize");
+    }
+    writeEventsReady = 1;
+
+    if(expect_true(ENT_LogInit() == ENT_SYS_NORMAL,
+                   "ENT_LogInit should initialize before independent-handle close test") != 0)
+    {
+        goto cleanup;
+    }
+    serviceOpen = 1;
+    if(expect_true(ENT_LogInitHandle(&closingLog, "BlockedCloseModule", dirPath) == ENT_SYS_NORMAL,
+                   "closing handle should initialize") != 0 ||
+       expect_true(ENT_LogInitHandle(&otherLog, "OtherHandleModule", dirPath) == ENT_SYS_NORMAL,
+                   "other handle should initialize") != 0 ||
+       expect_true(ENT_LogSetOption(closingLog, ENT_LOG_LEVEL_E, &level) == ENT_SYS_NORMAL,
+                   "closing handle should accept INFO records") != 0 ||
+       expect_true(ENT_LogSetOption(otherLog, ENT_LOG_LEVEL_E, &level) == ENT_SYS_NORMAL,
+                   "other handle should accept INFO records") != 0)
+    {
+        goto cleanup;
+    }
+
+    ioFunctions.write = test_blocking_cookie_write;
+    cookieFile = fopencookie(&cookieState, "w", ioFunctions);
+    if(expect_true(cookieFile != NULL,
+                   "blocking cookie stream should open for close-lock test") != 0 ||
+       expect_true(setvbuf(cookieFile, NULL, _IONBF, 0) == 0,
+                   "blocking cookie stream should be unbuffered") != 0)
+    {
+        goto cleanup;
+    }
+    iENT_LogIoLock((ENT_LOG_CTX_INTERNAL*)closingLog);
+    ((ENT_LOG_CTX_INTERNAL*)closingLog)->logFp = cookieFile;
+    ((ENT_LOG_CTX_INTERNAL*)closingLog)->nextCreate = time(NULL) + 86400;
+    iENT_LogIoUnlock((ENT_LOG_CTX_INTERNAL*)closingLog);
+    cookieFile = NULL;
+
+    if(expect_true(ENT_LogSetOption(closingLog, ENT_LOG_BUFFER_E, &buffered) == ENT_SYS_NORMAL,
+                   "closing handle should start a buffer worker") != 0 ||
+       expect_true(ENT_LogPrint(closingLog, "block buffer worker\n") == ENT_SYS_NORMAL,
+                   "closing handle should enqueue a message for the blocking worker") != 0)
+    {
+        goto cleanup;
+    }
+    if(expect_true(test_event_wait(&cookieState.entered, 2000) == 0,
+                   "buffer worker should reach the blocking file writer") != 0)
+    {
+        goto cleanup;
+    }
+
+    closeCtx.logHandle = closingLog;
+    closeCtx.closeRc = -999;
+    if(expect_true(pthread_create(&closeThread, NULL, close_handle_thread_proc, &closeCtx) == 0,
+                   "close thread should start while the buffer worker is blocked") != 0)
+    {
+        goto cleanup;
+    }
+    closeThreadStarted = 1;
+
+    {
+        int attempt;
+        for(attempt = 0; attempt < 200; ++attempt)
+        {
+            int stopRequested = 0;
+            pthread_mutex_lock(&((ENT_LOG_CTX_INTERNAL*)closingLog)->cs);
+            stopRequested = ((ENT_LOG_CTX_INTERNAL*)closingLog)->bufferThreadStop ? 1 : 0;
+            pthread_mutex_unlock(&((ENT_LOG_CTX_INTERNAL*)closingLog)->cs);
+            if(stopRequested)
+            {
+                bufferStopObserved = 1;
+                break;
+            }
+            test_sleep_ms(1);
+        }
+    }
+    if(expect_true(bufferStopObserved,
+                   "close should reach buffer-worker join while the file write is blocked") != 0 ||
+       expect_true(test_event_wait(&closeCtx.done, 20) != 0,
+                   "close should still be waiting for its own buffer worker") != 0)
+    {
+        goto cleanup;
+    }
+
+    writeCtx.logHandle = otherLog;
+    writeCtx.status = -999;
+    if(expect_true(pthread_create(&writeThread, NULL, test_log_write_thread_proc, &writeCtx) == 0,
+                   "other-handle writer thread should start during close") != 0)
+    {
+        goto cleanup;
+    }
+    writeThreadStarted = 1;
+    writerFinishedWhileCloseBlocked = test_event_wait(&writeCtx.done, 500) == 0;
+    if(expect_true(writerFinishedWhileCloseBlocked,
+                   "closing one handle should not hold the global lock while joining its worker") != 0)
+    {
+        goto cleanup;
+    }
+    if(expect_true(writeCtx.status == ENT_SYS_NORMAL,
+                   "other-handle log write should succeed while close waits") != 0)
+    {
+        goto cleanup;
+    }
+
+    rc = 0;
+
+cleanup:
+    test_event_signal(&cookieState.release);
+    if(closeThreadStarted)
+    {
+        pthread_join(closeThread, NULL);
+        closeThreadStarted = 0;
+        if(closeCtx.closeRc != ENT_SYS_NORMAL)
+        {
+            failures++;
+        }
+        closingLog = NULL;
+    }
+    if(writeThreadStarted)
+    {
+        pthread_join(writeThread, NULL);
+        writeThreadStarted = 0;
+        if(writeCtx.status != ENT_SYS_NORMAL)
+        {
+            failures++;
+        }
+    }
+    if(cookieFile != NULL)
+    {
+        fclose(cookieFile);
+        cookieFile = NULL;
+    }
+    if(closingLog != NULL)
+    {
+        ENT_LogCloseHandle(closingLog);
+    }
+    if(otherLog != NULL)
+    {
+        ENT_LogCloseHandle(otherLog);
+    }
+    if(serviceOpen)
+    {
+        ENT_LogClose();
+    }
+    if(writeEventsReady)
+    {
+        test_event_destroy(&writeCtx.done);
+    }
+    if(closeEventsReady)
+    {
+        test_event_destroy(&closeCtx.done);
+    }
+    if(cookieReleaseReady)
+    {
+        test_event_destroy(&cookieState.release);
+    }
+    if(cookieEnteredReady)
+    {
+        test_event_destroy(&cookieState.entered);
+    }
+    remove_dir_contents(dirPath);
+    return (rc == 0 && failures == 0) ? 0 : 1;
+}
+
 static ssize_t test_fail_cookie_write(void* cookie, const char* buffer, size_t size)
 {
     (void)cookie;
@@ -2886,9 +3232,11 @@ int main(void)
     failures += test_log_level_filters_debug_messages();
     failures += test_log_close_handle_waits_for_active_writers();
     failures += test_buffered_log_close_flushes_queued_messages();
+    failures += test_buffered_log_rejects_over_capacity_and_reports_stats();
     failures += test_buffered_log_interval_zero_flushes_on_close();
     failures += test_buffered_log_flush_interval_writes_without_close();
 #if defined(__linux__)
+    failures += test_closing_buffered_handle_does_not_block_other_handles();
     failures += test_failed_force_flush_preserves_pending_count();
 #endif
 

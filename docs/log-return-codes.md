@@ -17,6 +17,14 @@ The log module now uses the repository-wide `msg/ent.msg` message-code system. I
 | `ENT_LOG_FORMAT_FAILED` | format/prefix generation failed |
 | `ENT_LOG_THREAD_FAILED` | buffer thread operation failed |
 | `ENT_LOG_IO_FAILED` | file IO failed |
+| `ENT_LOG_QUEUE_FULL` | buffered log record rejected because the configured byte limit is full |
+
+Buffered handles have an 8 MiB default queue limit. Set
+`ENT_LOG_BUFFER_LIMIT_E` to a positive `size_t` value to change it. A record
+that would exceed the limit is rejected with `ENT_LOG_QUEUE_FULL`; it is not
+written synchronously as a fallback. `ENT_LogGetBufferStats()` and
+`ENT_LogCtxGetBufferStats()` report the current pending byte count, configured
+limit, and cumulative rejected-message count.
 
 ## Function Semantics
 
@@ -35,6 +43,11 @@ The log module now uses the repository-wide `msg/ent.msg` message-code system. I
 | `ENT_LogCtxSetOption()` | `ENT_SYS_NORMAL` | N/A | `ENT_LOG_BAD_ARGUMENT` for missing arguments | `ENT_LOG_NOT_INITIALIZED` | `ENT_LOG_BAD_HANDLE` for invalid context/handle relationship | `ENT_LOG_IN_USE` when the handle is not `ACTIVE` | `ENT_LOG_ALLOC_FAILED` | `ENT_LOG_PATH_FAILED` | N/A | `ENT_LOG_THREAD_FAILED` | `ENT_LOG_IO_FAILED` |
 | `ENT_LogCtxCloseHandle()` | `ENT_SYS_NORMAL` | N/A | N/A | `ENT_LOG_NOT_INITIALIZED` | `ENT_LOG_BAD_HANDLE` for invalid context/handle relationship | `ENT_LOG_IN_USE` when the handle is already closing | N/A | N/A | N/A | `ENT_LOG_THREAD_FAILED` | `ENT_LOG_IO_FAILED` |
 | `ENT_LogCtxRaw()` / level-specific `ENT_LogCtx*()` | `ENT_SYS_NORMAL` | `ENT_LOG_NON_FATAL` when filtered by log level | `ENT_LOG_BAD_ARGUMENT` for malformed format input | `ENT_LOG_NOT_INITIALIZED` | `ENT_LOG_BAD_HANDLE` for invalid context/handle relationship | `ENT_LOG_IN_USE` when the handle is closing | `ENT_LOG_ALLOC_FAILED` when format expansion or line buffering fails | N/A | `ENT_LOG_FORMAT_FAILED` for format/prefix failures | N/A | `ENT_LOG_IO_FAILED` for write/flush failures |
+
+`ENT_LogGetBufferStats()` returns `ENT_LOG_BAD_ARGUMENT` for a NULL output
+pointer and otherwise follows the handle lifecycle errors above.
+`ENT_LogCtxGetBufferStats()` also rejects handles not owned by the supplied
+context with `ENT_LOG_BAD_HANDLE`.
 
 ## Context Handle Ownership
 

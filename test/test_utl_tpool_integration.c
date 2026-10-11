@@ -395,6 +395,73 @@ static int test_real_tpool_close_waits_for_running_task(void)
     return failures == 0 ? 0 : 1;
 }
 
+static int test_real_tpool_capacity_and_close_drain(void)
+{
+    UTL_TPOOL pool = NULL;
+    TPOOL_INTEGRATION_PROBE probe;
+    MSG_ID_T runningRet = -1;
+    MSG_ID_T queuedRet = -1;
+    MSG_ID_T rejectedRet = -1;
+    MSG_ID_T queuedSts = ENT_SYS_NORMAL;
+    MSG_ID_T rejectedSts = ENT_SYS_NORMAL;
+    int failures = 0;
+
+    if(expect_true(probe_init(&probe, 2) == ENT_SYS_NORMAL,
+                   "probe_init should create state for bounded queue and drain test") != 0)
+    {
+        return 1;
+    }
+    if(expect_true(UTL_TPoolInitEx(&pool, 1, 1) == ENT_SYS_NORMAL,
+                   "UTL_TPoolInitEx should create a one-worker pool with one pending slot") != 0)
+    {
+        probe_close(&probe);
+        return 1;
+    }
+    if(expect_true(UTL_TPoolAddTask(pool, slow_task_cb, slow_task_end_cb, &probe, &runningRet) == ENT_SYS_NORMAL,
+                   "bounded pool should accept the task that occupies its worker") != 0)
+    {
+        UTL_TPoolClose(&pool);
+        probe_close(&probe);
+        return 1;
+    }
+    if(expect_true(wait_for_slow_start(&probe, 3000) == 1,
+                   "running task should start before the bounded queue is filled") != 0)
+    {
+        UTL_TPoolClose(&pool);
+        probe_close(&probe);
+        return 1;
+    }
+
+    queuedSts = UTL_TPoolAddTask(pool, counting_task_cb, counting_task_end_cb, &probe, &queuedRet);
+    rejectedSts = UTL_TPoolAddTask(pool, counting_task_cb, counting_task_end_cb, &probe, &rejectedRet);
+    if(expect_true(queuedSts == ENT_SYS_NORMAL,
+                   "bounded pool should accept a task while one worker task is running") != 0 ||
+       expect_true(rejectedSts == ENT_TPL_QUEUE_FULL,
+                   "bounded pool should return a specific error when its pending slot is full") != 0)
+    {
+        failures++;
+    }
+
+    if(expect_true(UTL_TPoolClose(&pool) == ENT_SYS_NORMAL,
+                   "UTL_TPoolClose should drain accepted queued work before joining workers") != 0)
+    {
+        failures++;
+    }
+    if(failures == 0 && expect_true(probe.started == 2 &&
+                                    probe.completed == 2 &&
+                                    probe.end_completed == 2 &&
+                                    runningRet == 7 &&
+                                    queuedRet == 10 &&
+                                    rejectedRet == -1,
+                                    "close should run both accepted tasks and their end callbacks exactly once") != 0)
+    {
+        failures++;
+    }
+
+    probe_close(&probe);
+    return failures == 0 ? 0 : 1;
+}
+
 static int test_real_tpool_rejects_self_close_without_freeing_pool(void)
 {
     UTL_TPOOL pool = NULL;
@@ -506,6 +573,7 @@ int main(void)
 
     failures += test_real_tpool_executes_multiple_tasks();
     failures += test_real_tpool_close_waits_for_running_task();
+    failures += test_real_tpool_capacity_and_close_drain();
     failures += test_real_tpool_rejects_self_close_without_freeing_pool();
     failures += test_real_tpool_rejects_add_after_close();
 
