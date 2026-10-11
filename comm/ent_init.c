@@ -44,6 +44,7 @@
 #ifdef ENT_INIT_TEST_HOOKS
 extern void ENT_InitTestHandleCtxFreed(ENT_HANDLE_CTX_T* handleCtx);
 extern void ENT_InitTestHandleCallEnded(ENT_HANDLE_CTX_T* handleCtx);
+extern void ENT_InitTestLogServiceLockProbe(int acquired);
 #endif
 
 #if defined(ENT_INIT_TEST_HOOKS) && defined(__linux__)
@@ -72,6 +73,13 @@ static void iENT_RuntimeUnlock(void)
 {
     ReleaseSRWLockExclusive(&sEntRuntimeLock);
 }
+
+#ifdef ENT_INIT_TEST_HOOKS
+static bool iENT_RuntimeTryLock(void)
+{
+    return TryAcquireSRWLockExclusive(&sEntRuntimeLock) != 0;
+}
+#endif
 #else
 static pthread_mutex_t sEntRuntimeLock = PTHREAD_MUTEX_INITIALIZER;
 static void iENT_RuntimeLock(void)
@@ -83,6 +91,13 @@ static void iENT_RuntimeUnlock(void)
 {
     pthread_mutex_unlock(&sEntRuntimeLock);
 }
+
+#ifdef ENT_INIT_TEST_HOOKS
+static bool iENT_RuntimeTryLock(void)
+{
+    return pthread_mutex_trylock(&sEntRuntimeLock) == 0;
+}
+#endif
 #endif
 
 static unsigned int sEntLogUsers = 0;
@@ -213,7 +228,7 @@ static MSG_ID_T iENT_HandleClose(ENT_HANDLE* handle)
     prevCtx = iENT_RuntimeSetActiveCtx(&handleCtx->ctx);
     sts = iENT_CTXClose(&handleCtx->ctx);
     iENT_RuntimeSetActiveCtx(prevCtx);
-    if(sts == ENT_SYS_NORMAL)
+    if(!handleCtx->ctx.isInit)
     {
         handleCtx->magic = 0u;
 #ifdef ENT_INIT_TEST_HOOKS
@@ -416,7 +431,16 @@ static MSG_ID_T iENT_RuntimeAcquireLogService(void)
 {
     MSG_ID_T sts = ENT_SYS_NORMAL;
 
+#ifdef ENT_INIT_TEST_HOOKS
+    bool acquired = iENT_RuntimeTryLock();
+    ENT_InitTestLogServiceLockProbe(acquired ? 1 : 0);
+    if(!acquired)
+    {
+        iENT_RuntimeLock();
+    }
+#else
     iENT_RuntimeLock();
+#endif
     if(sEntLogUsers == 0)
     {
         sts = ENT_LogInit();
@@ -431,22 +455,22 @@ static MSG_ID_T iENT_RuntimeAcquireLogService(void)
     return ENT_SYS_NORMAL;
 }
 
-static void iENT_RuntimeReleaseLogService(void)
+static MSG_ID_T iENT_RuntimeReleaseLogService(void)
 {
-    bool closeLog = false;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
 
     iENT_RuntimeLock();
     if(sEntLogUsers > 0)
     {
         sEntLogUsers--;
-        closeLog = (sEntLogUsers == 0);
+        if(sEntLogUsers == 0)
+        {
+            /* Keep acquire serialized with the last release through close. */
+            sts = ENT_LogClose();
+        }
     }
     iENT_RuntimeUnlock();
-
-    if(closeLog)
-    {
-        ENT_LogClose();
-    }
+    return sts;
 }
 
 static inline void iENT_CTXResetRuntime(ENT_CTX* ctx)
@@ -473,32 +497,91 @@ static inline void iENT_CTXResetRuntime(ENT_CTX* ctx)
     ctx->isInit = false;
 }
 
-static inline void iENT_CTXReleaseLogHandles(ENT_CTX* ctx,
-                                             bool closeEntLog,
-                                             bool closeDefaultLog)
+static inline MSG_ID_T iENT_CTXReleaseLogHandles(ENT_CTX* ctx,
+                                                 bool closeEntLog,
+                                                 bool closeDefaultLog,
+                                                 bool* retryable)
 {
+    MSG_ID_T sts = ENT_SYS_NORMAL;
+    bool closed = false;
+
+    if(retryable != NULL)
+    {
+        *retryable = false;
+    }
+
     if(closeEntLog && ctx != NULL && ctx->entLog != NULL)
     {
-        ENT_LogCloseHandle(ctx->entLog);
+        sts = iENT_LogCloseHandleEx(ctx->entLog, &closed);
+        if(closed)
+        {
+            ctx->entLog = NULL;
+        }
+        else if(sts < 0 && retryable != NULL)
+        {
+            *retryable = true;
+        }
     }
 
-    if(closeDefaultLog)
+    if(closeDefaultLog && (sts >= 0 || closed))
     {
-        ENT_LogCloseHandle(NULL);
+        bool defaultClosed = false;
+        MSG_ID_T defaultSts = iENT_LogCloseHandleEx(NULL, &defaultClosed);
+        if(sts >= 0)
+        {
+            sts = defaultSts;
+        }
+        if(defaultSts < 0 && !defaultClosed && retryable != NULL)
+        {
+            *retryable = true;
+        }
     }
 
-    if(ctx != NULL)
-    {
-        ctx->entLog = NULL;
-    }
+    return sts;
 }
 
-static inline void iENT_CTXCloseLog(ENT_CTX* ctx,
-                                    bool closeEntLog,
-                                    bool closeDefaultLog)
+static inline MSG_ID_T iENT_CTXCloseLog(ENT_CTX* ctx,
+                                       bool closeEntLog,
+                                       bool closeDefaultLog)
 {
-    iENT_CTXReleaseLogHandles(ctx, closeEntLog, closeDefaultLog);
-    iENT_RuntimeReleaseLogService();
+    MSG_ID_T sts = ENT_SYS_NORMAL;
+    MSG_ID_T serviceSts = ENT_SYS_NORMAL;
+    bool retryable = false;
+
+    sts = iENT_CTXReleaseLogHandles(ctx, closeEntLog, closeDefaultLog, &retryable);
+    if(retryable)
+    {
+        return sts;
+    }
+
+    serviceSts = iENT_RuntimeReleaseLogService();
+    if(sts >= 0)
+    {
+        sts = serviceSts;
+    }
+    return sts;
+}
+
+static inline void iENT_CTXRollbackInitLog(ENT_CTX* ctx, MSG_ID_T initSts)
+{
+    MSG_ID_T cleanupSts = ENT_SYS_NORMAL;
+
+    if(ctx == NULL)
+    {
+        return;
+    }
+
+    /* Init rollback never enables buffered logging, so no writer thread can
+     * make handle close retryable before the context becomes active. */
+    cleanupSts = iENT_CTXCloseLog(ctx, true, false);
+    if(cleanupSts < 0 || ctx->entLog != NULL)
+    {
+        fprintf(stderr,
+                "ENT logger cleanup after initialization failure [%d] returned [%d],handle %s.\n",
+                initSts,
+                cleanupSts,
+                (ctx->entLog != NULL) ? "still open" : "closed");
+    }
 }
 
 static inline void iENT_CTXFree(ENT_CTX* ctx)
@@ -799,7 +882,7 @@ static MSG_ID_T iENT_CTXInit(ENT_CTX* ctx,
     if(sts<0)
     {
         fprintf(stderr,"ENT_LogInitHandle failed,sts [%d].\n",sts);
-        iENT_CTXCloseLog(ctx,false,false);
+        iENT_CTXRollbackInitLog(ctx, ENT_INIT_ENTITY_HANDLEFAIL);
         iENT_CTXFree(ctx);
         iENT_CTXResetRuntime(ctx);
         return ENT_INIT_ENTITY_HANDLEFAIL;
@@ -808,7 +891,7 @@ static MSG_ID_T iENT_CTXInit(ENT_CTX* ctx,
     if(sts < 0)
     {
         fprintf(stderr,"ENT_LogSetOption failed,sts [%d].\n",sts);
-        iENT_CTXCloseLog(ctx,true,false);
+        iENT_CTXRollbackInitLog(ctx, ENT_INIT_ENTITY_LEVELFAIL);
         iENT_CTXFree(ctx);
         iENT_CTXResetRuntime(ctx);
         return ENT_INIT_ENTITY_LEVELFAIL;
@@ -818,8 +901,8 @@ static MSG_ID_T iENT_CTXInit(ENT_CTX* ctx,
     if(sts<0)
     {
         IENT_LOG_ERROR("UTL_LockInit failed,sts [%d]\n",sts);
+        iENT_CTXRollbackInitLog(ctx, ENT_INIT_LOCK_INITFAIL);
         iENT_CTXFree(ctx);
-        iENT_CTXCloseLog(ctx,true,false);
         iENT_CTXResetRuntime(ctx);
         return ENT_INIT_LOCK_INITFAIL;
     }
@@ -831,7 +914,7 @@ static MSG_ID_T iENT_CTXInit(ENT_CTX* ctx,
         iENT_CTXFree(ctx);
         UTL_LockClose(&ctx->entLock);
         ctx->entLock = NULL;
-        iENT_CTXCloseLog(ctx,true,false);
+        iENT_CTXRollbackInitLog(ctx, ENT_INIT_CV_INITFAIL);
         iENT_CTXResetRuntime(ctx);
         return ENT_INIT_CV_INITFAIL;
     }
@@ -886,6 +969,7 @@ static MSG_ID_T iENT_CTXReleaseRtMemory(ENT_CTX* ctx)
 static MSG_ID_T iENT_CTXClose(ENT_CTX* ctx)
 {
     MSG_ID_T sts = ENT_SYS_NORMAL;
+    MSG_ID_T logSts = ENT_SYS_NORMAL;
 
     if(ctx == NULL)
     {
@@ -916,17 +1000,22 @@ static MSG_ID_T iENT_CTXClose(ENT_CTX* ctx)
         return sts;
     }
 
+    logSts = iENT_CTXCloseLog(ctx, true, false);
+    if(logSts < 0 && ctx->entLog != NULL)
+    {
+        /* The logger still owns resources; preserve the live context for retry. */
+        return logSts;
+    }
+
     UTL_CVClose(&ctx->entCV);
     ctx->entCV = NULL;
 
     UTL_LockClose(&ctx->entLock);
     ctx->entLock = NULL;
 
-    iENT_CTXCloseLog(ctx, true, false);
-
     iENT_CTXFree(ctx);
     iENT_CTXResetRuntime(ctx);
-    return ENT_SYS_NORMAL;
+    return logSts;
 }
 
 static MSG_ID_T iENT_CTXRun(ENT_CTX* ctx)

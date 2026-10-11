@@ -44,11 +44,32 @@ static void test_flag_store(volatile int* value, int state)
     __sync_lock_test_and_set(value, state);
 #endif
 }
+static int test_flag_add(volatile int* value, int delta)
+{
+#ifdef _WIN32
+    return (int)InterlockedExchangeAdd((volatile LONG*)value, (LONG)delta) + delta;
+#else
+    return __sync_add_and_fetch(value, delta);
+#endif
+}
 static volatile int s_close_thread_started = 0;
 static volatile int s_close_wait_entered = 0;
+static volatile int s_block_log_close = 0;
+static volatile int s_log_close_entered = 0;
+static volatile int s_log_close_released = 0;
+static volatile int s_record_log_reacquire = 0;
+static volatile int s_log_service_event_counter = 0;
+static volatile int s_log_service_close_return_order = 0;
+static volatile int s_log_service_reacquire_order = 0;
+static volatile int s_log_init_during_close = 0;
+static volatile int s_log_service_lock_probe_complete = 0;
+static volatile int s_log_service_lock_probe_acquired = -1;
 static int s_log_init_calls = 0;
 static int s_log_close_handle_calls = 0;
 static int s_log_close_calls = 0;
+static int s_fail_log_close = 0;
+static int s_log_close_handle_status = 0;
+static int s_log_close_handle_completed = 1;
 static int s_lock_close_calls = 0;
 static int s_cv_close_calls = 0;
 static int s_fail_log_init = 0;
@@ -168,6 +189,22 @@ static void iENT_TestSleepMs(unsigned int ms)
 #endif
 }
 
+static int wait_for_test_flag(volatile int* flag, unsigned int timeoutMs)
+{
+    unsigned int elapsed = 0;
+
+    while(elapsed < timeoutMs)
+    {
+        if(test_flag_load(flag))
+        {
+            return 1;
+        }
+        iENT_TestSleepMs(1);
+        elapsed++;
+    }
+    return test_flag_load(flag);
+}
+
 static void wait_until_blocking_wait_entered(void)
 {
     while(!test_flag_load(&s_block_wait_entered))
@@ -211,6 +248,9 @@ static void reset_close_counters(void)
 static void reset_log_failures(void)
 {
     s_fail_log_init = 0;
+    s_fail_log_close = 0;
+    s_log_close_handle_status = 0;
+    s_log_close_handle_completed = 1;
     s_fail_log_init_handle_call = 0;
     s_log_init_calls = 0;
     s_log_init_handle_calls = 0;
@@ -221,6 +261,16 @@ static void reset_log_failures(void)
     s_event_counter = 0;
     s_log_error_order = 0;
     s_log_close_order = 0;
+    test_flag_store(&s_block_log_close, 0);
+    test_flag_store(&s_log_close_entered, 0);
+    test_flag_store(&s_log_close_released, 0);
+    test_flag_store(&s_record_log_reacquire, 0);
+    test_flag_store(&s_log_service_event_counter, 0);
+    test_flag_store(&s_log_service_close_return_order, 0);
+    test_flag_store(&s_log_service_reacquire_order, 0);
+    test_flag_store(&s_log_init_during_close, 0);
+    test_flag_store(&s_log_service_lock_probe_complete, 0);
+    test_flag_store(&s_log_service_lock_probe_acquired, -1);
     s_ent_log_at_lock_init = NULL;
     s_last_log_init_handle_module = NULL;
     s_last_log_init_handle_path = NULL;
@@ -304,6 +354,12 @@ void ENT_InitTestHandleCtxFreed(ENT_HANDLE_CTX_T* handleCtx)
     }
     s_handle_ctx_free_calls += 1;
 }
+
+void ENT_InitTestLogServiceLockProbe(int acquired)
+{
+    test_flag_store(&s_log_service_lock_probe_acquired, acquired);
+    test_flag_store(&s_log_service_lock_probe_complete, 1);
+}
 #endif
 
 static ENT_HANDLE make_bad_magic_handle(void)
@@ -333,10 +389,22 @@ typedef struct TEST_CLOSE_THREAD_CTX
     MSG_ID_T    ret;
 } TEST_CLOSE_THREAD_CTX;
 
+typedef struct TEST_INIT_THREAD_CTX
+{
+    ENT_HANDLE* handle;
+    const char* name;
+    const char* workPath;
+    MSG_ID_T    ret;
+    volatile int started;
+    volatile int complete;
+} TEST_INIT_THREAD_CTX;
+
 #ifdef _WIN32
 static DWORD WINAPI close_thread_proc(void* arg);
+static DWORD WINAPI init_thread_proc(void* arg);
 #else
 static void* close_thread_proc(void* arg);
+static void* init_thread_proc(void* arg);
 #endif
 
 #ifdef _WIN32
@@ -382,6 +450,32 @@ static void* close_thread_proc(void* arg)
 #endif
 }
 
+#ifdef _WIN32
+static DWORD WINAPI init_thread_proc(void* arg)
+#else
+static void* init_thread_proc(void* arg)
+#endif
+{
+    TEST_INIT_THREAD_CTX* ctx = (TEST_INIT_THREAD_CTX*)arg;
+
+    if(ctx != NULL)
+    {
+        test_flag_store(&ctx->started, 1);
+        ctx->ret = ENT_Init(ctx->handle,
+                            ctx->name,
+                            ctx->workPath,
+                            LOG_LEV_WARN_E,
+                            ENT_MODE_NORMAL_E);
+        test_flag_store(&ctx->complete, 1);
+    }
+
+#ifdef _WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
 static int start_test_thread(TEST_THREAD* th, TEST_RUN_THREAD_CTX* ctx)
 {
 #ifdef _WIN32
@@ -409,6 +503,21 @@ static int start_close_test_thread(TEST_THREAD* th, TEST_CLOSE_THREAD_CTX* ctx)
     return (*th != NULL) ? 0 : -1;
 #else
     return pthread_create(th, NULL, close_thread_proc, ctx);
+#endif
+}
+
+static int start_init_test_thread(TEST_THREAD* th, TEST_INIT_THREAD_CTX* ctx)
+{
+#ifdef _WIN32
+    if(th == NULL)
+    {
+        return -1;
+    }
+
+    *th = CreateThread(NULL, 0, init_thread_proc, ctx, 0, NULL);
+    return (*th != NULL) ? 0 : -1;
+#else
+    return pthread_create(th, NULL, init_thread_proc, ctx);
 #endif
 }
 
@@ -452,6 +561,17 @@ int munlockall(void)
 MSG_ID_T ENT_LogInit(void)
 {
     s_log_init_calls++;
+    if(test_flag_load(&s_record_log_reacquire))
+    {
+        test_flag_store(&s_log_service_reacquire_order,
+                        test_flag_add(&s_log_service_event_counter, 1));
+        if(test_flag_load(&s_block_log_close) &&
+           test_flag_load(&s_log_close_entered) &&
+           !test_flag_load(&s_log_close_released))
+        {
+            test_flag_store(&s_log_init_during_close, 1);
+        }
+    }
     if(s_fail_log_init != 0)
     {
         return s_fail_log_init;
@@ -463,7 +583,17 @@ MSG_ID_T ENT_LogClose(void)
 {
     s_log_close_calls++;
     s_log_close_order = ++s_event_counter;
-    return 0;
+    if(test_flag_load(&s_block_log_close))
+    {
+        test_flag_store(&s_log_close_entered, 1);
+        while(!test_flag_load(&s_log_close_released))
+        {
+            iENT_TestSleepMs(1);
+        }
+    }
+    test_flag_store(&s_log_service_close_return_order,
+                    test_flag_add(&s_log_service_event_counter, 1));
+    return s_fail_log_close;
 }
 
 MSG_ID_T ENT_LogInitHandle(ENT_LOG* pLogHandle, const char* moduleName, const char* logPath)
@@ -522,6 +652,25 @@ MSG_ID_T ENT_LogCloseHandle(ENT_LOG logHandle)
         s_second_closed_log_handle = logHandle;
     }
     return 0;
+}
+
+MSG_ID_T iENT_LogCloseHandleEx(ENT_LOG logHandle, bool* closed)
+{
+    s_last_closed_log_handle = logHandle;
+    s_log_close_handle_calls++;
+    if(s_log_close_handle_calls == 1)
+    {
+        s_first_closed_log_handle = logHandle;
+    }
+    else if(s_log_close_handle_calls == 2)
+    {
+        s_second_closed_log_handle = logHandle;
+    }
+    if(closed != NULL)
+    {
+        *closed = (s_log_close_handle_completed != 0);
+    }
+    return s_log_close_handle_status;
 }
 
 MSG_ID_T ENT_LogRaw(ENT_LOG logHandle, const char* format, ...)
@@ -1344,6 +1493,120 @@ static int test_ent_close_frees_handle_context(void)
                        "ENT_Close should close the entity log handle that was attached to the context");
 }
 
+static int test_ent_close_retries_logger_handle_close_failure(void)
+{
+    ENT_HANDLE handle = NULL;
+    MSG_ID_T closeSts = ENT_SYS_NORMAL;
+    int failed = 0;
+
+    reset_close_counters();
+    reset_log_failures();
+    if(expect_true(ENT_Init(&handle, "close_retry", "/tmp/close_retry", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
+                   "ENT_Init should succeed before testing retryable logger close failure") != 0)
+    {
+        return 1;
+    }
+
+    s_log_close_handle_status = ENT_LOG_THREAD_FAILED;
+    s_log_close_handle_completed = 0;
+    closeSts = ENT_Close(&handle);
+    if(expect_true(closeSts == ENT_LOG_THREAD_FAILED && handle != NULL,
+                   "retryable logger close failure should be returned with the runtime handle retained") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+    if(expect_true(((ENT_HANDLE_CTX_T*)handle)->ctx.entLog != NULL &&
+                   ((ENT_HANDLE_CTX_T*)handle)->ctx.entLock != NULL &&
+                   ((ENT_HANDLE_CTX_T*)handle)->ctx.entCV != NULL &&
+                   s_cv_close_calls == 0 && s_lock_close_calls == 0 && s_log_close_calls == 0,
+                   "retryable logger close failure should preserve its handle, synchronization, and service reference") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    s_log_close_handle_status = ENT_SYS_NORMAL;
+    s_log_close_handle_completed = 1;
+    if(expect_true(ENT_Close(&handle) == ENT_SYS_NORMAL && handle == NULL,
+                   "ENT_Close should complete after a retryable logger close succeeds") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+    if(expect_true(s_log_close_handle_calls == 2 && s_log_close_calls == 1,
+                   "retry should close the logger handle and service exactly once after success") != 0)
+    {
+        failed = 1;
+    }
+
+CLEANUP:
+    s_log_close_handle_status = ENT_SYS_NORMAL;
+    s_log_close_handle_completed = 1;
+    close_handle_if_needed(&handle);
+    return failed;
+}
+
+static int test_ent_close_reports_completed_logger_io_failure(void)
+{
+    ENT_HANDLE handle = NULL;
+    MSG_ID_T closeSts = ENT_SYS_NORMAL;
+    int failed = 0;
+
+    reset_close_counters();
+    reset_log_failures();
+    if(expect_true(ENT_Init(&handle, "close_io", "/tmp/close_io", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
+                   "ENT_Init should succeed before testing completed logger I/O failure") != 0)
+    {
+        return 1;
+    }
+
+    s_log_close_handle_status = ENT_LOG_IO_FAILED;
+    s_log_close_handle_completed = 1;
+    closeSts = ENT_Close(&handle);
+    if(expect_true(closeSts == ENT_LOG_IO_FAILED && handle == NULL,
+                   "completed logger I/O failure should be reported while clearing the released runtime handle") != 0)
+    {
+        failed = 1;
+    }
+    if(expect_true(s_log_close_calls == 1 && s_cv_close_calls == 1 && s_lock_close_calls == 1,
+                   "completed logger I/O failure should still release the service and runtime synchronization") != 0)
+    {
+        failed = 1;
+    }
+    return failed;
+}
+
+static int test_ent_close_reports_log_service_close_failure(void)
+{
+    ENT_HANDLE handle = NULL;
+    MSG_ID_T closeSts = ENT_SYS_NORMAL;
+    int failed = 0;
+
+    reset_close_counters();
+    reset_log_failures();
+    if(expect_true(ENT_Init(&handle, "service_close", "/tmp/service_close", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
+                   "ENT_Init should succeed before testing logger service close failure") != 0)
+    {
+        return 1;
+    }
+
+    s_fail_log_close = ENT_LOG_IN_USE;
+    closeSts = ENT_Close(&handle);
+    if(expect_true(closeSts == ENT_LOG_IN_USE && handle == NULL,
+                   "logger service close failure should be returned after the runtime handle is released") != 0)
+    {
+        failed = 1;
+    }
+    if(expect_true(s_log_close_handle_calls == 1 && s_log_close_calls == 1 &&
+                   s_cv_close_calls == 1 && s_lock_close_calls == 1,
+                   "service close failure should not skip completed handle cleanup") != 0)
+    {
+        failed = 1;
+    }
+    return failed;
+}
+
 static int test_ent_init_closes_logging_when_entity_log_level_setup_fails(void)
 {
     ENT_HANDLE handle = NULL;
@@ -1370,6 +1633,48 @@ static int test_ent_init_closes_logging_when_entity_log_level_setup_fails(void)
 
     return expect_true(s_log_close_calls == 1,
                        "ENT_Init should close logging when entity log setup fails");
+}
+
+static int test_ent_init_preserves_primary_failure_after_logger_cleanup_error(void)
+{
+    ENT_HANDLE handle = NULL;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
+    int failed = 0;
+
+    reset_close_counters();
+    reset_log_failures();
+    s_fail_log_set_option_call = 1;
+    s_log_close_handle_status = ENT_LOG_IO_FAILED;
+    s_log_close_handle_completed = 1;
+
+    sts = ENT_Init(&handle, "rollback_cleanup", "/tmp/rollback_cleanup", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E);
+    if(expect_true(sts == ENT_INIT_ENTITY_LEVELFAIL && handle == NULL,
+                   "ENT_Init should preserve its primary setup failure when logger cleanup reports a terminal error") != 0)
+    {
+        failed = 1;
+    }
+    if(expect_true(s_log_close_handle_calls == 1 && s_log_close_calls == 1,
+                   "init rollback should close the entity handle and release its service reference despite cleanup I/O error") != 0)
+    {
+        failed = 1;
+    }
+
+    s_log_close_handle_status = ENT_SYS_NORMAL;
+    if(expect_true(ENT_Init(&handle, "rollback_reopen", "/tmp/rollback_reopen", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL &&
+                   handle != NULL && s_log_init_calls == 2,
+                   "a later init should reacquire the logger service after rollback cleanup") != 0)
+    {
+        failed = 1;
+    }
+    if(handle != NULL)
+    {
+        if(expect_true(ENT_Close(&handle) == ENT_SYS_NORMAL && handle == NULL && s_log_close_calls == 2,
+                       "the later runtime should close its logger service without a stranded rollback reference") != 0)
+        {
+            failed = 1;
+        }
+    }
+    return failed;
 }
 
 static int test_ent_init_logs_before_tearing_down_logging_when_lock_init_fails(void)
@@ -2015,6 +2320,139 @@ CLEANUP:
     return failed;
 }
 
+static int test_runtime_log_service_close_serializes_reacquire(void)
+{
+    ENT_HANDLE handleA = NULL;
+    ENT_HANDLE handleB = NULL;
+    TEST_CLOSE_THREAD_CTX closeCtx;
+    TEST_INIT_THREAD_CTX initCtx;
+    TEST_THREAD closeThread;
+    TEST_THREAD initThread;
+    int closeThreadStarted = 0;
+    int initThreadStarted = 0;
+    int failed = 0;
+
+    memset(&gEntCtx, 0, sizeof(gEntCtx));
+    memset(&closeCtx, 0, sizeof(closeCtx));
+    memset(&initCtx, 0, sizeof(initCtx));
+    reset_close_counters();
+    reset_log_failures();
+    reset_wait_capture();
+
+    if(expect_true(ENT_Init(&handleA, "race_a", "/tmp/race_a", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_SYS_NORMAL,
+                   "first runtime should initialize before testing service release race") != 0)
+    {
+        return 1;
+    }
+
+    test_flag_store(&s_log_close_entered, 0);
+    test_flag_store(&s_log_close_released, 0);
+    test_flag_store(&s_log_service_close_return_order, 0);
+    test_flag_store(&s_log_service_reacquire_order, 0);
+    test_flag_store(&s_log_init_during_close, 0);
+    test_flag_store(&s_log_service_lock_probe_complete, 0);
+    test_flag_store(&s_log_service_lock_probe_acquired, -1);
+    test_flag_store(&s_record_log_reacquire, 1);
+    test_flag_store(&s_block_log_close, 1);
+
+    closeCtx.handle = &handleA;
+    closeCtx.ret = ENT_SYS_NORMAL;
+    if(expect_true(start_close_test_thread(&closeThread, &closeCtx) == 0,
+                   "last runtime close thread should start") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+    closeThreadStarted = 1;
+    if(expect_true(wait_for_test_flag(&s_log_close_entered, 5000),
+                   "last runtime close should reach the blocked logger service close") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    initCtx.handle = &handleB;
+    initCtx.name = "race_b";
+    initCtx.workPath = "/tmp/race_b";
+    initCtx.ret = ENT_SYS_NORMAL;
+    if(expect_true(start_init_test_thread(&initThread, &initCtx) == 0,
+                   "concurrent runtime init thread should start") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+    initThreadStarted = 1;
+    if(expect_true(wait_for_test_flag(&initCtx.started, 5000),
+                   "concurrent runtime init thread should begin") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+    if(expect_true(wait_for_test_flag(&s_log_service_lock_probe_complete, 5000),
+                   "concurrent runtime init should probe the logger service lock") != 0)
+    {
+        failed = 1;
+        goto CLEANUP;
+    }
+
+    if(expect_true(test_flag_load(&s_log_service_lock_probe_acquired) == 0 &&
+                   test_flag_load(&s_log_service_reacquire_order) == 0 &&
+                   !test_flag_load(&initCtx.complete),
+                   "new runtime must observe the held service lock and wait for close to complete") != 0)
+    {
+        failed = 1;
+    }
+
+CLEANUP:
+    test_flag_store(&s_log_close_released, 1);
+    if(closeThreadStarted && expect_true(join_test_thread(closeThread) == 0,
+                                         "last runtime close thread should join") != 0)
+    {
+        failed = 1;
+    }
+    if(initThreadStarted && expect_true(join_test_thread(initThread) == 0,
+                                        "concurrent runtime init thread should join") != 0)
+    {
+        failed = 1;
+    }
+    test_flag_store(&s_block_log_close, 0);
+    test_flag_store(&s_record_log_reacquire, 0);
+
+    if(closeThreadStarted)
+    {
+        if(expect_true(closeCtx.ret == ENT_SYS_NORMAL && handleA == NULL,
+                       "last runtime should close successfully before the new runtime initializes") != 0)
+        {
+            failed = 1;
+        }
+    }
+    if(initThreadStarted)
+    {
+        if(expect_true(initCtx.ret == ENT_SYS_NORMAL && handleB != NULL,
+                       "concurrent runtime should initialize after logger service close") != 0)
+        {
+            failed = 1;
+        }
+        if(expect_true(test_flag_load(&s_log_init_during_close) == 0 &&
+                       test_flag_load(&s_log_service_reacquire_order) >
+                           test_flag_load(&s_log_service_close_return_order),
+                       "logger service reinitialization should occur after its prior close returns") != 0)
+        {
+            failed = 1;
+        }
+    }
+
+    if(handleA != NULL)
+    {
+        ENT_Close(&handleA);
+    }
+    if(handleB != NULL)
+    {
+        ENT_Close(&handleB);
+    }
+    return failed;
+}
+
 static int test_handle_second_instance_lock_init_failure_keeps_first_alive(void)
 {
     ENT_HANDLE handleA = NULL;
@@ -2229,8 +2667,12 @@ int main(void)
     failures += test_ent_run_rejects_uninitialized_context();
     failures += test_ent_run_waits_on_cv_with_lock();
     failures += test_ent_close_frees_handle_context();
+    failures += test_ent_close_retries_logger_handle_close_failure();
+    failures += test_ent_close_reports_completed_logger_io_failure();
+    failures += test_ent_close_reports_log_service_close_failure();
     failures += test_ent_close_stops_running_handle();
     failures += test_ent_init_closes_logging_when_entity_log_level_setup_fails();
+    failures += test_ent_init_preserves_primary_failure_after_logger_cleanup_error();
     failures += test_ent_init_logs_before_tearing_down_logging_when_lock_init_fails();
     failures += test_ent_init_builds_paths_without_trailing_separator();
     failures += test_ent_init_builds_paths_with_trailing_separator();
@@ -2249,6 +2691,7 @@ int main(void)
     failures += test_ent_close_waits_for_running_worker_before_free();
     failures += test_handle_instance_uses_isolated_context();
     failures += test_handle_instances_can_run_and_close_independently();
+    failures += test_runtime_log_service_close_serializes_reacquire();
     failures += test_handle_second_instance_lock_init_failure_keeps_first_alive();
     failures += test_handle_second_instance_log_option_failure_keeps_first_alive();
 

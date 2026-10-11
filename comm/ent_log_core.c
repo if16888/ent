@@ -1266,13 +1266,18 @@ END_OF_ROUTINE:
     return sts;
 }
 
-MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
+MSG_ID_T iENT_LogCloseHandleEx(ENT_LOG logHandle, bool* closed)
 {
     MSG_ID_T sts = ENT_SYS_NORMAL;
     MSG_ID_T closeIoStatus = ENT_SYS_NORMAL;
     bool closeStarted = false;
     bool closeCompleted = false;
     bool globalLocked = false;
+
+    if(closed != NULL)
+    {
+        *closed = false;
+    }
 
     if(sLogMutexInit == false)
     {
@@ -1380,6 +1385,10 @@ MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
     iENT_LogStateSet(log, ENT_LOG_HANDLE_CLOSED_E);
     iENT_LogHandleUnlinkLocked(log);
     closeCompleted = true;
+    if(closed != NULL)
+    {
+        *closed = true;
+    }
 #ifdef _WIN32
     DeleteCriticalSection(&log->cs);
     DeleteCriticalSection(&log->ioCs);
@@ -1425,4 +1434,9 @@ END_OF_ROUTINE:
     iENT_LogGlobalUnlock();
 
     return sts;
+}
+
+MSG_ID_T iENT_LogCloseHandle(ENT_LOG logHandle)
+{
+    return iENT_LogCloseHandleEx(logHandle, NULL);
 }
