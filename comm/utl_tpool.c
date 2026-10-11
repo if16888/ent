@@ -50,6 +50,7 @@ typedef struct UTL_TPOOL_CTX_TAG
     BOOL                      acceptingTasks;
     BOOL                      closing;
     BOOL                      workerFailed;
+    BOOL                      closeAttemptActive;
     UTL_TPOOL_STATE_E         state;
     int                       activeOps;
     int                       maxPendingTasks;
@@ -322,8 +323,28 @@ static MSG_ID_T iUTL_TPoolBeginClose(UTL_TPOOL pool, UTL_TPOOL_CTX** outPool)
         iUTL_TPoolRegistryUnlock();
         return ENT_TPL_BAD_ARGUMENT;
     }
-    if(poolCtx->state == UTL_TPOOL_STATE_CLOSING_E || poolCtx->state == UTL_TPOOL_STATE_CLOSED_E)
+    if(poolCtx->state == UTL_TPOOL_STATE_CLOSED_E)
     {
+        iUTL_TPoolRegistryUnlock();
+        return ENT_SYS_NORMAL;
+    }
+    if(poolCtx->state == UTL_TPOOL_STATE_CLOSING_E)
+    {
+        UTL_LockEnter(poolCtx->taskLock);
+        if(iUTL_TPoolIsCurrentWorkerLocked(poolCtx))
+        {
+            UTL_LockLeave(poolCtx->taskLock);
+            iUTL_TPoolRegistryUnlock();
+            return ENT_THRD_IN_USE;
+        }
+        UTL_LockLeave(poolCtx->taskLock);
+        if(poolCtx->closeAttemptActive)
+        {
+            iUTL_TPoolRegistryUnlock();
+            return ENT_THRD_IN_USE;
+        }
+        poolCtx->closeAttemptActive = TRUE;
+        *outPool = poolCtx;
         iUTL_TPoolRegistryUnlock();
         return ENT_SYS_NORMAL;
     }
@@ -338,9 +359,26 @@ static MSG_ID_T iUTL_TPoolBeginClose(UTL_TPOOL pool, UTL_TPOOL_CTX** outPool)
     UTL_LockLeave(poolCtx->taskLock);
 
     poolCtx->state = UTL_TPOOL_STATE_CLOSING_E;
+    poolCtx->closeAttemptActive = TRUE;
     *outPool = poolCtx;
     iUTL_TPoolRegistryUnlock();
     return ENT_SYS_NORMAL;
+}
+
+static void iUTL_TPoolEndCloseAttempt(UTL_TPOOL_CTX* poolCtx)
+{
+    if(poolCtx == NULL)
+    {
+        return;
+    }
+
+    iUTL_TPoolRegistryLock();
+    if(iUTL_TPoolRegistryContainsLocked(poolCtx) &&
+       poolCtx->state == UTL_TPOOL_STATE_CLOSING_E)
+    {
+        poolCtx->closeAttemptActive = FALSE;
+    }
+    iUTL_TPoolRegistryUnlock();
 }
 
 static void iUTL_TPoolWaitActiveOps(UTL_TPOOL_CTX* poolCtx)
@@ -364,11 +402,11 @@ static void iUTL_TPoolWaitActiveOps(UTL_TPOOL_CTX* poolCtx)
     } while(activeOps > 0);
 }
 
-static void iUTL_TPoolAbortStartedWorker(UTL_TPOOL_CTX* poolCtx, UTL_TPOOL_THREAD* thCtx)
+static MSG_ID_T iUTL_TPoolAbortStartedWorker(UTL_TPOOL_CTX* poolCtx, UTL_TPOOL_THREAD* thCtx)
 {
     if(poolCtx == NULL || thCtx == NULL)
     {
-        return;
+        return ENT_TPL_BAD_ARGUMENT;
     }
 
     UTL_LockEnter(poolCtx->taskLock);
@@ -376,7 +414,59 @@ static void iUTL_TPoolAbortStartedWorker(UTL_TPOOL_CTX* poolCtx, UTL_TPOOL_THREA
     UTL_CVWakeAll(poolCtx->taskEmptyCV);
     UTL_LockLeave(poolCtx->taskLock);
 
-    ENT_ThreadWaitById(&thCtx->thId, poolCtx->thHandle, 0);
+    return ENT_ThreadWaitById(&thCtx->thId, poolCtx->thHandle, 0);
+}
+
+static MSG_ID_T iUTL_TPoolCleanupInitFailure(UTL_TPOOL_CTX* poolCtx,
+                                            UTL_TPOOL_THREAD* extraThread)
+{
+    MSG_ID_T   sts = 0;
+    DLL_D_HDR* curr = NULL;
+    DLL_D_HDR* tmp = NULL;
+    UTL_TPOOL_THREAD* thCtx = NULL;
+
+    if(poolCtx == NULL)
+    {
+        return ENT_TPL_BAD_ARGUMENT;
+    }
+
+    UTL_LockEnter(poolCtx->taskLock);
+    poolCtx->closing = TRUE;
+    poolCtx->acceptingTasks = FALSE;
+    curr = poolCtx->threadHeader.fw_ptr;
+    while(curr != &poolCtx->threadHeader)
+    {
+        thCtx = (UTL_TPOOL_THREAD*)curr;
+        thCtx->taskType = TASK_E_TYPE_QUIT;
+        curr = curr->fw_ptr;
+    }
+    if(extraThread != NULL)
+    {
+        extraThread->taskType = TASK_E_TYPE_QUIT;
+    }
+    UTL_CVWakeAll(poolCtx->taskEmptyCV);
+    UTL_LockLeave(poolCtx->taskLock);
+
+    /* Keep every worker context and synchronization object alive unless the
+     * thread service confirms that all started workers have been joined. */
+    sts = ENT_ThreadClose(poolCtx->thHandle);
+    if(sts < 0)
+    {
+        IENT_LOG_ERROR("ENT_ThreadClose failed during pool init rollback,sts [%d]\n",sts);
+        return sts;
+    }
+    poolCtx->thHandle = NULL;
+
+    while(UTL_DllRemHead(&poolCtx->threadHeader, &tmp) == ENT_SYS_NORMAL)
+    {
+        free(tmp);
+    }
+    free(extraThread);
+    UTL_CVClose(&poolCtx->taskEmptyCV);
+    UTL_LockClose(&poolCtx->recycleLock);
+    UTL_LockClose(&poolCtx->taskLock);
+    free(poolCtx);
+    return ENT_SYS_NORMAL;
 }
 
 static DWORD iUTL_TPoolTaskPro(void* data)
@@ -626,7 +716,13 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolInitEx(UTL_TPOOL* pool,int num,int maxPendingTasks
         }
         if(sts < 0)
         {
-            iUTL_TPoolAbortStartedWorker(poolCtx, thCtx);
+            MSG_ID_T waitSts = iUTL_TPoolAbortStartedWorker(poolCtx, thCtx);
+            if(waitSts < 0)
+            {
+                IENT_LOG_ERROR("worker join failed during pool init,sts [%d]\n",waitSts);
+                (void)iUTL_TPoolCleanupInitFailure(poolCtx, thCtx);
+                return ENT_TPL_WORKER_CREATEFAIL;
+            }
             free(thCtx);
             continue;
         }
@@ -637,20 +733,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolInitEx(UTL_TPOOL* pool,int num,int maxPendingTasks
     UTL_LockLeave(poolCtx->taskLock);
     if(sts <= 0)
     {
-        while(UTL_DllRemHead(&poolCtx->threadHeader, &tmp) == ENT_SYS_NORMAL)
-        {
-            thCtx = (UTL_TPOOL_THREAD*)tmp;
-            if(thCtx->thId)
-            {
-                (void)ENT_ThreadWaitById(&thCtx->thId, poolCtx->thHandle, 0);
-            }
-            free(thCtx);
-        }
-        UTL_CVClose(&poolCtx->taskEmptyCV);
-        UTL_LockClose(&poolCtx->recycleLock);
-        UTL_LockClose(&poolCtx->taskLock);
-        ENT_ThreadClose(poolCtx->thHandle);
-        free(poolCtx);
+        (void)iUTL_TPoolCleanupInitFailure(poolCtx, NULL);
         return ENT_TPL_WORKER_CREATEFAIL;
     }
 
@@ -712,15 +795,36 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolClose(UTL_TPOOL* pool)
     UTL_CVWakeAll(poolCtx->taskEmptyCV);
     UTL_LockLeave(poolCtx->taskLock);
 
-    while((sts = UTL_DllRemHead(&poolCtx->threadHeader,&tmp))==0)
+    for(;;)
     {
-        thDb = (UTL_TPOOL_THREAD*)tmp;
+        UTL_LockEnter(poolCtx->taskLock);
+        if(poolCtx->threadHeader.fw_ptr == &poolCtx->threadHeader)
+        {
+            UTL_LockLeave(poolCtx->taskLock);
+            break;
+        }
+        thDb = (UTL_TPOOL_THREAD*)poolCtx->threadHeader.fw_ptr;
+        UTL_LockLeave(poolCtx->taskLock);
+
         if(thDb->thId)
         {
             sts = ENT_ThreadWaitById(&thDb->thId,poolCtx->thHandle,0);
             IENT_LOG_WARN("pool remove thread sts [%d]\n",sts);
+            if(sts < 0)
+            {
+                iUTL_TPoolEndCloseAttempt(poolCtx);
+                return sts;
+            }
         }
 
+        UTL_LockEnter(poolCtx->taskLock);
+        sts = UTL_DllRemCurr((DLL_D_HDR*)thDb, &tmp);
+        UTL_LockLeave(poolCtx->taskLock);
+        if(sts < 0)
+        {
+            iUTL_TPoolEndCloseAttempt(poolCtx);
+            return sts;
+        }
         free(thDb);
     }
 
@@ -769,16 +873,24 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolClose(UTL_TPOOL* pool)
     }
     UTL_LockLeave(poolCtx->recycleLock);
 
+    sts = ENT_ThreadClose(poolCtx->thHandle);
+    if(sts < 0)
+    {
+        iUTL_TPoolEndCloseAttempt(poolCtx);
+        return sts;
+    }
+    poolCtx->thHandle = NULL;
+
     iUTL_TPoolRegistryLock();
     iUTL_TPoolRegistryRemoveLocked(poolCtx);
     poolCtx->state = UTL_TPOOL_STATE_CLOSED_E;
+    poolCtx->closeAttemptActive = FALSE;
     poolCtx->tag = 0;
     iUTL_TPoolRegistryUnlock();
 
     UTL_CVClose(&poolCtx->taskEmptyCV);
     UTL_LockClose(&poolCtx->recycleLock);
     UTL_LockClose(&poolCtx->taskLock);
-    ENT_ThreadClose(poolCtx->thHandle);
 
     free(poolCtx);
     *pool = NULL;

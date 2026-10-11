@@ -75,6 +75,12 @@ Current semantics:
 - workers are woken and joined;
 - the pool handle must not be reused after close returns.
 
+If joining a worker or closing the underlying thread service returns an error,
+`UTL_TPoolClose()` returns that error and leaves the caller's pool handle valid
+in the `CLOSING` state. Submissions remain rejected; call
+`UTL_TPoolClose()` again to retry the unfinished cleanup. A second close that
+overlaps an active close attempt returns `ENT_THRD_IN_USE`.
+
 Close waits until all work accepted before shutdown has completed. Like the
 existing running-task behavior, this wait has no timeout: a task callback or
 end callback that never returns can block `UTL_TPoolClose()` indefinitely.
