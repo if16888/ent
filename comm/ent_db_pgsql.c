@@ -632,7 +632,8 @@ static MSG_ID_T iENT_DbPgSQLCollectRows(PGconn* pgConn, PGresult* res, SqlResult
                 size_t cellBytes = 0;
                 size_t newPayloadBytes = 0;
                 if(!PQgetisnull(res, r, c) &&
-                   (!iENT_DbCheckedSizeAdd((size_t)PQgetlength(res, r, c), 1, &cellBytes) ||
+                   ((size_t)PQgetlength(res, r, c) > ENT_DB_MAX_FIELD_BYTES ||
+                    !iENT_DbCheckedSizeAdd((size_t)PQgetlength(res, r, c), 1, &cellBytes) ||
                     !iENT_DbCheckedSizeAdd(payloadBytes, cellBytes, &newPayloadBytes) ||
                     newPayloadBytes > ENT_DB_MAX_RESULT_BYTES))
                 {

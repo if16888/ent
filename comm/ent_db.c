@@ -1066,6 +1066,59 @@ ENT_PUBLIC MSG_ID_T ENT_DbWrite(DB_HANDLE dbHandle,const char* sql,SqlResultCB s
     return sts;
 }
 
+static MSG_ID_T iENT_DbParams(const ENT_DB_PARAM* params, size_t count)
+{
+    size_t i;
+    size_t total = 0;
+    if(count > ENT_DB_MAX_PARAMS || (count != 0 && params == NULL))
+    {
+        return ENT_DBS_BAD_PARAMS;
+    }
+    for(i = 0; i < count; i++)
+    {
+        size_t bytes = 0;
+        switch(params[i].type)
+        {
+            case ENT_DB_PARAM_TEXT_E:
+                if(params[i].value.text == NULL)
+                {
+                    return ENT_DBS_BAD_PARAMS;
+                }
+                while(bytes <= ENT_DB_MAX_FIELD_BYTES && params[i].value.text[bytes] != '\0')
+                {
+                    bytes++;
+                }
+                break;
+            case ENT_DB_PARAM_BLOB_E:
+                bytes = params[i].value.blob.size;
+                if(bytes != 0 && params[i].value.blob.data == NULL)
+                {
+                    return ENT_DBS_BAD_PARAMS;
+                }
+                break;
+            case ENT_DB_PARAM_INT_E:
+                bytes = sizeof(int);
+                break;
+            case ENT_DB_PARAM_INT64_E:
+                bytes = sizeof(long long);
+                break;
+            case ENT_DB_PARAM_DOUBLE_E:
+                bytes = sizeof(double);
+                break;
+            case ENT_DB_PARAM_NULL_E:
+                break;
+            default:
+                return ENT_DBS_BAD_PARAMS;
+        }
+        if(bytes > ENT_DB_MAX_FIELD_BYTES ||
+           !iENT_DbCheckedSizeAdd(total, bytes, &total) || total > ENT_DB_MAX_INPUT_BYTES)
+        {
+            return ENT_DBS_BAD_PARAMS;
+        }
+    }
+    return ENT_SYS_NORMAL;
+}
+
 ENT_PUBLIC MSG_ID_T ENT_DbReadParams(DB_HANDLE dbHandle,
                                      const char* sql,
                                      const ENT_DB_PARAM* params,
@@ -1080,6 +1133,12 @@ ENT_PUBLIC MSG_ID_T ENT_DbReadParams(DB_HANDLE dbHandle,
     {
         IENT_LOG_ERROR("Arguments are invalid.\n");
         return ENT_DBS_BAD_ARGUMENT;
+    }
+
+    sts = iENT_DbParams(params, paramCount);
+    if(sts < 0)
+    {
+        return sts;
     }
 
     sts = iENT_DbEnterHandleOp(dbHandle, &dbCfg);
@@ -1148,6 +1207,12 @@ ENT_PUBLIC MSG_ID_T ENT_DbWriteParams(DB_HANDLE dbHandle,
     {
         IENT_LOG_ERROR("Arguments are invalid.\n");
         return ENT_DBS_BAD_ARGUMENT;
+    }
+
+    sts = iENT_DbParams(params, paramCount);
+    if(sts < 0)
+    {
+        return sts;
     }
 
     sts = iENT_DbEnterHandleOp(dbHandle, &dbCfg);
