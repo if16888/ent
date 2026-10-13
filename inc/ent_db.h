@@ -22,6 +22,17 @@
 
 #include "ent_comm.h"
 
+/* Library build defaults. Backend-specific limits may be lower. */
+#ifndef ENT_DB_MAX_PARAMS
+#define ENT_DB_MAX_PARAMS 4096u
+#endif
+#ifndef ENT_DB_MAX_FIELD_BYTES
+#define ENT_DB_MAX_FIELD_BYTES (16u * 1024u * 1024u)
+#endif
+#ifndef ENT_DB_MAX_INPUT_BYTES
+#define ENT_DB_MAX_INPUT_BYTES (64u * 1024u * 1024u)
+#endif
+
 typedef enum DB_TYPE
 {
   SQLITE_TYPE = 1,
@@ -89,6 +100,14 @@ ENT_PUBLIC MSG_ID_T  ENT_DbRead(DB_HANDLE dbHandle,const char* sql,SqlResultCB s
 
 ENT_PUBLIC MSG_ID_T ENT_DbWrite(DB_HANDLE dbHandle,const char* sql,SqlResultCB sqlCb,void* userData);
 
+/* Arrays/text/blob storage must remain valid until the call returns. Input
+ * budget/count violations return ENT_DBS_BAD_PARAMS before opening/executing.
+ * Text/blob fields are limited to ENT_DB_MAX_FIELD_BYTES. Materialized results
+ * are limited to 1,048,576 cells / 64 MiB field payload including terminators;
+ * excess results return ENT_DBS_ALLOC_FAILED without invoking the callback.
+ * Callbacks borrow storage only for their duration; do not retain pointers or
+ * reenter the same handle. Owner synchronization must fence new calls from
+ * close; close waits for already admitted operations and nulls the handle. */
 ENT_PUBLIC MSG_ID_T ENT_DbReadParams(DB_HANDLE dbHandle,
                                      const char* sql,
                                      const ENT_DB_PARAM* params,

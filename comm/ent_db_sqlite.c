@@ -191,7 +191,8 @@ static MSG_ID_T iENT_DbSqliteAppendCell(SQLITE_RESULT* result,
         byteCount = 0;
     }
 
-    if(!iENT_DbCheckedSizeAdd((size_t)byteCount, 1, &allocationSize) ||
+    if((size_t)byteCount > ENT_DB_MAX_FIELD_BYTES ||
+       !iENT_DbCheckedSizeAdd((size_t)byteCount, 1, &allocationSize) ||
        !iENT_DbCheckedSizeAdd(result->payloadBytes, allocationSize, &newPayloadBytes) ||
        newPayloadBytes > ENT_DB_MAX_RESULT_BYTES)
     {

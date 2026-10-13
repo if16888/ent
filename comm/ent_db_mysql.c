@@ -312,6 +312,10 @@ static size_t iENT_DbMySQLResultBufferSize(const MYSQL_FIELD* field)
         return 1;
     }
 
+    if(field->max_length > ENT_DB_MAX_FIELD_BYTES)
+    {
+        return 0;
+    }
     size = (size_t)field->max_length + 1;
     if(size == 1)
     {
@@ -367,7 +371,8 @@ static MSG_ID_T iENT_DbMySQLBindResults(MYSQL_STMT* stmt,
     {
         size_t bufferSize = iENT_DbMySQLResultBufferSize(&fields[i]);
 
-        if(!iENT_DbCheckedSizeAdd(bufferBytes, bufferSize, &bufferBytes) ||
+        if(bufferSize == 0 || bufferSize > (size_t)ENT_DB_MAX_FIELD_BYTES + 1 ||
+           !iENT_DbCheckedSizeAdd(bufferBytes, bufferSize, &bufferBytes) ||
            bufferBytes > ENT_DB_MAX_RESULT_BYTES)
         {
             IENT_LOG_ERROR("mysql result buffers exceed the payload limit.\n");
@@ -496,7 +501,8 @@ static MSG_ID_T iENT_DbMySQLCollectRows(MYSQL_STMT* stmt,
                 {
                     size_t cellBytes = 0;
                     size_t newPayloadBytes = 0;
-                    if(!iENT_DbCheckedSizeAdd((size_t)resultCtx.lengths[i], 1, &cellBytes) ||
+                    if((size_t)resultCtx.lengths[i] > ENT_DB_MAX_FIELD_BYTES ||
+                       !iENT_DbCheckedSizeAdd((size_t)resultCtx.lengths[i], 1, &cellBytes) ||
                        !iENT_DbCheckedSizeAdd(payloadBytes, cellBytes, &newPayloadBytes) ||
                        newPayloadBytes > ENT_DB_MAX_RESULT_BYTES)
                     {
@@ -811,7 +817,8 @@ MSG_ID_T ENT_DbMySQLRead(MYSQL* dbHandle,const char* query,SqlResultCB userCb,vo
             size_t cellBytes = 0;
             size_t newPayloadBytes = 0;
             if(row[i] != NULL &&
-               (!iENT_DbCheckedSizeAdd((size_t)lengths[i], 1, &cellBytes) ||
+               ((size_t)lengths[i] > ENT_DB_MAX_FIELD_BYTES ||
+                !iENT_DbCheckedSizeAdd((size_t)lengths[i], 1, &cellBytes) ||
                 !iENT_DbCheckedSizeAdd(payloadBytes, cellBytes, &newPayloadBytes) ||
                 newPayloadBytes > ENT_DB_MAX_RESULT_BYTES))
             {

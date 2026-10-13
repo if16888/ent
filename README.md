@@ -692,3 +692,9 @@ scripts\run-ci-wsl.ps1
   1,000,000 条 Lua 指令；超限返回运行错误。该后端用于执行受控业务规则，
   不是操作系统级隔离边界，仍不应运行来源不可信的脚本。
 - Lua 5.4.8 的下游勘误补丁记录在 `3rd/lua/PATCHES.md`。
+
+### Core quality and resource contracts
+
+See [core quality contracts and validation](docs/core-quality.md) for database
+resource budgets, handle ownership, compiler diagnostics, static analysis,
+coverage, ABI comparison, parser fuzzing, and SDK archive acceptance.

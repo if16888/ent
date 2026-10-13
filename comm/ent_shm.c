@@ -264,7 +264,8 @@ static MSG_ID_T iENT_SharedMapOpenWindows(const ENT_SharedMapOptions* options,
         if(truncate_if_exists || created_new)
         {
             final_size = options->size;
-            if(final_size == 0ULL || final_size > (ENT_SIZE)LLONG_MAX)
+            if(final_size > (ENT_SIZE)LLONG_MAX ||
+               iENT_SharedMapValidateNativeSize(final_size, &native_size) != ENT_SYS_NORMAL)
             {
                 CloseHandle(file_handle);
                 return ENT_SHM_BAD_SIZE;
@@ -522,7 +523,9 @@ static MSG_ID_T iENT_SharedMapOpenPosix(const ENT_SharedMapOptions* options,
     else if(truncate_if_exists || created_new)
     {
         final_size = options->size;
-        if(final_size == 0ULL || final_size > (ENT_SIZE)LLONG_MAX)
+        if(final_size > (ENT_SIZE)LLONG_MAX ||
+           (ENT_SIZE)(off_t)final_size != final_size ||
+           iENT_SharedMapValidateNativeSize(final_size, &native_size) != ENT_SYS_NORMAL)
         {
             close(fd);
             return ENT_SHM_BAD_SIZE;

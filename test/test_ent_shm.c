@@ -6,6 +6,8 @@
 #include <windows.h>
 #else
 #include <unistd.h>
+#include <sys/stat.h>
+#include <limits.h>
 #endif
 
 #include "ent_shm.h"
@@ -788,10 +790,64 @@ static int test_windows_rejects_directory_and_reparse_point(void)
 }
 #endif
 
+#ifndef _WIN32
+static int test_posix_path_and_permissions(void)
+{
+    char path[256];
+    char link[272];
+    struct stat st;
+    ENT_SharedMap* map = NULL;
+    ENT_SharedMapOptions options;
+    int failed = 0;
+    if(prepare_temp_path(path, sizeof(path)) != 0)
+    {
+        return 1;
+    }
+    snprintf(link, sizeof(link), "%s.link", path);
+    memset(&options, 0, sizeof(options));
+    options.path = path;
+    options.mode = ENT_SHM_MODE_READ_WRITE;
+    options.size = TEST_SHM_SMALL_SIZE;
+    options.flags = ENT_SHM_F_CREATE_IF_MISSING;
+    failed += expect_true(ENT_SharedMapOpen(&options, &map) >= 0, "create secure mapping");
+    failed += expect_true(stat(path, &st) == 0 && (st.st_mode & 077) == 0,
+                          "new mapping must have owner-only permissions");
+    ENT_SharedMapClose(&map);
+    if(symlink(path, link) != 0)
+    {
+        unlink(path);
+        return 1;
+    }
+    options.path = link;
+    options.flags |= ENT_SHM_F_TRUNCATE_IF_EXISTS;
+    options.size = TEST_SHM_LARGE_SIZE;
+    failed += expect_true(ENT_SharedMapOpen(&options, &map) < 0 && map == NULL,
+                          "reject symlink without truncating its target");
+    failed += expect_true(stat(path, &st) == 0 && st.st_size == (off_t)TEST_SHM_SMALL_SIZE,
+                          "symlink rejection must preserve target size");
+    options.path = path;
+    options.size = (ENT_SIZE)-1;
+    failed += expect_true(ENT_SharedMapOpen(&options, &map) < 0 && map == NULL,
+                          "reject unrepresentable native size");
+    failed += expect_true(stat(path, &st) == 0 && st.st_size == (off_t)TEST_SHM_SMALL_SIZE,
+                          "size rejection must precede truncation");
+    options.path = "/tmp";
+    options.size = TEST_SHM_SMALL_SIZE;
+    failed += expect_true(ENT_SharedMapOpen(&options, &map) < 0 && map == NULL,
+                          "reject directory mapping");
+    unlink(link);
+    unlink(path);
+    return failed;
+}
+#endif
+
 int main(void)
 {
     int failures = 0;
 
+#ifndef _WIN32
+    failures += test_posix_path_and_permissions();
+#endif
     failures += test_invalid_args();
     failures += test_flush_rejects_out_of_range();
     failures += test_flush_accepts_unaligned_offset();

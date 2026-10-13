@@ -129,3 +129,9 @@ ipch/
 # but keep track of directories ending in .cache
 !?*.[Cc]ache/
 .worktrees/
+
+# Quality evidence and Python interpreter caches
+build-quality/
+__pycache__/
+parser-fuzz.json
+msg-fuzz-failure.msg
