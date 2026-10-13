@@ -59,7 +59,7 @@
 
 ### PUB-001：Release SDK relocatability
 
-- 状态：Linux no-DB、SQLite 实际压缩包的 shared/static consumer 已通过；Linux/Windows archive gate 已接入，本轮 Windows CI 待验收。
+- 状态：Linux no-DB、SQLite 实际压缩包的 shared/static consumer 已通过；Linux/Windows archive gate 均通过；Windows 本轮 archive 为 no-DB profile，带后端的正式 release artifact 仍需发布验收。
 - 目标：使实际解压后的 devel SDK 可以分别构建并运行 shared/static consumer。
 - 验收：导出 CMake metadata 不含 build tree、runner 或 `vcpkg_installed` 绝对路径；真实 archive consumer 必须通过。
 - 非目标：不修改 public C API，不改变 DB 行为。
@@ -99,7 +99,7 @@
 
 ### CORE-103：基础 shared-memory 安全加固
 
-- 状态：基础加固已存在；本轮补 native-size 截断前校验及 POSIX 权限/符号链接回归，本地测试和 ASan/UBSan 已通过，Windows 分支待 CI。
+- 状态：基础加固已存在；本轮补 native-size 截断前校验及 POSIX 权限/符号链接回归，本地测试和 ASan/UBSan 已通过，Windows x86/x64 和 ARM CI 已通过。
 
 - 目标：强化本机 mapping 的名称、路径、权限、大小校验和异常关闭行为。
 - 非目标：不增加 multi-writer、RCU、version chain、transaction、replication 或 distributed synchronization。
@@ -108,7 +108,7 @@
 
 ### CORE-104：数据库结果与输入资源上限
 
-- 状态：本轮补公共参数预算与各后端单字段上限；SQLite、no-DB 及 ASan/UBSan 回归通过，真实 MySQL/PostgreSQL 边界/超限/恢复查询已加入独立 CI 服务任务；本地缺少运行服务，仍待服务验收。
+- 状态：本轮补公共参数预算与各后端单字段上限；SQLite、no-DB 及 ASan/UBSan 回归通过，真实 MySQL/PostgreSQL 边界/超限/恢复查询已加入独立 CI 服务任务；本地未运行服务；独立 CI 的真实 MySQL/PostgreSQL 三类查询均通过。
 
 - 目标：对可控的结果 materialization、参数数量、字段长度和错误返回建立明确上限。
 - 非目标：不实现 ORM、连接池集群、故障转移或在线复制。
@@ -128,7 +128,7 @@
 
 ### ENG-201：编译器 warning baseline
 
-- 状态：已接入 GCC/Clang 同工具链基准比较和 MSVC /W4 gate；GCC 34→32、Clang 30→28 条诊断，均无新增，MSVC 待 CI。
+- 状态：已接入 GCC/Clang 同工具链基准比较和 MSVC /W4 gate；本地 GCC 34→32、Clang 30→28 条诊断，均无新增；MSVC /W4、GCC/Clang CI gate 均通过。
 
 - 目标：逐步接入 GCC/Clang `-Wall -Wextra` 和 MSVC `/W4`，形成可维护的 warning baseline。
 - 非目标：不在一个 PR 中全库重写风格。
@@ -183,5 +183,14 @@
 - SQLite-only 完整 CTest 31/31、no-DB 完整 CTest 27/27 通过。
 - DB 部分行释放、资源预算和 shared-map ASan/UBSan 4/4 通过。
 - 本地 GCC 警告/静态分析、Clang 警告、ABI 比较、10,000-case fuzz 通过。
-- MSVC /W4、Windows SDK 与 ARM 构建结果以本轮实际 CI 为准。
-- 仍需真实 DB 服务超限查询、Windows 路径/权限验收和真实 release artifact 跨平台验收；不得把 baseline gate 接入等同于 1.0 生产级认证。
+- 代码提交 `ff93cdc`：Core Quality 的 9 个 job 全部通过，含 MSVC /W4、Windows SDK、真实 MySQL/PostgreSQL；标准 Linux/Windows x86/x64、ASan/UBSan、TSan、Windows ASan、可选后端和 ARM CI 均通过。
+- 剩余：正式 release artifact 的跨平台/带后端 profile 验收，以及基于报告继续提升失败路径覆盖；不得把 baseline gate 接入等同于 1.0 生产级认证。
+
+CI 证据（代码提交 `ff93cdc`）：
+
+- [Core Quality（9 jobs）](https://github.com/if16888/ent/actions/runs/38390248489)
+- [标准构建及 sanitizer](https://github.com/if16888/ent/actions/runs/38390248303)
+- [ARM64 自托管](https://github.com/if16888/ent/actions/runs/38390248114)
+- [可选数据库配置](https://github.com/if16888/ent/actions/runs/38390248882)
+
+该记录描述已经执行的代码验收，不代表已经发布 release 或合并 PR。
