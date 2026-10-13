@@ -22,7 +22,11 @@ PREFIX_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _as_c_string(text: str) -> str:
-    escaped = text.replace("\\", "\\\\").replace('"', '\\"')
+    escaped = "".join(
+        f"\\{ord(char):03o}" if ord(char) < 32 or ord(char) == 127 else
+        "\\\\" if char == "\\" else '\\"' if char == '"' else char
+        for char in text
+    )
     return f'"{escaped}"'
 
 

@@ -55,18 +55,18 @@
 - CMake install、downstream `find_package` 和 release runtime/devel packaging 已接入验证。
 - Apache-2.0、NOTICE 和 THIRD_PARTY_NOTICES 已进入发布包。
 
-## 进行中
+## 实现与验收状态（2026-10-13）
 
 ### PUB-001：Release SDK relocatability
 
-- 状态：PR 验证中。
+- 状态：Linux no-DB、SQLite 实际压缩包的 shared/static consumer 已通过；Linux/Windows archive gate 已接入，本轮 Windows CI 待验收。
 - 目标：使实际解压后的 devel SDK 可以分别构建并运行 shared/static consumer。
 - 验收：导出 CMake metadata 不含 build tree、runner 或 `vcpkg_installed` 绝对路径；真实 archive consumer 必须通过。
 - 非目标：不修改 public C API，不改变 DB 行为。
 
 ### PUB-002：Open-source scope closure
 
-- 状态：进行中。
+- 状态：公开 scope 检查通过；文档、贡献入口和 backlog 已对齐。发布时仍需扫描实际 artifact。
 - 目标：让公开范围在 scope 文档、AI 规则、贡献入口和 backlog 中保持一致。
 - 验收：公开仓库不包含闭源功能的实现、public API 占位、roadmap 或设计文档。
 - 非目标：不删除已经属于 core 且有测试的基础模块。
@@ -75,7 +75,7 @@
 
 ### CORE-101：异步日志队列容量与过载语义
 
-- 状态：实现与本地回归验证完成，等待跨平台 CI。
+- 状态：已合并至 `57b08df`，该主分支 CI 已通过；本轮不重复实现。
 - 目标：为异步日志队列建立可配置上限、明确的拒绝/丢弃策略和可观测计数。
 - 非目标：不改变日志格式，不引入外部 event loop。
 - 风险：R3。
@@ -83,7 +83,7 @@
 
 ### CORE-102：线程池任务队列容量
 
-- 状态：实现与本地回归验证完成，等待跨平台 CI。
+- 状态：已合并至 `57b08df`，该主分支 CI 已通过；本轮不重复实现。
 - 目标：为 thread pool queue 建立容量上限和确定的 backpressure / reject 语义。
 - 非目标：不实现分布式调度、RPC worker 或跨节点任务复制。
 - 风险：R3。
@@ -91,13 +91,15 @@
 
 ### CORE-106：Linux 微秒定时器过载合并
 
-- 状态：实现与本地回归验证完成，等待跨平台 CI。
+- 状态：已合并至 `57b08df`，该主分支 CI 已通过；本轮不重复实现。
 - 目标：限制 `UTL_TimerCreateUs()` 的周期回调积压；慢回调期间合并过期 tick，避免追赶式回调队列无限增长；定时器基准工具支持本地显式抖动阈值。
 - 非目标：不承诺用户态硬实时，不设置跨机器通用抖动门限。
 - 风险：R2。
 - 验收：慢回调下待执行回调数最多为 1，普通周期行为和删除/关闭生命周期测试通过。
 
 ### CORE-103：基础 shared-memory 安全加固
+
+- 状态：基础加固已存在；本轮补 native-size 截断前校验及 POSIX 权限/符号链接回归，本地测试和 ASan/UBSan 已通过，Windows 分支待 CI。
 
 - 目标：强化本机 mapping 的名称、路径、权限、大小校验和异常关闭行为。
 - 非目标：不增加 multi-writer、RCU、version chain、transaction、replication 或 distributed synchronization。
@@ -106,12 +108,16 @@
 
 ### CORE-104：数据库结果与输入资源上限
 
+- 状态：本轮补公共参数预算与各后端单字段上限；SQLite、no-DB 及 ASan/UBSan 回归通过，真实 MySQL/PostgreSQL 边界/超限/恢复查询已加入独立 CI 服务任务；本地缺少运行服务，仍待服务验收。
+
 - 目标：对可控的结果 materialization、参数数量、字段长度和错误返回建立明确上限。
 - 非目标：不实现 ORM、连接池集群、故障转移或在线复制。
 - 风险：R3。
 - 验收：超限拒绝、边界值、不同 backend 一致性和释放路径测试。
 
 ### CORE-105：公开 API 文档校准
+
+- 状态：已更新 public DB header、README 与 `docs/core-quality.md`，说明生命周期、回调、资源预算及平台差异；本轮未改变 public 函数签名或结构布局。
 
 - 目标：确保 public headers、README、architecture docs 和 tests 对生命周期、线程安全和可选后端描述一致。
 - 非目标：不提前承诺未实现 API。
@@ -122,25 +128,35 @@
 
 ### ENG-201：编译器 warning baseline
 
+- 状态：已接入 GCC/Clang 同工具链基准比较和 MSVC /W4 gate；GCC 34→32、Clang 30→28 条诊断，均无新增，MSVC 待 CI。
+
 - 目标：逐步接入 GCC/Clang `-Wall -Wextra` 和 MSVC `/W4`，形成可维护的 warning baseline。
 - 非目标：不在一个 PR 中全库重写风格。
 
 ### ENG-202：静态分析
+
+- 状态：已接入 GCC -fanalyzer 和新诊断门禁，本地无新增诊断；不将历史诊断视为已验证漏洞。
 
 - 目标：评估并接入适合 C 项目的 CodeQL 或等价静态分析。
 - 非目标：不把第三方扫描结果直接等同于有效漏洞。
 
 ### ENG-203：覆盖率报告
 
+- 状态：已接入 gcovr JSON/XML/HTML 报告；SQLite-only 本地 core 行覆盖率 71.0%、函数 90.5%、分支 56.3%。报告不代表所有后端覆盖。
+
 - 目标：建立 Linux 测试覆盖率基线，识别未覆盖的失败和释放路径。
 - 非目标：不以覆盖率数字替代行为测试质量。
 
 ### ENG-204：ABI 变化检查
 
+- 状态：已接入 libabigail public-header/no-DB 同配置比较，本地无 ABI 变化；行为及其他 feature profile 兼容性需独立验收。
+
 - 目标：在进入更稳定版本前评估 public symbol / ABI diff 检查。
 - 非目标：0.x 阶段不承诺 minor version ABI 不变。
 
 ### ENG-205：输入解析 fuzzing
+
+- 状态：已接入消息解析器种子变异 fuzz、失败样本保存和短 CTest；本地 10,000 样本通过（2,628 接受、7,372 拒绝），修复生成器控制字符 C 字符串转义。
 
 - 目标：选择消息生成、配置解析或其他边界明确的公开输入面进行最小 fuzzing。
 - 非目标：不引入私有协议或产品数据格式。
@@ -159,3 +175,13 @@
 - 私有产品运维、许可、部署控制或内部项目复用计划。
 
 这类需求应在独立私有环境中管理，依赖方向只能是私有扩展依赖公开 `ent` core。
+
+## 本轮证据与剩余验收
+
+任务卡：[CORE_QUALITY_TASK.md](CORE_QUALITY_TASK.md)。运行说明：[core-quality.md](../core-quality.md)。
+
+- SQLite-only 完整 CTest 31/31、no-DB 完整 CTest 27/27 通过。
+- DB 部分行释放、资源预算和 shared-map ASan/UBSan 4/4 通过。
+- 本地 GCC 警告/静态分析、Clang 警告、ABI 比较、10,000-case fuzz 通过。
+- MSVC /W4、Windows SDK 与 ARM 构建结果以本轮实际 CI 为准。
+- 仍需真实 DB 服务超限查询、Windows 路径/权限验收和真实 release artifact 跨平台验收；不得把 baseline gate 接入等同于 1.0 生产级认证。

@@ -17,6 +17,7 @@ try {
     Expand-Archive -LiteralPath $Archive -DestinationPath $Sdk -Force
 
     $CmakeFiles = Get-ChildItem -LiteralPath $Sdk -Recurse -File -Filter "*.cmake"
+    if (-not $CmakeFiles) { throw "SDK contains no exported CMake metadata" }
     $Forbidden = @("vcpkg_installed", "D:/a/", "C:\a\", "/home/runner/work/")
     if ($env:GITHUB_WORKSPACE) { $Forbidden += $env:GITHUB_WORKSPACE }
     if ($env:BUILD_DIR) { $Forbidden += [System.IO.Path]::GetFullPath($env:BUILD_DIR) }

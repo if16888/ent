@@ -11,6 +11,10 @@ trap 'rm -rf "${root}"' EXIT
 tar -xzf "${archive}" -C "${sdk}"
 
 mapfile -t cmake_files < <(find "${sdk}" -type f -name '*.cmake' -print)
+if [[ ${#cmake_files[@]} -eq 0 ]]; then
+  echo "SDK contains no exported CMake metadata" >&2
+  exit 1
+fi
 for pattern in \
   'vcpkg_installed' \
   'D:/a/' \

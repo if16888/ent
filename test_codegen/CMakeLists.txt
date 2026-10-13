@@ -49,3 +49,9 @@ add_test(
     "${CMAKE_CURRENT_SOURCE_DIR}/test_gen_ent_msg_symbols.py"
     "${CMAKE_SOURCE_DIR}/scripts/gen_ent_msg_symbols.py"
 )
+
+add_test(NAME test_quality_scripts
+  COMMAND "${_ent_codegen_python}" ${CMAKE_CURRENT_SOURCE_DIR}/test_quality_scripts.py)
+add_test(NAME test_msg_parser_fuzz
+  COMMAND "${_ent_codegen_python}" ${PROJECT_SOURCE_DIR}/scripts/fuzz-msg-parser.py --iterations 500)
+set_tests_properties(test_msg_parser_fuzz PROPERTIES TIMEOUT 30)
