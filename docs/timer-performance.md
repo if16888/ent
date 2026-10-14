@@ -121,6 +121,41 @@ as `timerfd-comparison-arm64`. A separate follow-up benchmark correction
 stabilizes the post-shutdown thread-count snapshot; it **does not** revise
 or silently replace the archived original measurements.
 
+### Bounded multicore and controlled-load experiments
+
+For ARM64 and Linux x64 comparisons, `compare_timer_backends.py` can now
+restrict both backends to the **same first N allowed CPUs**. For a synthetic
+load probe, a separate subprocess runs on the first selected CPU with a
+100 ms cycle and a bounded busy duty (maximum 50% of one CPU). The loader
+is terminated and reaped when the collector exits, and exits on its own
+after at most 1200 seconds. These controls do **not** guarantee CPU
+utilization on a shared VM, nor isolate noisy neighbors, CPU frequency,
+or load outside the benchmark's affinity. Benchmark process CPU percent
+does not include the separate load subprocess.
+
+```sh
+python3 scripts/compare_timer_backends.py \
+  --legacy-bin build-perf/bin/perf_timer_scale \
+  --prototype-bin build-perf/bin/perf_timerfd_scale \
+  --output-dir timer-results/arm64-multicore \
+  --trials 20 --duration-ms 1500 --cpu-width 2
+
+python3 scripts/compare_timer_backends.py \
+  --legacy-bin build-perf/bin/perf_timer_scale \
+  --prototype-bin build-perf/bin/perf_timerfd_scale \
+  --output-dir timer-results/arm64-multicore-load25 \
+  --trials 20 --duration-ms 1500 --cpu-width 2 \
+  --load-duty-percent 25
+```
+
+Each output carries the exact allowed affinity, selected CPU IDs, requested
+load duty and a **paired per-run P99 win count**, in addition to raw results
+and min/median/P95/worst across run-level metrics. The smoke tests validate
+the collector and the load-process lifecycle but **do not** enforce jitter
+thresholds. Use a dedicated benchmark host/time window and record ambient
+load and cgroup CPU quotas. Do not compare these two-core data directly to
+the earlier one-core pinned baseline as though they were paired measurements.
+
 ### timerfd/eventfd architecture decision gate
 
 Before changing the runtime implementation, create an **independent** Linux
