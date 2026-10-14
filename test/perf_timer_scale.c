@@ -1,6 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
-/* Observational Linux scaling test. Errors are absolute callback inter-arrival
- * differences, NOT actual scheduled-deadline latency. No timing thresholds. */
+/* Observational Linux scaling test. Inter-arrival errors and (for regular
+ * millisecond timers only) test-hook absolute-deadline lags. No timing gates. */
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,8 +40,12 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle, const char* format, ...) { (void)logHan
 
 #define TIMER_LIMIT 128
 #define SAMPLES_PER_TIMER 8192
+/* Compiled only in this benchmarking target with ENT_TIMER_TEST_HOOKS.
+ * The production library does not expose a deadline introspection API. */
+long long iUTL_TimerTestCallbackDeadlineNs(void);
 typedef struct {
     long long stamps[SAMPLES_PER_TIMER];
+    long long deadline_lag_ns[SAMPLES_PER_TIMER];
     int n;
 } TIMER_PROBE;
 
@@ -88,7 +92,14 @@ static int threads_after_settle(int expected)
 static void* callback(void* data) {
     TIMER_PROBE* p = (TIMER_PROBE*)data;
     /* Timer runtime serializes callback invocations for a given timer. */
-    if(p->n < SAMPLES_PER_TIMER) p->stamps[p->n++] = ns(CLOCK_MONOTONIC);
+    if(p->n < SAMPLES_PER_TIMER) {
+        long long stamp = ns(CLOCK_MONOTONIC);
+        long long deadline = iUTL_TimerTestCallbackDeadlineNs();
+        p->stamps[p->n] = stamp;
+        p->deadline_lag_ns[p->n] =
+            (deadline > 0 && stamp >= deadline) ? stamp - deadline : -1;
+        p->n++;
+    }
     return NULL;
 }
 static int cmp(const void* a, const void* b) {
@@ -104,13 +115,14 @@ static double pct(double* sorted, int n, int p) {
 
 int main(int argc, char** argv) {
     int count, period, duration, mode_us, i, k, started = 0, open = 0;
-    int before, active, after, sample_count = 0, total_hits = 0;
+    int before, active, after, sample_count = 0, total_hits = 0, lag_count = 0;
     int status = EXIT_FAILURE;
     long long base_ns, wall_a, wall_b, cpu_a, cpu_b;
     long long close_a, close_b;
     UTL_TIMER_T* timers = NULL;
     TIMER_PROBE* probes = NULL;
     double* deviation_us = NULL;
+    double* lag_us = NULL;
     double* deletion_us = NULL;
     struct rusage resource;
 
@@ -163,21 +175,29 @@ int main(int argc, char** argv) {
     if(close_b < close_a || cpu_b < 0 || wall_b <= wall_a) goto CLEANUP;
     after = threads_after_settle(before);
     deviation_us = (double*)malloc((size_t)count * (SAMPLES_PER_TIMER - 1) * sizeof(double));
-    if(!deviation_us) goto CLEANUP;
+    if(!mode_us)
+        lag_us = (double*)malloc((size_t)count * SAMPLES_PER_TIMER * sizeof(double));
+    if(!deviation_us || (!mode_us && !lag_us)) goto CLEANUP;
     for(i = 0; i < count; ++i) {
         TIMER_PROBE* p = &probes[i];
         total_hits += p->n;
+        if(!mode_us) for(k = 0; k < p->n; ++k) {
+            if(p->deadline_lag_ns[k] >= 0)
+                lag_us[lag_count++] = (double)p->deadline_lag_ns[k] / 1000.0;
+        }
         for(k = 1; k < p->n; ++k) {
             double err = (double)(p->stamps[k] - p->stamps[k-1] - base_ns) / 1000.0;
             if(err < 0) err = -err;
             deviation_us[sample_count++] = err;
         }
     }
-    if(sample_count < 2) {
-        fprintf(stderr, "insufficient samples\n");
+    if(sample_count < 2 || (!mode_us && lag_count != total_hits)) {
+        fprintf(stderr, "insufficient samples or missing deadline trace: intervals=%d lags=%d hits=%d\n",
+                sample_count, lag_count, total_hits);
         goto CLEANUP;
     }
     qsort(deviation_us, (size_t)sample_count, sizeof(double), cmp);
+    if(!mode_us) qsort(lag_us, (size_t)lag_count, sizeof(double), cmp);
     qsort(deletion_us, (size_t)count, sizeof(double), cmp);
     memset(&resource, 0, sizeof(resource));
     (void)getrusage(RUSAGE_SELF, &resource);
@@ -186,7 +206,7 @@ int main(int argc, char** argv) {
            "cpu_process_ms=%.3f wall_ms=%.3f cpu_pct_single_core=%.2f "
            "threads_before=%d threads_active=%d threads_after=%d ru_maxrss_kib=%ld "
            "delete_p50_us=%.3f delete_p95_us=%.3f delete_p99_us=%.3f "
-           "delete_max_us=%.3f timer_close_us=%.3f\n",
+           "delete_max_us=%.3f timer_close_us=%.3f",
            argv[1], count, period, duration, total_hits, sample_count,
            pct(deviation_us, sample_count, 50),
            pct(deviation_us, sample_count, 95),
@@ -198,6 +218,12 @@ int main(int argc, char** argv) {
            pct(deletion_us, count, 50), pct(deletion_us, count, 95),
            pct(deletion_us, count, 99), deletion_us[count - 1],
            (double)(close_b - close_a) / 1000.0);
+    if(!mode_us) {
+        printf(" deadline_lag_p50_us=%.3f deadline_lag_p95_us=%.3f deadline_lag_p99_us=%.3f",
+               pct(lag_us, lag_count, 50), pct(lag_us, lag_count, 95),
+               pct(lag_us, lag_count, 99));
+    }
+    printf("\n");
     status = EXIT_SUCCESS;
 CLEANUP:
     if(timers) for(i = 0; i < open; ++i)
@@ -206,6 +232,7 @@ CLEANUP:
     free(timers);
     free(probes);
     free(deviation_us);
+    free(lag_us);
     free(deletion_us);
     return status;
 }

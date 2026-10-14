@@ -156,6 +156,33 @@ thresholds. Use a dedicated benchmark host/time window and record ambient
 load and cgroup CPU quotas. Do not compare these two-core data directly to
 the earlier one-core pinned baseline as though they were paired measurements.
 
+### Comparable scheduled-deadline lag (instrumented Linux ms timers)
+
+The regular Linux POSIX timer benchmark now compiles its own copy of
+`comm/utl_timer.c` with `ENT_TIMER_TEST_HOOKS`, exposing the **actual
+absolute monotonic deadline** calculated for each fixed-delay period to
+the invoking callback via thread-local state. This does not change or
+expose the shipped ent timer library. It records callback-entry monotonic
+time minus that stored deadline and emits
+`deadline_lag_p50_us/p95_us/p99_us`, matching the timerfd prototype's
+absolute-deadline-to-observed-callback definition.
+
+The standalone baseline collector includes these optional deadline fields
+in its CSV and per-scenario summaries when present (leaving them blank for
+microsecond timers). The paired comparison collector **requires** valid
+nonnegative deadline metrics from *both backends* for `ms` scenarios and
+aggregates them across trials. Do not silently compare an old benchmark executable lacking the
+hook: it now fails explicitly. This is not a formal real-time guarantee,
+and instrumentation overhead, different callback dispatch architecture
+and CPU contention remain relevant.
+
+The microsecond `UTL_TimerCreateUs` path uses a separate scheduler and
+callback worker; its intended deadlines are **not yet traced** with this
+hook. Accordingly, `us` scenarios retain only inter-arrival comparisons
+and optional prototype-only lag values. Do not compare those lags to
+legacy scheduling metrics or claim a common deadline-latency result for
+microsecond timers.
+
 ### timerfd/eventfd architecture decision gate
 
 Before changing the runtime implementation, create an **independent** Linux

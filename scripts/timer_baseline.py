@@ -26,6 +26,7 @@ REQUIRED = (
     "delete_p50_us", "delete_p95_us", "delete_p99_us", "delete_max_us",
     "timer_close_us",
 )
+OPTIONAL = ("deadline_lag_p50_us", "deadline_lag_p95_us", "deadline_lag_p99_us")
 METRICS = (
     "abs_interarrival_error_p50_us", "p95_us", "p99_us", "max_us",
     "cpu_pct_single_core", "threads_active", "ru_maxrss_kib",
@@ -68,6 +69,15 @@ def parse_result(stdout):
             value = float(result[key])
             if not math.isfinite(value):
                 raise ValueError("nonfinite metric: " + key)
+            result[key] = value
+    unknown = set(result) - set(REQUIRED) - set(OPTIONAL)
+    if unknown:
+        raise ValueError("unknown timer metrics: " + ", ".join(sorted(unknown)))
+    for key in OPTIONAL:
+        if key in result:
+            value = float(result[key])
+            if not math.isfinite(value) or value < 0:
+                raise ValueError("invalid optional metric: " + key)
             result[key] = value
     return result
 
@@ -164,7 +174,7 @@ def main():
         raise
 
     with (args.output_dir / "samples.csv").open("w", newline="", encoding="utf-8") as out:
-        writer = csv.DictWriter(out, fieldnames=["scenario", "trial", *REQUIRED])
+        writer = csv.DictWriter(out, fieldnames=["scenario", "trial", *REQUIRED, *OPTIONAL])
         writer.writeheader()
         writer.writerows(rows)
 
@@ -173,7 +183,11 @@ def main():
         key = f"{mode}:{count}:{period}"
         subset = [row for row in rows if row["scenario"] == key]
         summaries[key] = {}
-        for field in METRICS:
+        for field in (*METRICS, *OPTIONAL):
+            # The microsecond RT path intentionally has no common deadline
+            # instrumentation; preserve a blank CSV column, omit its summary.
+            if not all(field in row for row in subset):
+                continue
             values = [float(row[field]) for row in subset]
             summaries[key][field] = {
                 "min": min(values),

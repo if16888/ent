@@ -105,6 +105,15 @@ static __declspec(thread) PTIMER_CTX_T sTimerCurrentCallback = NULL;
 static pthread_mutex_t sTimerLifecycleLock = PTHREAD_MUTEX_INITIALIZER;
 static __thread unsigned int sTimerCallbackDepth = 0;
 #endif
+/* Test-only deadline visibility for the regular POSIX timer worker.
+ * The shipped timer library never builds with ENT_TIMER_TEST_HOOKS. */
+#if ENT_TMR_IMPL_LINUX && defined(ENT_TIMER_TEST_HOOKS)
+static __thread long long sTimerTestCallbackDeadlineNs = 0;
+long long iUTL_TimerTestCallbackDeadlineNs(void)
+{
+    return sTimerTestCallbackDeadlineNs;
+}
+#endif
 static BOOL          sTimerClosing = FALSE;
 static BOOL          sTimerCloseActive = FALSE;
 static unsigned int  sTimerLifecycleOps = 0;
@@ -600,6 +609,9 @@ static void* iUTL_TimerThread(void* data)
         UTL_TIMER_EV_F timerCb = NULL;
         void* timerData = NULL;
         BOOL oneshot = FALSE;
+#if ENT_TMR_IMPL_LINUX && defined(ENT_TIMER_TEST_HOOKS)
+        long long callbackDeadlineNs = 0;
+#endif
 
         /* Preserve one deadline per period. Restarting a full relative
          * timeout after every spurious wake indefinitely postpones callbacks
@@ -652,6 +664,10 @@ static void* iUTL_TimerThread(void* data)
                 iUTL_TimerThreadStateStop(timerCtx, FALSE);
                 break;
             }
+#if ENT_TMR_IMPL_LINUX && defined(ENT_TIMER_TEST_HOOKS)
+            /* Exactly the absolute deadline used for this CV wait cycle. */
+            callbackDeadlineNs = deadlineNs;
+#endif
         }
 
         timerCb = timerCtx->timer_ev_cb;
@@ -660,7 +676,13 @@ static void* iUTL_TimerThread(void* data)
 
         if(timerCb)
         {
+#if ENT_TMR_IMPL_LINUX && defined(ENT_TIMER_TEST_HOOKS)
+            sTimerTestCallbackDeadlineNs = callbackDeadlineNs;
+#endif
             iUTL_TimerInvokeCallback(timerCb, timerData);
+#if ENT_TMR_IMPL_LINUX && defined(ENT_TIMER_TEST_HOOKS)
+            sTimerTestCallbackDeadlineNs = 0;
+#endif
         }
 
         if(iUTL_TimerThreadStateSelfDelete(timerCtx))
