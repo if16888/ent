@@ -34,7 +34,7 @@ def main():
     parser.add_argument("--cpu-width", type=int,
                         help="pin both backends to the first N allowed CPUs (1..4)")
     parser.add_argument("--load-duty-percent", type=int, default=0,
-                        help="bounded background load on first pinned CPU (0..50%)")
+                        help="bounded background load on first pinned CPU (0..50%%)")
     args = parser.parse_args()
     if not 1 <= args.trials <= 100 or not 250 <= args.duration_ms <= 5000:
         parser.error("trials=1..100 and duration-ms=250..5000 required")
@@ -55,7 +55,7 @@ def main():
     width = args.cpu_width if args.cpu_width is not None else (
         1 if args.pin_first_allowed else 0
     )
-    if width < 0 or width > 4:
+    if width < 0 or width > 4 or (args.cpu_width is not None and width == 0):
         parser.error("--cpu-width must be 1..4 (or omit for unrestricted affinity)")
     if width and (len(affinity) < width or shutil.which("taskset") is None):
         parser.error("insufficient allowed CPUs or taskset unavailable")
