@@ -683,6 +683,20 @@ endif()
 
 if(UNIX AND NOT APPLE)
   add_executable(
+    perf_timer_scale
+    perf_timer_scale.c
+    test_runtime_stub.c
+    ../comm/utl_timer.c
+    ../comm/utl_thread.c
+    ../comm/utl_dll.c
+  )
+  target_include_directories(perf_timer_scale PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../comm
+  )
+  target_link_libraries(perf_timer_scale PRIVATE pthread rt)
+
+  add_executable(
     perf_utl_timer_rt
     perf_utl_timer_rt.c
     test_runtime_stub.c
