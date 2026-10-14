@@ -61,7 +61,17 @@ ENT_PUBLIC MSG_ID_T  UTL_LockClose(UTL_LOCK* lock);
 
 ENT_PUBLIC MSG_ID_T  UTL_CVInit(UTL_CV* cv,const char* name);
 ENT_PUBLIC MSG_ID_T  UTL_CVClose(UTL_CV* cv);
+/* Compatibility interface: ms <= 0 means an UNBOUNDED wait.
+ * Prefer UTL_CVWaitFor / UTL_CVWaitForever for unambiguous semantics. */
 ENT_PUBLIC MSG_ID_T  UTL_CVWait(UTL_CV cv,UTL_LOCK lock,int ms,UTL_LOCK_RW_TYPE_T rwType);
+/* Explicit finite wait: 0 = non-blocking timeout check; positive = maximum
+ * duration in milliseconds; negative = ENT_UTHD_INVALID_ARGUMENT.
+ * Returns ENT_SYS_NORMAL when awakened, ENT_UTHD_WAIT_TIMEOUT when expired.
+ * The caller MUST hold lock and recheck its predicate after every wake. */
+ENT_PUBLIC MSG_ID_T UTL_CVWaitFor(UTL_CV cv,UTL_LOCK lock,int timeoutMs,UTL_LOCK_RW_TYPE_T rwType);
+/* Explicit unbounded wait; returns only when signaled or on error.
+ * Must be called while holding the accompanying lock. */
+ENT_PUBLIC MSG_ID_T UTL_CVWaitForever(UTL_CV cv,UTL_LOCK lock,UTL_LOCK_RW_TYPE_T rwType);
 ENT_PUBLIC MSG_ID_T  UTL_CVWake(UTL_CV cv);
 ENT_PUBLIC MSG_ID_T  UTL_CVWakeAll(UTL_CV cv);
 

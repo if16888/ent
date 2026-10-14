@@ -17,6 +17,24 @@ These APIs validate the pointer-to-handle argument and set the caller-owned hand
 
 They do not make it safe to close a lock or condition variable while another thread is actively using it. The caller must still guarantee that no thread is blocked on or holding the object when it is closed. On POSIX, if native destruction reports an error, the object storage and the caller's handle are retained rather than freed. This is a best-effort diagnostic, **not** a license to destroy synchronization objects in use (that is undefined behavior).
 
+### Condition-variable wait semantics
+
+The preferred APIs make the wait bound explicit:
+
+- `UTL_CVWaitFor(cv, lock, timeoutMs, rwType)`: nonnegative finite duration;
+  `0` checks immediately and returns `ENT_UTHD_WAIT_TIMEOUT` unless
+  already awakened. Negative durations return `ENT_UTHD_INVALID_ARGUMENT`.
+- `UTL_CVWaitForever(cv, lock, rwType)`: unbounded blocking wait.
+- `UTL_CVWait(cv, lock, ms, rwType)`: retained for compatibility. `ms <= 0`
+  means **unbounded**, while positive values denote finite durations.
+
+Callers must acquire the mutex before waiting and must recheck their shared
+predicate in a loop after each successful wake: condition variables may wake
+without the condition being satisfied. On Linux timed waits use the monotonic
+clock; other POSIX implementations use the system real-time clock.
+Only a successful wait is `ENT_SYS_NORMAL`; expired waits return
+`ENT_UTHD_WAIT_TIMEOUT`.
+
 ## Thread handles
 
 ### `ENT_ThreadClose()`

@@ -76,7 +76,7 @@ static void* cv_wait_thread(void* data)
     }
     while(!probe->ready)
     {
-        probe->wait_status = UTL_CVWait(probe->cv, probe->lock, 0, RW_WRITE_E);
+        probe->wait_status = UTL_CVWaitForever(probe->cv, probe->lock, RW_WRITE_E);
         if(probe->wait_status != ENT_SYS_NORMAL)
         {
             UTL_LockLeave(probe->lock);
@@ -184,6 +184,48 @@ static int test_cv_wait_timeout_semantics(void)
                        "UTL_LockClose should release the mutex after timeout test");
 }
 
+static int test_cv_explicit_wait_contract(void)
+{
+    UTL_LOCK lock = NULL;
+    UTL_CV cv = NULL;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
+    int failures = 0;
+
+    if(expect_true(UTL_LockInit(&lock, "finite-wait-lock") == ENT_SYS_NORMAL,
+                   "finite wait needs a mutex") != 0)
+        return 1;
+    if(expect_true(UTL_CVInit(&cv, "finite-wait-cv") == ENT_SYS_NORMAL,
+                   "finite wait needs a condition variable") != 0)
+    {
+        UTL_LockClose(&lock);
+        return 1;
+    }
+    if(expect_true(UTL_LockEnter(lock) == ENT_SYS_NORMAL,
+                   "finite wait requires the caller to hold the lock") != 0)
+    {
+        UTL_CVClose(&cv);
+        UTL_LockClose(&lock);
+        return 1;
+    }
+
+    sts = UTL_CVWaitFor(cv, lock, 0, RW_WRITE_E);
+    failures += expect_true(sts == ENT_UTHD_WAIT_TIMEOUT,
+                            "explicit 0ms must immediately time out, not wait forever");
+    sts = UTL_CVWaitFor(cv, lock, 15, RW_WRITE_E);
+    failures += expect_true(sts == ENT_UTHD_WAIT_TIMEOUT,
+                            "explicit positive duration must time out if not notified");
+    sts = UTL_CVWaitFor(cv, lock, -1, RW_WRITE_E);
+    failures += expect_true(sts == ENT_UTHD_INVALID_ARGUMENT,
+                            "explicit finite API must reject negative duration");
+    failures += expect_true(UTL_LockLeave(lock) == ENT_SYS_NORMAL,
+                            "timed CV wait must return with the mutex held");
+    failures += expect_true(UTL_CVClose(&cv) == ENT_SYS_NORMAL,
+                            "finite-wait CV close must succeed");
+    failures += expect_true(UTL_LockClose(&lock) == ENT_SYS_NORMAL,
+                            "finite-wait mutex close must succeed");
+    return failures;
+}
+
 static int test_cv_wait_and_wake_roundtrip(void)
 {
     UTL_LOCK lock = NULL;
@@ -257,6 +299,7 @@ int main(void)
     failures += test_rw_lock_requires_explicit_mode();
     failures += test_cv_wait_rejects_spin_lock();
     failures += test_cv_wait_timeout_semantics();
+    failures += test_cv_explicit_wait_contract();
     failures += test_cv_wait_and_wake_roundtrip();
     if(failures != 0)
     {

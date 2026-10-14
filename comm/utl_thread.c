@@ -718,10 +718,10 @@ ENT_PUBLIC MSG_ID_T UTL_CVClose(UTL_CV* cv)
     return ENT_SYS_NORMAL;
 }
 
-static MSG_ID_T iUTL_CVWaitMutex(UTL_TH_CV* cvCtx,UTL_TH_LOCK* lockCtx,int ms)
+static MSG_ID_T iUTL_CVWaitMutex(UTL_TH_CV* cvCtx,UTL_TH_LOCK* lockCtx,int ms,BOOL forever)
 {
 #ifdef _WIN32
-    BOOL ok = SleepConditionVariableCS(&cvCtx->cv,&lockCtx->lock.cs,ms > 0 ? (DWORD)ms : INFINITE);
+    BOOL ok = SleepConditionVariableCS(&cvCtx->cv,&lockCtx->lock.cs,forever ? INFINITE : (DWORD)ms);
     if(ok)
     {
         return 0;
@@ -734,7 +734,7 @@ static MSG_ID_T iUTL_CVWaitMutex(UTL_TH_CV* cvCtx,UTL_TH_LOCK* lockCtx,int ms)
     IENT_LOG_ERROR("SleepConditionVariableCS failed,error [%lu]\n",(unsigned long)err);
     return -6;
 #else
-    if(ms <= 0)
+    if(forever)
     {
         int s = pthread_cond_wait(&cvCtx->cv,&lockCtx->lock.cs);
         if(s != 0)
@@ -775,7 +775,7 @@ static MSG_ID_T iUTL_CVWaitMutex(UTL_TH_CV* cvCtx,UTL_TH_LOCK* lockCtx,int ms)
 #endif
 }
 
-static MSG_ID_T iUTL_CVWaitRW(UTL_TH_CV* cvCtx,UTL_TH_LOCK* lockCtx,int ms,UTL_LOCK_RW_TYPE_T rwType)
+static MSG_ID_T iUTL_CVWaitRW(UTL_TH_CV* cvCtx,UTL_TH_LOCK* lockCtx,int ms,UTL_LOCK_RW_TYPE_T rwType,BOOL forever)
 {
 #ifdef _WIN32
     ULONG flag = 0;
@@ -790,7 +790,7 @@ static MSG_ID_T iUTL_CVWaitRW(UTL_TH_CV* cvCtx,UTL_TH_LOCK* lockCtx,int ms,UTL_L
         return -1;
     }
 
-    ok = SleepConditionVariableSRW(&cvCtx->cv,&lockCtx->lock.rw,ms > 0 ? (DWORD)ms : INFINITE,flag);
+    ok = SleepConditionVariableSRW(&cvCtx->cv,&lockCtx->lock.rw,forever ? INFINITE : (DWORD)ms,flag);
     if(ok)
     {
         return 0;
@@ -805,12 +805,16 @@ static MSG_ID_T iUTL_CVWaitRW(UTL_TH_CV* cvCtx,UTL_TH_LOCK* lockCtx,int ms,UTL_L
     (void)lockCtx;
     (void)ms;
     (void)rwType;
+    (void)forever;
     IENT_LOG_ERROR("unsupported rw lock type\n");
     return -2;
 #endif
 }
 
-ENT_PUBLIC MSG_ID_T UTL_CVWait(UTL_CV cv,UTL_LOCK lock,int ms,UTL_LOCK_RW_TYPE_T rwType)
+/* Centralized dispatch: forever is explicit so 0ms can be a genuine poll
+ * in the new API, while the compatibility API retains 0 => infinite. */
+static MSG_ID_T iUTL_CVWaitDispatch(UTL_CV cv,UTL_LOCK lock,int ms,
+                                     UTL_LOCK_RW_TYPE_T rwType,BOOL forever)
 {
     MSG_ID_T sts = 0;
     if(cv == NULL || lock == NULL)
@@ -825,16 +829,39 @@ ENT_PUBLIC MSG_ID_T UTL_CVWait(UTL_CV cv,UTL_LOCK lock,int ms,UTL_LOCK_RW_TYPE_T
     switch(lockCtx->lockType)
     {
         case LOCK_MUTEX_E:
-            sts = iUTL_CVWaitMutex(cvCtx,lockCtx,ms);
+            sts = iUTL_CVWaitMutex(cvCtx,lockCtx,ms,forever);
             break;
         case LOCK_RW_E:
-            sts = iUTL_CVWaitRW(cvCtx,lockCtx,ms,rwType);
+            sts = iUTL_CVWaitRW(cvCtx,lockCtx,ms,rwType,forever);
             break;
         default:
             IENT_LOG_ERROR("unsupported lock type\n");
             return ENT_UTHD_UNSUPPORTED_LOCK;
     }
     return iUTL_MapCvSts(sts);
+}
+
+/* Deprecated behavior retained for existing consumers: ms <= 0 is infinite. */
+ENT_PUBLIC MSG_ID_T UTL_CVWait(UTL_CV cv,UTL_LOCK lock,int ms,UTL_LOCK_RW_TYPE_T rwType)
+{
+    return iUTL_CVWaitDispatch(cv,lock,ms,rwType,ms <= 0 ? TRUE : FALSE);
+}
+
+/* Explicit finite wait: 0ms is an immediate timeout, negatives are invalid. */
+ENT_PUBLIC MSG_ID_T UTL_CVWaitFor(UTL_CV cv,UTL_LOCK lock,int timeoutMs,
+                                  UTL_LOCK_RW_TYPE_T rwType)
+{
+    if(timeoutMs < 0)
+    {
+        return ENT_UTHD_INVALID_ARGUMENT;
+    }
+    return iUTL_CVWaitDispatch(cv,lock,timeoutMs,rwType,FALSE);
+}
+
+ENT_PUBLIC MSG_ID_T UTL_CVWaitForever(UTL_CV cv,UTL_LOCK lock,
+                                      UTL_LOCK_RW_TYPE_T rwType)
+{
+    return iUTL_CVWaitDispatch(cv,lock,0,rwType,TRUE);
 }
 
 ENT_PUBLIC MSG_ID_T UTL_CVWake(UTL_CV cv)
