@@ -105,6 +105,18 @@ static __declspec(thread) PTIMER_CTX_T sTimerCurrentCallback = NULL;
 static pthread_mutex_t sTimerLifecycleLock = PTHREAD_MUTEX_INITIALIZER;
 static __thread unsigned int sTimerCallbackDepth = 0;
 #endif
+#if ENT_TMR_IMPL_LINUX && defined(ENT_TIMER_BENCH_DEADLINE_HOOK)
+/* Linux benchmark-only thread-local deadline. No production API/ABI changes.
+ * This is the intended MONOTONIC wait deadline, not a post-hoc estimate
+ * reconstructed from prior callbacks. */
+static __thread long long sTimerBenchDeadlineNs = -1;
+
+long long iUTL_TimerBenchDeadlineNs(void)
+{
+    return sTimerBenchDeadlineNs;
+}
+#endif
+
 static BOOL          sTimerClosing = FALSE;
 static BOOL          sTimerCloseActive = FALSE;
 static unsigned int  sTimerLifecycleOps = 0;
@@ -652,6 +664,9 @@ static void* iUTL_TimerThread(void* data)
                 iUTL_TimerThreadStateStop(timerCtx, FALSE);
                 break;
             }
+#if ENT_TMR_IMPL_LINUX && defined(ENT_TIMER_BENCH_DEADLINE_HOOK)
+            sTimerBenchDeadlineNs = deadlineNs;
+#endif
         }
 
         timerCb = timerCtx->timer_ev_cb;
@@ -662,6 +677,9 @@ static void* iUTL_TimerThread(void* data)
         {
             iUTL_TimerInvokeCallback(timerCb, timerData);
         }
+#if ENT_TMR_IMPL_LINUX && defined(ENT_TIMER_BENCH_DEADLINE_HOOK)
+        sTimerBenchDeadlineNs = -1;
+#endif
 
         if(iUTL_TimerThreadStateSelfDelete(timerCtx))
         {

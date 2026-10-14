@@ -701,6 +701,10 @@ if(UNIX AND NOT APPLE)
     ${CMAKE_CURRENT_SOURCE_DIR}/../comm
   )
   target_link_libraries(perf_timer_scale PRIVATE pthread rt)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Compile instrumentation into this benchmark only; production ent stays untouched.
+    target_compile_definitions(perf_timer_scale PRIVATE ENT_TIMER_BENCH_DEADLINE_HOOK=1)
+  endif()
 
   add_executable(
     perf_utl_timer_rt

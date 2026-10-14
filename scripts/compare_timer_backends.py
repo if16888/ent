@@ -162,8 +162,12 @@ def main():
             subset = [row for row in rows if row["scenario"] == key and
                       row["backend"] == backend]
             summaries[key][backend] = {}
-            for field in METRICS:
-                values = [float(row[field]) for row in subset]
+            for field in (*METRICS, *OPTIONAL):
+                values = [float(row[field]) for row in subset if row[field] != ""]
+                if not values:
+                    continue
+                if len(values) != args.trials:
+                    raise ValueError(f"incomplete optional measurement {field} in {key} {backend}")
                 summaries[key][backend][field] = {
                     "median": statistics.median(values),
                     "p95_trials": rank(values, 0.95),
@@ -184,6 +188,16 @@ def main():
             "total_pairs": args.trials,
             "definition": "prototype per-run interarrival P99 strictly lower",
         }
+        if all(legacy[t]["deadline_lag_p99_us"] != "" and
+               prototype[t]["deadline_lag_p99_us"] != "" for t in legacy):
+            summaries[key]["paired_deadline_lag_p99"] = {
+                "timerfd_better_runs": sum(
+                    float(prototype[t]["deadline_lag_p99_us"]) <
+                    float(legacy[t]["deadline_lag_p99_us"]) for t in legacy
+                ),
+                "total_pairs": args.trials,
+                "definition": "observed MONOTONIC scheduled-deadline-to-sample P99",
+            }
     (args.output_dir / "summary.json").write_text(
         json.dumps({"metadata": meta, "summaries": summaries},
                    indent=2, ensure_ascii=False, allow_nan=False) + "\n",

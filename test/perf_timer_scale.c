@@ -40,8 +40,15 @@ MSG_ID_T ENT_LogDebug(ENT_LOG logHandle, const char* format, ...) { (void)logHan
 
 #define TIMER_LIMIT 128
 #define SAMPLES_PER_TIMER 8192
+
+#if defined(__linux__) && defined(ENT_TIMER_BENCH_DEADLINE_HOOK)
+long long iUTL_TimerBenchDeadlineNs(void);
+#endif
+
 typedef struct {
     long long stamps[SAMPLES_PER_TIMER];
+    /* May be absent for the microsecond RT callback-worker path. */
+    long long deadline_lag_ns[SAMPLES_PER_TIMER];
     int n;
 } TIMER_PROBE;
 
@@ -88,7 +95,17 @@ static int threads_after_settle(int expected)
 static void* callback(void* data) {
     TIMER_PROBE* p = (TIMER_PROBE*)data;
     /* Timer runtime serializes callback invocations for a given timer. */
-    if(p->n < SAMPLES_PER_TIMER) p->stamps[p->n++] = ns(CLOCK_MONOTONIC);
+    if(p->n < SAMPLES_PER_TIMER) {
+        long long now = ns(CLOCK_MONOTONIC);
+        long long deadline = -1;
+#if defined(__linux__) && defined(ENT_TIMER_BENCH_DEADLINE_HOOK)
+        deadline = iUTL_TimerBenchDeadlineNs();
+#endif
+        p->stamps[p->n] = now;
+        p->deadline_lag_ns[p->n] = (deadline < 0 || now < 0) ?
+            -1 : (now > deadline ? now - deadline : 0);
+        p->n++;
+    }
     return NULL;
 }
 static int cmp(const void* a, const void* b) {
@@ -112,6 +129,8 @@ int main(int argc, char** argv) {
     TIMER_PROBE* probes = NULL;
     double* deviation_us = NULL;
     double* deletion_us = NULL;
+    double* deadline_lag_us = NULL;
+    int deadline_samples = 0;
     struct rusage resource;
 
     if(argc != 5 || (strcmp(argv[1], "ms") != 0 && strcmp(argv[1], "us") != 0) ||
@@ -163,10 +182,27 @@ int main(int argc, char** argv) {
     if(close_b < close_a || cpu_b < 0 || wall_b <= wall_a) goto CLEANUP;
     after = threads_after_settle(before);
     deviation_us = (double*)malloc((size_t)count * (SAMPLES_PER_TIMER - 1) * sizeof(double));
+#if defined(__linux__) && defined(ENT_TIMER_BENCH_DEADLINE_HOOK)
+    if(!mode_us)
+        deadline_lag_us = (double*)malloc((size_t)count * SAMPLES_PER_TIMER * sizeof(double));
+#endif
     if(!deviation_us) goto CLEANUP;
+#if defined(__linux__) && defined(ENT_TIMER_BENCH_DEADLINE_HOOK)
+    if(!mode_us && !deadline_lag_us) goto CLEANUP;
+#endif
     for(i = 0; i < count; ++i) {
         TIMER_PROBE* p = &probes[i];
         total_hits += p->n;
+        if(deadline_lag_us) {
+            for(k = 0; k < p->n; ++k) {
+                if(p->deadline_lag_ns[k] < 0) {
+                    fprintf(stderr, "missing monotonic timer deadline timer=%d hit=%d\n", i, k);
+                    goto CLEANUP;
+                }
+                deadline_lag_us[deadline_samples++] =
+                    (double)p->deadline_lag_ns[k] / 1000.0;
+            }
+        }
         for(k = 1; k < p->n; ++k) {
             double err = (double)(p->stamps[k] - p->stamps[k-1] - base_ns) / 1000.0;
             if(err < 0) err = -err;
@@ -179,6 +215,10 @@ int main(int argc, char** argv) {
     }
     qsort(deviation_us, (size_t)sample_count, sizeof(double), cmp);
     qsort(deletion_us, (size_t)count, sizeof(double), cmp);
+    if(deadline_lag_us) {
+        if(deadline_samples != total_hits || deadline_samples < 2) goto CLEANUP;
+        qsort(deadline_lag_us, (size_t)deadline_samples, sizeof(double), cmp);
+    }
     memset(&resource, 0, sizeof(resource));
     (void)getrusage(RUSAGE_SELF, &resource);
     printf("timer_scale mode=%s timers=%d period=%d duration_ms=%d hits=%d intervals=%d "
@@ -186,7 +226,7 @@ int main(int argc, char** argv) {
            "cpu_process_ms=%.3f wall_ms=%.3f cpu_pct_single_core=%.2f "
            "threads_before=%d threads_active=%d threads_after=%d ru_maxrss_kib=%ld "
            "delete_p50_us=%.3f delete_p95_us=%.3f delete_p99_us=%.3f "
-           "delete_max_us=%.3f timer_close_us=%.3f\n",
+           "delete_max_us=%.3f timer_close_us=%.3f",
            argv[1], count, period, duration, total_hits, sample_count,
            pct(deviation_us, sample_count, 50),
            pct(deviation_us, sample_count, 95),
@@ -198,6 +238,14 @@ int main(int argc, char** argv) {
            pct(deletion_us, count, 50), pct(deletion_us, count, 95),
            pct(deletion_us, count, 99), deletion_us[count - 1],
            (double)(close_b - close_a) / 1000.0);
+    if(deadline_lag_us) {
+        printf(" deadline_lag_p50_us=%.3f deadline_lag_p95_us=%.3f "
+               "deadline_lag_p99_us=%.3f",
+               pct(deadline_lag_us, deadline_samples, 50),
+               pct(deadline_lag_us, deadline_samples, 95),
+               pct(deadline_lag_us, deadline_samples, 99));
+    }
+    putchar('\n');
     status = EXIT_SUCCESS;
 CLEANUP:
     if(timers) for(i = 0; i < open; ++i)
@@ -207,5 +255,6 @@ CLEANUP:
     free(probes);
     free(deviation_us);
     free(deletion_us);
+    free(deadline_lag_us);
     return status;
 }

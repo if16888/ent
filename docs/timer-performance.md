@@ -80,10 +80,23 @@ not a new timer implementation linked into ent. It uses timerfd one-shot
 absolute deadlines, epoll with a single dispatcher, and eventfd for shutdown.
 After each callback sample, the timer is re-armed for the next fixed-delay
 period. The common output columns support a controlled comparison to
-`perf_timer_scale`; extra `deadline_lag_pXX_us` columns are measured only
-in the timerfd prototype, using kernel-arm deadline versus observed callback
-timestamp. **The existing ent timer lacks that same metric**, so latency
-percentiles must not be directly compared.
+`perf_timer_scale`.
+
+Linux `perf_timer_scale` is also built with a **benchmark-only** internal
+deadline hook for normal millisecond timers; its callback records the
+original monotonic deadline computed by the POSIX worker before waiting.
+Both benchmark binaries therefore report `deadline_lag_p50_us`,
+`deadline_lag_p95_us` and `deadline_lag_p99_us` for `ms` tests,
+measured from planned MONOTONIC deadline to the timestamp at the event/
+callback sampling point. They use the same clock and deadline definition,
+but their internal sampling points differ slightly (the prototype samples
+after reading timerfd; the existing timer samples inside its callback).
+These are observational latencies, not a hard real-time SLA. Microsecond
+legacy timers use a separate RT worker and **do not** report these fields,
+so the `us` scenario has no comparable deadline-lag pair. Do not compare
+prototype-only lag to legacy inter-arrival error. The instrumentation
+macro `ENT_TIMER_BENCH_DEADLINE_HOOK` is set only for the benchmark target,
+never the published ent library.
 
 Run a short functional sanity check:
 
