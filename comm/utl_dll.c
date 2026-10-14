@@ -78,6 +78,10 @@ ENT_PUBLIC MSG_ID_T UTL_DllInsCurr(DLL_D_HDR *dll_hdr,DLL_D_HDR *dll_elem)
         IENT_LOG_ERROR("arguments validations is NULL\n");
         return ENT_DLL_BAD_ARGUMENT;
     }
+    if(dll_hdr == dll_elem)
+    {
+        return ENT_DLL_SAME_NODE;
+    }
     return UTL_DllInsHead(dll_hdr->bw_ptr,dll_elem);
 }
 
@@ -126,6 +130,8 @@ ENT_PUBLIC MSG_ID_T UTL_DllRemHead(DLL_D_HDR *dll_hdr,DLL_D_HDR **dll_elem)
     dll_hdr->fw_ptr = removed_elem->fw_ptr;
     next_dll_elem = removed_elem->fw_ptr;
     next_dll_elem->bw_ptr = dll_hdr;
+    removed_elem->fw_ptr = NULL;
+    removed_elem->bw_ptr = NULL;
     *dll_elem = removed_elem;
     return ENT_SYS_NORMAL;
 }
@@ -150,8 +156,15 @@ ENT_PUBLIC MSG_ID_T UTL_DllRemCurr(DLL_D_HDR *dll_hdr,DLL_D_HDR **dll_elem)
 
     prev = dll_hdr->bw_ptr;
     next = dll_hdr->fw_ptr;
+    if(prev == NULL || next == NULL ||
+       prev->fw_ptr != dll_hdr || next->bw_ptr != dll_hdr)
+    {
+        return ENT_DLL_BAD_ARGUMENT;
+    }
     prev->fw_ptr = next;
     next->bw_ptr = prev;
+    dll_hdr->fw_ptr = NULL;
+    dll_hdr->bw_ptr = NULL;
     *dll_elem = dll_hdr;
     return ENT_SYS_NORMAL;
 }
@@ -176,6 +189,8 @@ ENT_PUBLIC MSG_ID_T UTL_DllRemTail(DLL_D_HDR *dll_hdr,DLL_D_HDR **dll_elem)
     dll_hdr->bw_ptr = removed_elem->bw_ptr;
     prev_dll_elem = removed_elem->bw_ptr;
     prev_dll_elem->fw_ptr = dll_hdr;
+    removed_elem->fw_ptr = NULL;
+    removed_elem->bw_ptr = NULL;
     *dll_elem = removed_elem;
     return ENT_SYS_NORMAL;
 }

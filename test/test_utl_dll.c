@@ -302,6 +302,31 @@ static int test_dll_remove_curr_rejects_head_without_mutating_list(void)
                        "Rejected head removal should leave the tail node unchanged");
 }
 
+static int test_dll_rejects_self_insertion_and_double_remove(void)
+{
+    DLL_D_HDR head;
+    TEST_NODE first;
+    DLL_D_HDR* removed = NULL;
+
+    memset(&first, 0, sizeof(first));
+    UTL_DllInitHead(&head);
+    UTL_DllInsHead(&head, &first.link);
+    if(expect_true(UTL_DllInsCurr(&head, &head) == ENT_DLL_SAME_NODE,
+                   "inserting the list head into itself must fail") != 0)
+        return 1;
+    if(expect_true(UTL_DllRemCurr(&first.link, &removed) == ENT_SYS_NORMAL,
+                   "first removal should succeed") != 0)
+        return 1;
+    if(expect_true(first.link.fw_ptr == NULL && first.link.bw_ptr == NULL,
+                   "detached nodes should not retain neighbor pointers") != 0)
+        return 1;
+    if(expect_true(UTL_DllRemCurr(&first.link, &removed) == ENT_DLL_BAD_ARGUMENT,
+                   "second removal must fail without corrupting neighbors") != 0)
+        return 1;
+    return expect_true(head.fw_ptr == &head && head.bw_ptr == &head,
+                       "sentinel must remain intact after rejection");
+}
+
 int main(void)
 {
     int failures = 0;
@@ -311,6 +336,7 @@ int main(void)
     failures += test_dll_remove_head_then_tail_returns_inserted_nodes();
     failures += test_dll_remove_head_reports_empty_list();
     failures += test_dll_remove_curr_rejects_head_without_mutating_list();
+    failures += test_dll_rejects_self_insertion_and_double_remove();
 
     if(failures != 0)
     {

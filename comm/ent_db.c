@@ -638,16 +638,13 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
         return ENT_DBS_BAD_ARGUMENT;
     }
 
-    dbCfg = (DB_CFG*)*pdbHandle;
-
-    if(dbCfg!=NULL && dbCfg->sTag==ENTDB_S_TAG && dbCfg->eTag == ENTDB_E_TAG)
+    /* An output slot must be explicitly initialized to NULL by its owner.
+     * Never dereference an incoming pointer: it could be stale or foreign.
+     * Reconfiguration and close are separate, explicit operations. */
+    if(*pdbHandle != NULL)
     {
-        sts=ENT_DbCloseHandle(pdbHandle);
-        if(sts < 0)
-        {
-            return sts;
-        }
-        dbCfg = NULL;
+        IENT_LOG_ERROR("DB output handle must be NULL; close an existing handle explicitly.\n");
+        return ENT_DBS_IN_USE;
     }
 
     iENT_DbGlobalLock();
