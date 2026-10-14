@@ -119,7 +119,7 @@ typedef struct USER_SQLITE_DATA
     void* userData;
 } USER_SQLITE_READ, USER_SQLITE_WRITE;
 
-static int iENT_DbCheckedSizeMultiply(size_t left, size_t right, size_t* result)
+static inline int iENT_DbCheckedSizeMultiply(size_t left, size_t right, size_t* result)
 {
     if(result == NULL || (left != 0 && right > ((size_t)-1) / left))
     {
@@ -129,7 +129,7 @@ static int iENT_DbCheckedSizeMultiply(size_t left, size_t right, size_t* result)
     return 1;
 }
 
-static int iENT_DbCheckedSizeAdd(size_t left, size_t right, size_t* result)
+static inline int iENT_DbCheckedSizeAdd(size_t left, size_t right, size_t* result)
 {
     if(result == NULL || right > ((size_t)-1) - left)
     {

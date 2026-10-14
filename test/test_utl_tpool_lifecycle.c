@@ -48,9 +48,27 @@ static DWORD WINAPI test_thread_start(LPVOID data)
 
 typedef struct
 {
-    volatile int task_started;
+    int task_started;
     volatile int task_hits;
 } TPOOL_LIFECYCLE_PROBE;
+
+static void mark_task_started(TPOOL_LIFECYCLE_PROBE* probe)
+{
+#ifdef _WIN32
+    InterlockedExchange((volatile LONG*)&probe->task_started, 1);
+#else
+    __atomic_store_n(&probe->task_started, 1, __ATOMIC_RELEASE);
+#endif
+}
+
+static int task_has_started(const TPOOL_LIFECYCLE_PROBE* probe)
+{
+#ifdef _WIN32
+    return InterlockedCompareExchange((volatile LONG*)&probe->task_started, 0, 0) != 0;
+#else
+    return __atomic_load_n(&probe->task_started, __ATOMIC_ACQUIRE) != 0;
+#endif
+}
 
 static int expect_true(int condition, const char* message)
 {
@@ -200,7 +218,7 @@ MSG_ID_T UTL_Sleep(int ms)
 static MSG_ID_T slow_task_cb(void* data)
 {
     TPOOL_LIFECYCLE_PROBE* probe = (TPOOL_LIFECYCLE_PROBE*)data;
-    probe->task_started = 1;
+    mark_task_started(probe);
     UTL_Sleep(80);
     probe->task_hits++;
     return 9;
@@ -248,12 +266,12 @@ static int test_tpool_add_task_is_rejected_once_close_starts(void)
         return 1;
     }
 
-    for(i = 0; i < 50 && probe.task_started == 0; ++i)
+    for(i = 0; i < 50 && !task_has_started(&probe); ++i)
     {
         UTL_Sleep(5);
     }
 
-    if(expect_true(probe.task_started == 1,
+    if(expect_true(task_has_started(&probe),
                    "slow task should start before close/add race is exercised") != 0)
     {
         UTL_TPoolClose(&pool);

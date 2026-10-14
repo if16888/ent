@@ -20,7 +20,7 @@ behavior or every possible concurrent interleaving.
   is required. Callbacks borrow result storage and must not reenter/close the
   same DB handle. Non-NULL callbacks require non-NULL user data.
 - DB password copies held by ent are zeroed before freeing on reconfigure and close; this does not scrub independent database client or allocator copies.
-- `ENT_DbInitHandle(&handle, ...)` requires a caller-initialized NULL slot, rejects non-NULL without touching the referenced object, and never implicitly closes or replaces a live handle. Close explicitly first.
+- `ENT_DbInitHandle(&handle, ...)` treats `handle` as output-only and clears the slot without reading its previous contents, so an uninitialized local variable is valid. Close any live handle before reusing its variable; initialization does not close or preserve a previous handle.
 - DB and runtime close wait for admitted operations. The caller must fence new
   entries against close and stop using copied raw handles after close. Logging
   uses its own registry protection; that guarantee must not be generalized to

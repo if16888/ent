@@ -422,27 +422,40 @@ static int read_env_or_default_int(const char* name, int fallback)
     return result;
 }
 
-static int test_db_init_handle_rejects_uninitialized_service(void)
+static int test_db_init_handle_clears_uninitialized_output(void)
 {
-    DB_HANDLE db_handle = NULL;
+    DB_HANDLE db_handle;
+    MSG_ID_T status;
 
     ENT_DbClose();
 
-    return expect_true(ENT_DbInitHandle(&db_handle, SQLITE_TYPE, NULL, "ignored.db", NULL, NULL, 0) == ENT_DBS_NOT_INITIALIZED,
-                       "ENT_DbInitHandle should reject calls before ENT_DbInit");
+    status = ENT_DbInitHandle(&db_handle, SQLITE_TYPE, NULL, "ignored.db", NULL, NULL, 0);
+    return expect_true(status == ENT_DBS_NOT_INITIALIZED && db_handle == NULL,
+                       "ENT_DbInitHandle should clear an uninitialized output before checking service state");
 }
 
-static int test_db_init_handle_rejects_nonnull_without_dereference(void)
+static int test_db_init_handle_clears_nonnull_output(void)
 {
     DB_HANDLE untrusted = (DB_HANDLE)(uintptr_t)1;
-    MSG_ID_T status = ENT_DbInitHandle(&untrusted, SQLITE_TYPE, NULL, "ignored.db", NULL, NULL, 0);
-    if(expect_true(status == ENT_DBS_IN_USE,
-                   "DB init must reject a non-NULL output without dereferencing it") != 0)
+    MSG_ID_T initStatus;
+    MSG_ID_T status;
+    MSG_ID_T closeStatus;
+
+    initStatus = reset_db_service();
+    if(initStatus != ENT_SYS_NORMAL && initStatus != ENT_SYS_ALREADY_INITIALIZED)
+    {
+        return expect_true(0, "ENT_DbInit should initialize before output-slot validation");
+    }
+
+    status = ENT_DbInitHandle(&untrusted, (DB_TYPE)999, NULL, "ignored.db", NULL, NULL, 0);
+    closeStatus = ENT_DbClose();
+    if(expect_true(status == ENT_DBS_UNSUPPORTED,
+                   "an unsupported database type should be rejected after clearing the output slot") != 0)
     {
         return 1;
     }
-    return expect_true(untrusted == (DB_HANDLE)(uintptr_t)1,
-                       "DB init must preserve the rejected output slot");
+    return expect_true(untrusted == NULL && closeStatus == ENT_SYS_NORMAL,
+                       "ENT_DbInitHandle should overwrite output storage without inspecting its prior value");
 }
 
 static int test_db_api_rejects_null_handles(void)
@@ -1711,12 +1724,12 @@ static int test_pgsql_roundtrip_if_configured(void)
 
 int main(void)
 {
-    if(test_db_init_handle_rejects_uninitialized_service() != 0)
+    if(test_db_init_handle_clears_uninitialized_output() != 0)
     {
         return 1;
     }
 
-    if(test_db_init_handle_rejects_nonnull_without_dereference() != 0)
+    if(test_db_init_handle_clears_nonnull_output() != 0)
     {
         return 1;
     }

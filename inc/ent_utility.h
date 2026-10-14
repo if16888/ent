@@ -134,11 +134,11 @@ typedef void*(*UTL_TIMER_EV_F)(void*);
 
 typedef void* UTL_TIMER_T;
 
-ENT_PUBLIC MSG_ID_T  UTL_TimerInit();
+ENT_PUBLIC MSG_ID_T  UTL_TimerInit(void);
 ENT_PUBLIC MSG_ID_T  UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int ms,UTL_TIMER_EV_F evCb,void* data);
 ENT_PUBLIC MSG_ID_T  UTL_TimerCreateUs(UTL_TIMER_T* pTimer,unsigned int type, int period_us,UTL_TIMER_EV_F evCb,void* data);
 ENT_PUBLIC MSG_ID_T  UTL_TimerDelete(UTL_TIMER_T* pTimer);
-ENT_PUBLIC MSG_ID_T  UTL_TimerClose();
+ENT_PUBLIC MSG_ID_T  UTL_TimerClose(void);
 
 #ifdef _WIN32
 typedef SOCKET  UTL_D_SOCKET;
@@ -146,7 +146,7 @@ typedef SOCKET  UTL_D_SOCKET;
 typedef int     UTL_D_SOCKET;
 #endif 
 
-ENT_PUBLIC MSG_ID_T UTL_SocketInit();
+ENT_PUBLIC MSG_ID_T UTL_SocketInit(void);
 ENT_PUBLIC MSG_ID_T  UTL_Socket(
     int           AddrFamily,	  
     int           SocketType,	  

@@ -990,7 +990,7 @@ static MSG_ID_T iENT_CTXClose(ENT_CTX* ctx)
     UTL_LockEnter(ctx->entLock);
     while(ctx->running || ctx->activeCalls > 0u)
     {
-        UTL_CVWait(ctx->entCV,ctx->entLock,0,RW_WRITE_E);
+        UTL_CVWait(ctx->entCV,ctx->entLock,-1,RW_WRITE_E);
     }
     UTL_LockLeave(ctx->entLock);
 
@@ -1043,7 +1043,7 @@ static MSG_ID_T iENT_CTXRun(ENT_CTX* ctx)
     ctx->running = true;
     while(!ctx->stopRequested)
     {
-        waitSts = UTL_CVWait(ctx->entCV,ctx->entLock,0,RW_WRITE_E);
+        waitSts = UTL_CVWait(ctx->entCV,ctx->entLock,-1,RW_WRITE_E);
         if(waitSts < 0)
         {
             ctx->running = false;
@@ -1152,7 +1152,7 @@ ENT_PUBLIC MSG_ID_T  ENT_Run(ENT_HANDLE handle)
  *
  *-----------------------------------------------------------------------------
  */
-ENT_PUBLIC MSG_ID_T  ENT_Helpers()
+ENT_PUBLIC MSG_ID_T  ENT_Helpers(void)
 {
     return ENT_SYS_NORMAL;
 }
