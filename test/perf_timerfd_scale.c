@@ -3,6 +3,7 @@
  * Not part of the ent timer runtime or its public API. Timers rearm after
  * callback accounting to retain the existing fixed-delay semantics.
  * This prototype has one dispatcher thread, not a thread per timer. */
+#include <dirent.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -37,6 +38,13 @@ typedef struct {
     int worker_error;
     pthread_mutex_t lock;
     PROBE *probes;
+    /* Test-only injected callback gate. Never active during benchmarks. */
+    int hol_test;
+    int hol_entered;
+    int hol_release;
+    int hol_other_seen;
+    pthread_mutex_t hol_lock;
+    pthread_cond_t hol_cv;
 } BENCH;
 
 static uint64_t monotonic_ns(void)
@@ -95,6 +103,38 @@ static int threads_after_settle(int expected)
     }
     return n;
 }
+static int open_fds(void)
+{
+    DIR *dir = opendir("/proc/self/fd");
+    struct dirent *entry;
+    int count = 0;
+    if(dir == NULL) return -1;
+    while((entry = readdir(dir)) != NULL)
+    {
+        if(strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0)
+            count++;
+    }
+    closedir(dir);
+    return count;
+}
+
+static int wait_hol(BENCH *b, int *flag)
+{
+    struct timespec until;
+    int status = 0;
+    if(clock_gettime(CLOCK_REALTIME, &until) != 0) return -1;
+    until.tv_sec += 2;
+    pthread_mutex_lock(&b->hol_lock);
+    while(!*flag)
+    {
+        status = pthread_cond_timedwait(&b->hol_cv, &b->hol_lock, &until);
+        if(status != 0) break;
+    }
+    status = *flag ? 0 : -1;
+    pthread_mutex_unlock(&b->hol_lock);
+    return status;
+}
+
 static int arm(PROBE *p)
 {
     struct itimerspec req;
@@ -145,6 +185,32 @@ static void *dispatch(void *arg)
                             p->lateness[p->n] = now > p->deadline ? now - p->deadline : 0;
                             p->n++;
                         }
+                        /*
+                         * A deterministic, test-only stand-in for a callback
+                         * blocked inside a single shared dispatcher. The
+                         * owner arms timer 2 while timer 1 is blocked, then
+                         * verifies timer 2 could not be serviced on time.
+                         * Benchmark mode never enters either test branch.
+                         */
+                        if(b->hol_test && token == 1)
+                        {
+                            pthread_mutex_lock(&b->hol_lock);
+                            if(!b->hol_entered)
+                            {
+                                b->hol_entered = 1;
+                                pthread_cond_broadcast(&b->hol_cv);
+                                while(!b->hol_release)
+                                    pthread_cond_wait(&b->hol_cv, &b->hol_lock);
+                            }
+                            pthread_mutex_unlock(&b->hol_lock);
+                        }
+                        if(b->hol_test && token == 2)
+                        {
+                            pthread_mutex_lock(&b->hol_lock);
+                            b->hol_other_seen = 1;
+                            pthread_cond_broadcast(&b->hol_cv);
+                            pthread_mutex_unlock(&b->hol_lock);
+                        }
                         /* A new timer period begins AFTER handling this callback.
                          * Do not use kernel periodic catch-up semantics. */
                         p->deadline = monotonic_ns() + b->period_ns;
@@ -173,6 +239,135 @@ static double percentile(const double *sorted, int count, int pct)
     if(k > count) k = count;
     return sorted[k - 1];
 }
+/*
+ * Diagnose head-of-line blocking in the existing *benchmark prototype*.
+ * This is not a production callback API, nor a lifecycle-equivalence test.
+ * Timer 1 is paused inside dispatch; only then do we arm timer 2. We expect
+ * timer 2 to expire but not be observed until timer 1's gate is released.
+ */
+static int test_dispatch_head_of_line(void)
+{
+    BENCH b;
+    PROBE probes[2];
+    struct epoll_event event;
+    pthread_t worker;
+    uint64_t delayed_ns = 0;
+    int first_fds = open_fds();
+    int first_threads = threads();
+    int last_fds, last_threads;
+    int lock_init = 0, hol_lock_init = 0, hol_cv_init = 0;
+    int started = 0, success = 0;
+    int i;
+
+    memset(&b, 0, sizeof(b));
+    memset(probes, 0, sizeof(probes));
+    b.epfd = -1;
+    b.stopfd = -1;
+    b.count = 2;
+    b.period_ns = 1000000ULL;
+    b.probes = probes;
+    b.hol_test = 1;
+    for(i = 0; i < 2; ++i) probes[i].fd = -1;
+    if(first_fds < 0 || first_threads < 0) goto CLEANUP;
+    if(pthread_mutex_init(&b.lock, NULL) != 0) goto CLEANUP;
+    lock_init = 1;
+    if(pthread_mutex_init(&b.hol_lock, NULL) != 0) goto CLEANUP;
+    hol_lock_init = 1;
+    if(pthread_cond_init(&b.hol_cv, NULL) != 0) goto CLEANUP;
+    hol_cv_init = 1;
+
+    b.epfd = epoll_create1(EPOLL_CLOEXEC);
+    b.stopfd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+    if(b.epfd < 0 || b.stopfd < 0) goto CLEANUP;
+    memset(&event, 0, sizeof(event));
+    event.events = EPOLLIN;
+    event.data.u32 = 0;
+    if(epoll_ctl(b.epfd, EPOLL_CTL_ADD, b.stopfd, &event) != 0) goto CLEANUP;
+    for(i = 0; i < 2; ++i)
+    {
+        PROBE *p = &probes[i];
+        p->fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
+        if(p->fd < 0) goto CLEANUP;
+        p->active = 1;
+        memset(&event, 0, sizeof(event));
+        event.events = EPOLLIN;
+        event.data.u32 = (uint32_t)(i + 1);
+        if(epoll_ctl(b.epfd, EPOLL_CTL_ADD, p->fd, &event) != 0) goto CLEANUP;
+    }
+    /* Only timer 1 is armed initially. Timer 2 cannot precede its gate. */
+    probes[0].deadline = monotonic_ns() + b.period_ns;
+    if(arm(&probes[0]) != 0) goto CLEANUP;
+    if(pthread_create(&worker, NULL, dispatch, &b) != 0) goto CLEANUP;
+    started = 1;
+    if(wait_hol(&b, &b.hol_entered) != 0)
+    {
+        fprintf(stderr, "timerfd HOL: timer 1 did not enter callback gate\n");
+        goto CLEANUP;
+    }
+    probes[1].deadline = monotonic_ns() + b.period_ns;
+    if(arm(&probes[1]) != 0) goto CLEANUP;
+    sleep_ms(30);
+
+    pthread_mutex_lock(&b.hol_lock);
+    /* Timer 2 cannot have been processed while the only worker is gated. */
+    if(b.hol_other_seen)
+    {
+        pthread_mutex_unlock(&b.hol_lock);
+        fprintf(stderr, "timerfd HOL: unrelated timer ran during gated callback\n");
+        goto CLEANUP;
+    }
+    b.hol_release = 1;
+    pthread_cond_broadcast(&b.hol_cv);
+    pthread_mutex_unlock(&b.hol_lock);
+    if(wait_hol(&b, &b.hol_other_seen) != 0)
+    {
+        fprintf(stderr, "timerfd HOL: timer 2 was not processed after release\n");
+        goto CLEANUP;
+    }
+    success = 1;
+
+CLEANUP:
+    if(started)
+    {
+        uint64_t one = 1;
+        pthread_mutex_lock(&b.hol_lock);
+        b.hol_release = 1;
+        pthread_cond_broadcast(&b.hol_cv);
+        pthread_mutex_unlock(&b.hol_lock);
+        if(b.stopfd >= 0) (void)write(b.stopfd, &one, sizeof(one));
+        pthread_join(worker, NULL);
+        if(b.worker_error || probes[1].n == 0)
+            success = 0;
+        else
+            delayed_ns = probes[1].lateness[0];
+    }
+    for(i = 0; i < 2; ++i)
+        if(probes[i].fd >= 0) (void)close(probes[i].fd);
+    if(b.stopfd >= 0) (void)close(b.stopfd);
+    if(b.epfd >= 0) (void)close(b.epfd);
+    if(hol_cv_init) pthread_cond_destroy(&b.hol_cv);
+    if(hol_lock_init) pthread_mutex_destroy(&b.hol_lock);
+    if(lock_init) pthread_mutex_destroy(&b.lock);
+    last_fds = open_fds();
+    last_threads = threads_after_settle(first_threads);
+    if(first_fds != last_fds || first_threads != last_threads)
+    {
+        fprintf(stderr, "timerfd HOL: resource leak: fd %d->%d, threads %d->%d\n",
+                first_fds, last_fds, first_threads, last_threads);
+        success = 0;
+    }
+    if(delayed_ns < 15000000ULL)
+    {
+        fprintf(stderr, "timerfd HOL: expected 15ms+ stall, got %.3fms\n",
+                (double)delayed_ns / 1e6);
+        success = 0;
+    }
+    if(success)
+        printf("timerfd HOL reproduced: other_timer_lag_ms=%.3f fds=%d threads=%d\n",
+               (double)delayed_ns / 1e6, last_fds, last_threads);
+    return success ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
 int main(int argc, char **argv)
 {
     BENCH b;
@@ -187,6 +382,9 @@ int main(int argc, char **argv)
     int before = -1, active = -1, after = -1;
     int i, j, created = 0, samples = 0, hits = 0, rc = EXIT_FAILURE;
     int mutex_initialized = 0, thread_started = 0;
+
+    if(argc == 2 && strcmp(argv[1], "--selftest-hol") == 0)
+        return test_dispatch_head_of_line();
 
     if(argc != 5 || (strcmp(argv[1], "ms") && strcmp(argv[1], "us")) ||
        parse(argv[2], 1, TIMER_LIMIT, &count) ||
