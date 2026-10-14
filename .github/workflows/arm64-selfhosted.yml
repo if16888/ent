@@ -111,6 +111,17 @@ jobs:
             --scenario ms:1:20 --scenario ms:64:20 \
             --scenario ms:128:20 --scenario us:8:1000
 
+      - name: Experimental timerfd comparison smoke (non-threshold)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/compare_timer_backends.py \
+            --legacy-bin "$BUILD_DIR/bin/perf_timer_scale" \
+            --prototype-bin "$BUILD_DIR/bin/perf_timerfd_scale" \
+            --output-dir "$RUNNER_TEMP/timerfd-compare-smoke" \
+            --trials 1 --duration-ms 350 \
+            --scenario ms:16:20 --scenario us:4:1000
+
       - name: Repeat pinned timer baseline (manual dispatch only)
         if: github.event_name == 'workflow_dispatch'
         shell: bash
@@ -120,6 +131,25 @@ jobs:
             --binary "$BUILD_DIR/bin/perf_timer_scale" \
             --output-dir "$RUNNER_TEMP/timer-baseline-arm64" \
             --trials 20 --duration-ms 1500 --pin-first-allowed
+
+      - name: Manual paired timerfd comparison (20 trials)
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/compare_timer_backends.py \
+            --legacy-bin "$BUILD_DIR/bin/perf_timer_scale" \
+            --prototype-bin "$BUILD_DIR/bin/perf_timerfd_scale" \
+            --output-dir "$RUNNER_TEMP/timerfd-comparison-arm64" \
+            --trials 20 --duration-ms 1500 --pin-first-allowed
+
+      - name: Upload manual timerfd A/B dataset
+        if: github.event_name == 'workflow_dispatch' && always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: timerfd-comparison-arm64
+          path: ${{ runner.temp }}/timerfd-comparison-arm64
+          if-no-files-found: warn
 
       - name: Upload manual timer baseline dataset
         if: github.event_name == 'workflow_dispatch' && always()

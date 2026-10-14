@@ -87,6 +87,15 @@ jobs:
             --trials 1 --duration-ms 350 \
             --scenario ms:1:20 --scenario us:2:1000
 
+      - name: Experimental timerfd comparison smoke (non-threshold)
+        run: |
+          python3 scripts/compare_timer_backends.py \
+            --legacy-bin "$BUILD_DIR/bin/perf_timer_scale" \
+            --prototype-bin "$BUILD_DIR/bin/perf_timerfd_scale" \
+            --output-dir "$RUNNER_TEMP/timerfd-compare-smoke" \
+            --trials 1 --duration-ms 350 \
+            --scenario ms:1:20 --scenario ms:16:20
+
       - name: Resource snapshot
         if: always()
         run: |
