@@ -88,6 +88,38 @@ jobs:
           cmake --version
           command -v ninja && ninja --version || true
 
+      # Do not spend minutes on manual pinned baselines when four full CPU
+      # quotas are unavailable for the requested four-CPU acceptance run.
+      - name: Fail-fast four-CPU experiment capacity preflight (manual only)
+        if: github.event_name == 'workflow_dispatch' && inputs.full_four_cpu_ab
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=scripts python3 - <<'PY'
+          import json
+          import shutil
+          from timer_baseline import machine_metadata
+          from compare_timer_backends import check_cpu_quota_capacity
+
+          metadata = machine_metadata()
+          cpus = metadata["cpu_affinity_allowed"]
+          if len(cpus) != 4:
+              raise SystemExit(f"four-CPU experiment requires exactly 4 allowed CPUs, found {len(cpus)}: {cpus}")
+          try:
+              quota_cores = check_cpu_quota_capacity(metadata.get("cpu_cgroup_max"), 4)
+          except ValueError as exc:
+              raise SystemExit(f"four-CPU experiment preflight failed: {exc}") from exc
+          if shutil.which("taskset") is None:
+              raise SystemExit("four-CPU loaded experiment requires taskset")
+          print(json.dumps({
+              "git_sha": metadata["git_sha"],
+              "allowed_cpus": cpus,
+              "cpu_cgroup_max": metadata["cpu_cgroup_max"],
+              "quota_capacity_cores": quota_cores,
+              "status": "preflight_pass",
+          }, sort_keys=True))
+          PY
+
       - name: Configure
         run: ./scripts/run-ci-linux.sh configure
 
