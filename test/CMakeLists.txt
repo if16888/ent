@@ -681,6 +681,12 @@ if(UNIX AND NOT APPLE)
   target_link_libraries(perf_utl_timer PRIVATE rt)
 endif()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  # Experimental benchmark only: independent of ent timer runtime/API.
+  add_executable(perf_timerfd_scale perf_timerfd_scale.c)
+  target_link_libraries(perf_timerfd_scale PRIVATE pthread)
+endif()
+
 if(UNIX AND NOT APPLE)
   add_executable(
     perf_timer_scale
