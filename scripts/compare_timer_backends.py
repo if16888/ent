@@ -7,6 +7,7 @@ is diagnostic and MUST NOT be interpreted as a measured production timer SLA.
 import argparse
 import csv
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -80,7 +81,7 @@ def main():
         },
         "ordering": "alternating legacy-timerfd then timerfd-legacy",
         "metric_scope": "sampled interarrival and resource measurements; no SLA",
-        "caveat": "delete and close contracts differ; prototype-only deadline lag is not paired",
+        "caveat": "delete and close contracts differ; deadline lag is comparable only for instrumented ms timers",
     })
     args.output_dir.mkdir(parents=True, exist_ok=True)
     rows = []
@@ -118,6 +119,17 @@ def main():
                             f"{result.stdout[-2000:]}\n{result.stderr[-2000:]}"
                         )
                     metric = parse_result(result.stdout)
+                    # Reject mixed old/new binaries when comparing absolute deadlines.
+                    # The Linux RT microsecond implementation has a separate
+                    # scheduler and is not yet instrumented for that metric.
+                    if mode == "ms":
+                        for field in OPTIONAL:
+                            try:
+                                value = float(metric[field])
+                            except (KeyError, ValueError) as exc:
+                                raise ValueError(f"missing {field} for {key} {backend}") from exc
+                            if not math.isfinite(value) or value < 0:
+                                raise ValueError(f"invalid {field} for {key} {backend}")
                     if (metric["mode"], int(metric["timers"]), int(metric["period"])) != (
                         mode, count, period
                     ):
@@ -162,7 +174,9 @@ def main():
             subset = [row for row in rows if row["scenario"] == key and
                       row["backend"] == backend]
             summaries[key][backend] = {}
-            for field in METRICS:
+            # Scheduled deadline lag is now the same measurement for
+            # both backends for *millisecond* timers only.
+            for field in (*METRICS, *(OPTIONAL if mode == "ms" else ())):
                 values = [float(row[field]) for row in subset]
                 summaries[key][backend][field] = {
                     "median": statistics.median(values),

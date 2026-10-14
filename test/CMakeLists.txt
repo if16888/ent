@@ -701,6 +701,8 @@ if(UNIX AND NOT APPLE)
     ${CMAKE_CURRENT_SOURCE_DIR}/../comm
   )
   target_link_libraries(perf_timer_scale PRIVATE pthread rt)
+  # Private test-only deadline tracing; does not alter the shipping library.
+  target_compile_definitions(perf_timer_scale PRIVATE ENT_TIMER_TEST_HOOKS=1)
 
   add_executable(
     perf_utl_timer_rt
