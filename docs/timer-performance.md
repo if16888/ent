@@ -73,6 +73,45 @@ thread-per-timer architecture; this baseline alone does not establish safe
 operation for 1000 timers. Record hardware load, scheduler policy and sample
 interval truncation before asserting performance improvements.
 
+### Independent timerfd/epoll/eventfd feasibility prototype
+
+Linux now also builds `perf_timerfd_scale`, an **isolated benchmark only**,
+not a new timer implementation linked into ent. It uses timerfd one-shot
+absolute deadlines, epoll with a single dispatcher, and eventfd for shutdown.
+After each callback sample, the timer is re-armed for the next fixed-delay
+period. The common output columns support a controlled comparison to
+`perf_timer_scale`; extra `deadline_lag_pXX_us` columns are measured only
+in the timerfd prototype, using kernel-arm deadline versus observed callback
+timestamp. **The existing ent timer lacks that same metric**, so latency
+percentiles must not be directly compared.
+
+Run a short functional sanity check:
+
+```sh
+./build-perf/bin/perf_timerfd_scale ms 16 20 650
+python3 scripts/compare_timer_backends.py \
+  --legacy-bin build-perf/bin/perf_timer_scale \
+  --prototype-bin build-perf/bin/perf_timerfd_scale \
+  --output-dir timer-results/arm64-ab \
+  --trials 20 --duration-ms 1500 --pin-first-allowed
+```
+
+The paired comparison alternates execution order (AB then BA). Outputs:
+`paired_samples.csv`, `summary.json`, and `error.txt` on any failed
+measurement. The GitHub ARM64 workflow runs short, non-threshold A/B smoke
+on each PR; **manual workflow dispatch** runs the full 20-trial A/B experiment
+and uploads `timerfd-comparison-arm64`.
+
+**Known non-equivalence:** the epoll prototype has one dispatcher thread,
+whereas ent currently has a worker per ordinary timer and two per microsecond
+timer. The prototype only timestamps callbacks; it does not emulate arbitrary
+slow callbacks, callback self-deletion, backpressure, thread affinity for
+individual callbacks, or multi-owner external API races. Its timer-delete
+latency is epoll removal plus FD close, while ent includes worker termination.
+The prototype's `timer_close_us` also includes joining the dispatcher.
+Consequently these values are resource/feasibility evidence, **not sufficient
+for a production architecture migration**.
+
 ### timerfd/eventfd architecture decision gate
 
 Before changing the runtime implementation, create an **independent** Linux
