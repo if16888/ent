@@ -555,7 +555,7 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
     thCtx->state = ENT_TH_STATE_CLOSING_E;
     while(thCtx->activeCalls > 0)
     {
-        sts = UTL_CVWait(thCtx->lifecycleCV,thCtx->dllLock,0,RW_WRITE_E);
+        sts = UTL_CVWait(thCtx->lifecycleCV,thCtx->dllLock,-1,RW_WRITE_E);
         if(sts < 0)
         {
             thCtx->state = ENT_TH_STATE_ACTIVE_E;
@@ -915,7 +915,7 @@ ENT_PUBLIC MSG_ID_T ENT_ThreadClose(ENT_THREAD handle)
     thCtx->state = ENT_TH_STATE_CLOSING_E;
     while(thCtx->activeCalls > 0)
     {
-        sts = UTL_CVWait(thCtx->lifecycleCV,thCtx->dllLock,0,RW_WRITE_E);
+        sts = UTL_CVWait(thCtx->lifecycleCV,thCtx->dllLock,-1,RW_WRITE_E);
         if(sts < 0)
         {
             thCtx->state = ENT_TH_STATE_ACTIVE_E;

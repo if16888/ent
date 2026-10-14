@@ -62,7 +62,7 @@ ENT_PUBLIC MSG_ID_T  ENT_Stop(ENT_HANDLE handle);
 
 ENT_PUBLIC MSG_ID_T  ENT_Run(ENT_HANDLE handle);
 
-ENT_PUBLIC MSG_ID_T  ENT_Helpers();
+ENT_PUBLIC MSG_ID_T  ENT_Helpers(void);
 
 #ifdef __cplusplus
 }

@@ -60,9 +60,9 @@ typedef enum
 extern "C" {
 #endif
 
-ENT_PUBLIC MSG_ID_T  ENT_LogInit();
+ENT_PUBLIC MSG_ID_T  ENT_LogInit(void);
 
-ENT_PUBLIC MSG_ID_T  ENT_LogClose();
+ENT_PUBLIC MSG_ID_T  ENT_LogClose(void);
 
 ENT_PUBLIC MSG_ID_T  ENT_LogInitHandle(ENT_LOG* pLogHandle,const char* moduleName,const char* logPath);
 

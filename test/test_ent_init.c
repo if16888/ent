@@ -11,6 +11,7 @@
 #ifdef __linux__
 #include <sched.h>
 #endif
+static pthread_mutex_t s_test_lock = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
 #include "ient_comm.h"
@@ -159,8 +160,8 @@ static void reset_wait_capture(void)
     s_block_wait_cv = NULL;
     test_flag_store(&s_block_wait_entered, 0);
     test_flag_store(&s_block_wait_released, 0);
-    s_close_thread_started = 0;
-    s_close_wait_entered = 0;
+    test_flag_store(&s_close_thread_started, 0);
+    test_flag_store(&s_close_wait_entered, 0);
 }
 
 static void enable_auto_stop_after_wait(void)
@@ -215,7 +216,7 @@ static void wait_until_blocking_wait_entered(void)
 
 static void wait_until_close_thread_started(void)
 {
-    while(!s_close_thread_started)
+    while(!test_flag_load(&s_close_thread_started))
     {
         iENT_TestSleepMs(1);
     }
@@ -223,7 +224,7 @@ static void wait_until_close_thread_started(void)
 
 static void wait_until_close_wait_entered(void)
 {
-    while(!s_close_wait_entered)
+    while(!test_flag_load(&s_close_wait_entered))
     {
         iENT_TestSleepMs(1);
     }
@@ -437,7 +438,7 @@ static void* close_thread_proc(void* arg)
 {
     TEST_CLOSE_THREAD_CTX* ctx = (TEST_CLOSE_THREAD_CTX*)arg;
 
-    s_close_thread_started = 1;
+    test_flag_store(&s_close_thread_started, 1);
     if(ctx != NULL)
     {
         ctx->ret = ENT_Close(ctx->handle);
@@ -742,6 +743,9 @@ MSG_ID_T UTL_LockInitEx(UTL_LOCK* lock, const char* name, UTL_LOCK_TYPE_T type)
 MSG_ID_T UTL_LockEnter(UTL_LOCK lock)
 {
     (void)lock;
+#ifndef _WIN32
+    if(pthread_mutex_lock(&s_test_lock) != 0) return -1;
+#endif
     return 0;
 }
 
@@ -749,12 +753,18 @@ MSG_ID_T UTL_LockEnterEx(UTL_LOCK lock, UTL_LOCK_RW_TYPE_T rwType)
 {
     (void)lock;
     (void)rwType;
+#ifndef _WIN32
+    if(pthread_mutex_lock(&s_test_lock) != 0) return -1;
+#endif
     return 0;
 }
 
 MSG_ID_T UTL_LockLeave(UTL_LOCK lock)
 {
     (void)lock;
+#ifndef _WIN32
+    if(pthread_mutex_unlock(&s_test_lock) != 0) return -1;
+#endif
     return 0;
 }
 
@@ -762,6 +772,9 @@ MSG_ID_T UTL_LockLeaveEx(UTL_LOCK lock, UTL_LOCK_RW_TYPE_T rwType)
 {
     (void)lock;
     (void)rwType;
+#ifndef _WIN32
+    if(pthread_mutex_unlock(&s_test_lock) != 0) return -1;
+#endif
     return 0;
 }
 
@@ -812,12 +825,18 @@ MSG_ID_T UTL_CVWait(UTL_CV cv, UTL_LOCK lock, int ms, UTL_LOCK_RW_TYPE_T rwType)
         test_flag_store(&s_block_wait_entered, 1);
         if(ctx != NULL && ctx->handleState == ENT_HANDLE_STATE_CLOSING_E)
         {
-            s_close_wait_entered = 1;
+            test_flag_store(&s_close_wait_entered, 1);
         }
+#ifndef _WIN32
+        pthread_mutex_unlock(&s_test_lock);
+#endif
         while(!test_flag_load(&s_block_wait_released))
         {
             iENT_TestSleepMs(1);
         }
+#ifndef _WIN32
+        pthread_mutex_lock(&s_test_lock);
+#endif
         return 0;
     }
     if(s_auto_stop_after_wait)

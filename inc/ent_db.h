@@ -80,9 +80,9 @@ typedef struct ENT_DB_PARAM_TAG
 extern "C" {
 #endif
 
-ENT_PUBLIC MSG_ID_T  ENT_DbInit();
+ENT_PUBLIC MSG_ID_T  ENT_DbInit(void);
 
-ENT_PUBLIC MSG_ID_T  ENT_DbClose();
+ENT_PUBLIC MSG_ID_T  ENT_DbClose(void);
 
 /* Create-only: *pdbHandle MUST be initialized to NULL by the caller.
  * On success, ownership transfers to the caller. A non-NULL slot is rejected

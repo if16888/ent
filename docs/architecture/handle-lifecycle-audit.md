@@ -121,8 +121,9 @@ Key findings:
 Key findings:
 
 - `ENT_DbCloseHandle()` is already a strong close-and-drain implementation.
-- `ENT_DbInitHandle()` auto-closes a previous live handle, so its failure path must keep
-  the caller pointer consistent. Current tests already exercise the close/reinit edge.
+- `ENT_DbInitHandle()` is create-only and requires a caller-initialized NULL
+  handle slot; a non-NULL slot is rejected without overwriting a live handle.
+  Close the existing handle explicitly before reinitializing.
 - The handle is not tied to `ENT_CTX` yet, so runtime-owned shutdown is still a design
   question rather than an implementation fact.
 
