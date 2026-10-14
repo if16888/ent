@@ -96,6 +96,13 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolInit(UTL_TPOOL*  pool,int num);
 /* maxPendingTasks bounds queued tasks; zero or negative values are invalid. */
 ENT_PUBLIC MSG_ID_T  UTL_TPoolInitEx(UTL_TPOOL* pool,int num,int maxPendingTasks);
 ENT_PUBLIC MSG_ID_T  UTL_TPoolClose(UTL_TPOOL* pool);
+/* Preferred asynchronous task submission. Completion callback borrows a pointer
+ * to the result owned by the task; the pointer expires when callback returns.
+ * taskData must remain valid through task and completion callbacks. */
+ENT_PUBLIC MSG_ID_T UTL_TPoolSubmit(UTL_TPOOL pool, UTL_TP_TASK_F taskCb,
+                                    UTL_TP_TASK_END_F taskEndCb, void* taskData);
+/* Legacy interface: caller owns retVal storage and must keep it writable
+ * through completion, with synchronization if results are shared. */
 ENT_PUBLIC MSG_ID_T  UTL_TPoolAddTask(UTL_TPOOL pool,UTL_TP_TASK_F taskCb,UTL_TP_TASK_END_F taskEndCb,void* taskData,MSG_ID_T* retVal);
 
 

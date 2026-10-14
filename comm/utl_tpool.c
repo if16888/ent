@@ -79,6 +79,7 @@ typedef struct
     UTL_TP_TASK_END_F  taskEndCb;
     void*              taskData;
     MSG_ID_T*          pRetVal;
+    MSG_ID_T           localRetVal; /* result owned by the task until completion */
 }UTL_TPOOL_TASK;
 
 typedef struct
@@ -897,14 +898,16 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolClose(UTL_TPOOL* pool)
     return closeResult;
 }
 
-ENT_PUBLIC MSG_ID_T  UTL_TPoolAddTask(UTL_TPOOL pool,UTL_TP_TASK_F taskCb,UTL_TP_TASK_END_F taskEndCb,void* taskData,MSG_ID_T* retVal)
+static MSG_ID_T iUTL_TPoolAddTaskCore(UTL_TPOOL pool, UTL_TP_TASK_F taskCb,
+                                       UTL_TP_TASK_END_F taskEndCb, void* taskData,
+                                       MSG_ID_T* retVal, BOOL requireRetVal)
 {
     MSG_ID_T          sts = 0;
     UTL_TPOOL_CTX*    poolCtx= NULL;
     UTL_TPOOL_TASK*   taskDb = NULL;
     DLL_D_HDR*        tmp = NULL;
     BOOL              shouldWake = FALSE;
-    if(taskCb==NULL || retVal == NULL)
+    if(taskCb==NULL || (requireRetVal && retVal == NULL))
     {
         IENT_LOG_ERROR("invalid arguments\n");
         return ENT_TPL_BAD_ARGUMENT;
@@ -967,7 +970,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolAddTask(UTL_TPOOL pool,UTL_TP_TASK_F taskCb,UTL_TP
     taskDb->taskCb    = taskCb;
     taskDb->taskEndCb = taskEndCb;
     taskDb->taskData  = taskData;
-    taskDb->pRetVal   = retVal;
+    taskDb->pRetVal   = retVal != NULL ? retVal : &taskDb->localRetVal;
 
     UTL_LockEnter(poolCtx->taskLock);
     if(poolCtx->pendingAdds > 0)
@@ -1007,4 +1010,19 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolAddTask(UTL_TPOOL pool,UTL_TP_TASK_F taskCb,UTL_TP
 
     iUTL_TPoolReleaseOp(poolCtx);
     return ENT_SYS_NORMAL;
+}
+
+/* Preferred API: no asynchronous writes to caller-owned result storage. */
+ENT_PUBLIC MSG_ID_T UTL_TPoolSubmit(UTL_TPOOL pool, UTL_TP_TASK_F taskCb,
+                                     UTL_TP_TASK_END_F taskEndCb, void* taskData)
+{
+    return iUTL_TPoolAddTaskCore(pool, taskCb, taskEndCb, taskData, NULL, FALSE);
+}
+
+/* Legacy API: retVal must remain valid until task completion. */
+ENT_PUBLIC MSG_ID_T UTL_TPoolAddTask(UTL_TPOOL pool, UTL_TP_TASK_F taskCb,
+                                      UTL_TP_TASK_END_F taskEndCb, void* taskData,
+                                      MSG_ID_T* retVal)
+{
+    return iUTL_TPoolAddTaskCore(pool, taskCb, taskEndCb, taskData, retVal, TRUE);
 }

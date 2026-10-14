@@ -44,7 +44,16 @@ Use `ENT_ThreadWaitById()` when the caller needs to wait for a specific thread e
 
 ## Thread pool
 
-### `UTL_TPoolAddTask()`
+### `UTL_TPoolSubmit()` (preferred)
+
+Use `UTL_TPoolSubmit(pool, taskCb, endCb, taskData)` for asynchronous tasks.
+The result is owned by the library and passed to `endCb` through a borrowed
+`MSG_ID_T*` pointer. The pointer is valid only until `endCb` returns.
+This avoids the common use-after-return error of passing the address of a
+short-lived local variable. `taskData` and callback functions must still
+remain valid until completion. Normal pool close drains submitted work.
+
+### `UTL_TPoolAddTask()` (compatibility)
 
 `UTL_TPoolAddTask()` stores the caller-provided `MSG_ID_T* retVal` pointer and writes the task return value to it when the worker runs the task.
 
