@@ -408,6 +408,46 @@ static MSG_ID_T iUTL_TimerCommitSelfDeleteThread(UTL_TIMER_T* pTimer, PTIMER_CTX
 #endif
 
 #if ENT_TMR_IMPL_LINUX || ENT_TMR_IMPL_POSIX_FALLBACK
+/* Use the same clock that UTL_CVWaitFor uses for POSIX timed waits:
+ * MONOTONIC on Linux; REALTIME for other POSIX platforms. */
+static long long iUTL_TimerThreadClockNs(void)
+{
+    struct timespec ts;
+#if defined(__linux__)
+    const clockid_t clockId = CLOCK_MONOTONIC;
+#else
+    const clockid_t clockId = CLOCK_REALTIME;
+#endif
+    if(clock_gettime(clockId, &ts) != 0)
+    {
+        return -1;
+    }
+    return (long long)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+#ifdef ENT_TIMER_TEST_HOOKS
+/* Test-only spurious notification; does not change the timer state.
+ * The caller must own a live regular timer through the call. */
+int iUTL_TimerTestWakeWithoutStop(UTL_TIMER_T timer)
+{
+    PTIMER_CTX_T ctx = (PTIMER_CTX_T)timer;
+    if(ctx == NULL || ctx->tag != UTL_TIMER_TAG)
+    {
+        return 0;
+    }
+#if ENT_TMR_IMPL_LINUX
+    if(ctx->rtMode)
+    {
+        return 0;
+    }
+#endif
+    UTL_LockEnter(ctx->stateLock);
+    UTL_CVWakeAll(ctx->stateWakeCV);
+    UTL_LockLeave(ctx->stateLock);
+    return 1;
+}
+#endif
+
 static BOOL iUTL_TimerThreadStateEnabled(PTIMER_CTX_T timerCtx)
 {
     BOOL enabled;
@@ -561,20 +601,44 @@ static void* iUTL_TimerThread(void* data)
         void* timerData = NULL;
         BOOL oneshot = FALSE;
 
-        /* Fixed-delay wait: wake immediately on delete, ignore spurious
-         * wakeups and dispatch only after the requested period expires. */
+        /* Preserve one deadline per period. Restarting a full relative
+         * timeout after every spurious wake indefinitely postpones callbacks
+         * under a steady stream of notifications. Start a new deadline only
+         * after the previous callback has returned (fixed-delay policy). */
         {
+            long long nowNs = iUTL_TimerThreadClockNs();
+            long long deadlineNs = nowNs + (long long)timerCtx->ms * 1000000LL;
             MSG_ID_T waitSts = ENT_SYS_NORMAL;
             BOOL enabled = FALSE;
+            BOOL expired = FALSE;
+
             UTL_LockEnter(timerCtx->stateLock);
             while(timerCtx->isEnable)
             {
-                waitSts = UTL_CVWait(timerCtx->stateWakeCV,
-                                    timerCtx->stateLock, timerCtx->ms, RW_WRITE_E);
-                if(waitSts != ENT_SYS_NORMAL)
+                long long remainingNs;
+                int remainingMs;
+                if(nowNs < 0)
+                {
+                    waitSts = ENT_UTHD_CLOCK_FAILED;
+                    break;
+                }
+                remainingNs = deadlineNs - nowNs;
+                if(remainingNs <= 0)
+                {
+                    expired = TRUE;
+                    break;
+                }
+                /* Round up to avoid submillisecond spin loops. */
+                remainingMs = (int)((remainingNs + 999999LL) / 1000000LL);
+                waitSts = UTL_CVWaitFor(timerCtx->stateWakeCV,
+                                        timerCtx->stateLock,
+                                        remainingMs, RW_WRITE_E);
+                if(waitSts != ENT_SYS_NORMAL &&
+                   waitSts != ENT_UTHD_WAIT_TIMEOUT)
                 {
                     break;
                 }
+                nowNs = iUTL_TimerThreadClockNs();
             }
             enabled = timerCtx->isEnable ? TRUE : FALSE;
             UTL_LockLeave(timerCtx->stateLock);
@@ -582,9 +646,9 @@ static void* iUTL_TimerThread(void* data)
             {
                 break;
             }
-            if(waitSts != ENT_UTHD_WAIT_TIMEOUT)
+            if(!expired)
             {
-                IENT_LOG_ERROR("timer wait failed,sts [%d]\n",waitSts);
+                IENT_LOG_ERROR("timer clock/wait failed,sts [%d]\n",waitSts);
                 iUTL_TimerThreadStateStop(timerCtx, FALSE);
                 break;
             }
