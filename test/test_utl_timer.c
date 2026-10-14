@@ -438,6 +438,92 @@ static void* timer_close_thread(void* data)
 }
 #endif
 
+/* Closing the timer runtime from a callback must fail immediately.
+ * This covers both Linux callback-worker paths without changing the public API. */
+typedef struct
+{
+    TIMER_WAIT_PROBE finished;
+    MSG_ID_T close_status;
+} TIMER_CALLBACK_CLOSE_PROBE;
+
+static void* timer_close_from_callback_cb(void* data)
+{
+    TIMER_CALLBACK_CLOSE_PROBE* probe = (TIMER_CALLBACK_CLOSE_PROBE*)data;
+
+    probe->close_status = UTL_TimerClose();
+    timer_wait_probe_signal(&probe->finished);
+    return NULL;
+}
+
+static int test_timer_close_from_callback_mode(int microseconds)
+{
+    TIMER_CALLBACK_CLOSE_PROBE probe;
+    UTL_TIMER_T timer = NULL;
+    MSG_ID_T sts;
+    int failures = 0;
+    int initialized = 0;
+
+    memset(&probe, 0, sizeof(probe));
+    probe.close_status = -999;
+    if(timer_wait_probe_init(&probe.finished) != 0)
+    {
+        return 1;
+    }
+
+    if(expect_true(UTL_TimerInit() == ENT_SYS_NORMAL,
+                   "timer subsystem should initialize before callback close test") != 0)
+    {
+        failures++;
+        goto CLEANUP;
+    }
+    initialized = 1;
+
+#ifdef __linux__
+    if(microseconds)
+    {
+        sts = UTL_TimerCreateUs(&timer, UTL_TIMER_E_ONESHOT, 1000,
+                               timer_close_from_callback_cb, &probe);
+    }
+    else
+#else
+    (void)microseconds;
+#endif
+    {
+        sts = UTL_TimerCreate(&timer, UTL_TIMER_E_ONESHOT, 5,
+                             timer_close_from_callback_cb, &probe);
+    }
+    if(expect_true(sts == ENT_SYS_NORMAL && timer != NULL,
+                   "callback close test timer should be created") != 0)
+    {
+        failures++;
+        goto CLEANUP;
+    }
+
+    if(expect_true(timer_wait_probe_wait_at_least(&probe.finished, 1, 2000) == 0,
+                   "callback close attempt should complete without deadlock") != 0)
+    {
+        failures++;
+        goto CLEANUP;
+    }
+
+    failures += expect_true(probe.close_status == ENT_TMR_THREAD_FAILED,
+                            "UTL_TimerClose must reject callback reentrancy");
+
+CLEANUP:
+    if(timer != NULL)
+    {
+        failures += expect_true(UTL_TimerDelete(&timer) == ENT_SYS_NORMAL,
+                                "timer should remain deletable after callback close attempt");
+    }
+    if(initialized)
+    {
+        failures += expect_true(UTL_TimerClose() == ENT_SYS_NORMAL,
+                                "timer service must remain closeable by the owner");
+    }
+    timer_wait_probe_destroy(&probe.finished);
+    return failures;
+}
+
 static int test_periodic_timer_remains_stable_with_slow_callback(void)
 {
     UTL_TIMER_T timer = NULL;
@@ -1358,6 +1444,10 @@ int main(void)
 #endif
     failures += test_periodic_timer_remains_stable_with_slow_callback();
     failures += test_timer_delete_allows_reentrant_callback_timer_api();
+    failures += test_timer_close_from_callback_mode(0);
+#ifdef __linux__
+    failures += test_timer_close_from_callback_mode(1);
+#endif
     failures += test_timer_create_us_has_consistent_failure_contract();
     failures += test_timer_create_us_delete_does_not_wait_full_period();
     failures += test_timer_create_us_periodic_timer_fires_on_linux();
