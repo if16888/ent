@@ -658,9 +658,14 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
         return ENT_DBS_BAD_ARGUMENT;
     }
 
-    /* This is output-only. Do not read it: callers may pass an uninitialized
-     * automatic handle. Existing handles must be closed before reusing a slot. */
-    *pdbHandle = NULL;
+    /* An output slot must be explicitly initialized to NULL by its owner.
+     * Never dereference an incoming pointer: it could be stale or foreign.
+     * Reconfiguration and close are separate, explicit operations. */
+    if(*pdbHandle != NULL)
+    {
+        IENT_LOG_ERROR("DB output handle must be NULL; close an existing handle explicitly.\n");
+        return ENT_DBS_IN_USE;
+    }
 
     iENT_DbGlobalLock();
     if(sDbMutexInit == false)
