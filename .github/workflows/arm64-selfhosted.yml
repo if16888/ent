@@ -122,6 +122,18 @@ jobs:
             --trials 1 --duration-ms 350 \
             --scenario ms:16:20 --scenario us:4:1000
 
+      - name: Multi-core controlled-load A/B smoke (non-threshold)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/compare_timer_backends.py \
+            --legacy-bin "$BUILD_DIR/bin/perf_timer_scale" \
+            --prototype-bin "$BUILD_DIR/bin/perf_timerfd_scale" \
+            --output-dir "$RUNNER_TEMP/timerfd-2core-loaded-smoke" \
+            --trials 1 --duration-ms 350 \
+            --scenario ms:16:20 \
+            --cpu-width 2 --load-duty-percent 25
+
       - name: Repeat pinned timer baseline (manual dispatch only)
         if: github.event_name == 'workflow_dispatch'
         shell: bash
@@ -142,6 +154,33 @@ jobs:
             --prototype-bin "$BUILD_DIR/bin/perf_timerfd_scale" \
             --output-dir "$RUNNER_TEMP/timerfd-comparison-arm64" \
             --trials 20 --duration-ms 1500 --pin-first-allowed
+
+      - name: Manual two-core and controlled-load 20-trial A/B
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/compare_timer_backends.py \
+            --legacy-bin "$BUILD_DIR/bin/perf_timer_scale" \
+            --prototype-bin "$BUILD_DIR/bin/perf_timerfd_scale" \
+            --output-dir "$RUNNER_TEMP/timerfd-2core-no-load" \
+            --trials 20 --duration-ms 1500 --cpu-width 2
+          python3 scripts/compare_timer_backends.py \
+            --legacy-bin "$BUILD_DIR/bin/perf_timer_scale" \
+            --prototype-bin "$BUILD_DIR/bin/perf_timerfd_scale" \
+            --output-dir "$RUNNER_TEMP/timerfd-2core-40pct-load" \
+            --trials 20 --duration-ms 1500 \
+            --cpu-width 2 --load-duty-percent 40
+
+      - name: Upload multi-core/load benchmark evidence
+        if: github.event_name == 'workflow_dispatch' && always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: timerfd-2core-load-evidence
+          path: |
+            ${{ runner.temp }}/timerfd-2core-no-load
+            ${{ runner.temp }}/timerfd-2core-40pct-load
+          if-no-files-found: warn
 
       - name: Upload manual timerfd A/B dataset
         if: github.event_name == 'workflow_dispatch' && always()

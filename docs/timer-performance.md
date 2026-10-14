@@ -121,6 +121,42 @@ as `timerfd-comparison-arm64`. A separate follow-up benchmark correction
 stabilizes the post-shutdown thread-count snapshot; it **does not** revise
 or silently replace the archived original measurements.
 
+### Two-core affinity and bounded CPU contention
+
+The A/B collector accepts `--cpu-width 1..4` (pin both benchmark
+backends to the first N CPUs allowed by the current host) and
+`--load-duty-percent 0..50` (an auxiliary process pinned to the first
+selected CPU using a 100 ms busy/sleep cycle). The auxiliary process
+uses a hard 20-minute self-exit bound and the collector terminates it
+in a `finally` cleanup path. This is a synthetic, deliberately bounded
+load; it does not certify a fixed host-level utilization or throttling.
+
+```sh
+python3 scripts/compare_timer_backends.py \
+  --legacy-bin build-perf/bin/perf_timer_scale \
+  --prototype-bin build-perf/bin/perf_timerfd_scale \
+  --output-dir timer-results/2core-idle \
+  --trials 20 --duration-ms 1500 --cpu-width 2
+
+python3 scripts/compare_timer_backends.py \
+  --legacy-bin build-perf/bin/perf_timer_scale \
+  --prototype-bin build-perf/bin/perf_timerfd_scale \
+  --output-dir timer-results/2core-40pct \
+  --trials 20 --duration-ms 1500 \
+  --cpu-width 2 --load-duty-percent 40
+```
+
+The regular ARM64 CI runs one **350 ms** two-core, 25%-load smoke.
+Manual ARM64 workflow dispatch additionally runs both complete
+20-trial five-scenario datasets, with separate metadata, paired
+measurements and cross-trial summaries uploaded as
+`timerfd-2core-load-evidence`. These lengthy measurements are never
+used as hard-fail P99 performance thresholds on routine PRs.
+The background load is a separate process and **is not counted** in
+`cpu_pct_single_core`, which belongs to the benchmark subprocess only.
+Compare medians and worst per-trial P99, verify paired consistency,
+and check the declared cgroup CPU quota before any architecture claim.
+
 ### timerfd/eventfd architecture decision gate
 
 Before changing the runtime implementation, create an **independent** Linux
