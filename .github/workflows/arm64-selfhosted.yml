@@ -22,6 +22,12 @@ on:
       - "CMakeLists.txt"
       - ".github/workflows/arm64-selfhosted.yml"
   workflow_dispatch:
+    inputs:
+      full_four_cpu_ab:
+        description: "Collect 20 paired trials across five scenarios, full four-CPU idle and loaded"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -133,6 +139,22 @@ jobs:
             --trials 1 --duration-ms 350 --cpu-width 2 \
             --load-duty-percent 25 --scenario ms:16:20
 
+      - name: Validate unrestricted-affinity collector (four allowed CPUs only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          allowed="$(python3 -c 'import os; print(len(os.sched_getaffinity(0)))')"
+          if [ "$allowed" -ne 4 ]; then
+            echo "Skipping optional unrestricted four-CPU smoke: allowed=$allowed"
+            exit 0
+          fi
+          python3 scripts/compare_timer_backends.py \
+            --legacy-bin "$BUILD_DIR/bin/perf_timer_scale" \
+            --prototype-bin "$BUILD_DIR/bin/perf_timerfd_scale" \
+            --output-dir "$RUNNER_TEMP/timerfd-fourcpu-smoke" \
+            --trials 1 --duration-ms 350 --require-unrestricted-cpus 4 \
+            --load-duty-percent 25 --scenario ms:16:20
+
       - name: Repeat pinned timer baseline (manual dispatch only)
         if: github.event_name == 'workflow_dispatch'
         shell: bash
@@ -153,6 +175,39 @@ jobs:
             --prototype-bin "$BUILD_DIR/bin/perf_timerfd_scale" \
             --output-dir "$RUNNER_TEMP/timerfd-comparison-arm64" \
             --trials 20 --duration-ms 1500 --pin-first-allowed
+
+      # These are optional long-running acceptance experiments, not PR smoke.
+      # The entire inherited affinity must expose exactly four CPUs or fail.
+      - name: Full four-CPU paired timerfd comparison (idle)
+        if: github.event_name == 'workflow_dispatch' && inputs.full_four_cpu_ab
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/compare_timer_backends.py \
+            --legacy-bin "$BUILD_DIR/bin/perf_timer_scale" \
+            --prototype-bin "$BUILD_DIR/bin/perf_timerfd_scale" \
+            --output-dir "$RUNNER_TEMP/timerfd-fourcpu-ab/idle" \
+            --trials 20 --duration-ms 1500 --require-unrestricted-cpus 4
+
+      - name: Full four-CPU paired timerfd comparison (loaded)
+        if: github.event_name == 'workflow_dispatch' && inputs.full_four_cpu_ab
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/compare_timer_backends.py \
+            --legacy-bin "$BUILD_DIR/bin/perf_timer_scale" \
+            --prototype-bin "$BUILD_DIR/bin/perf_timerfd_scale" \
+            --output-dir "$RUNNER_TEMP/timerfd-fourcpu-ab/loaded25" \
+            --trials 20 --duration-ms 1500 --require-unrestricted-cpus 4 \
+            --load-duty-percent 25
+
+      - name: Upload full four-CPU timerfd A/B dataset
+        if: github.event_name == 'workflow_dispatch' && inputs.full_four_cpu_ab && always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: timerfd-fourcpu-arm64-deadline-lag
+          path: ${{ runner.temp }}/timerfd-fourcpu-ab
+          if-no-files-found: warn
 
       - name: Upload manual timerfd A/B dataset
         if: github.event_name == 'workflow_dispatch' && always()
