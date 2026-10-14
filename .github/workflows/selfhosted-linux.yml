@@ -79,6 +79,14 @@ jobs:
       - name: Performance Smoke
         run: ./scripts/run-ci-linux.sh perf
 
+      - name: Reproducible baseline collector smoke
+        run: |
+          python3 scripts/timer_baseline.py \
+            --binary "$BUILD_DIR/bin/perf_timer_scale" \
+            --output-dir "$RUNNER_TEMP/timer-baseline-smoke" \
+            --trials 1 --duration-ms 350 \
+            --scenario ms:1:20 --scenario us:2:1000
+
       - name: Resource snapshot
         if: always()
         run: |
