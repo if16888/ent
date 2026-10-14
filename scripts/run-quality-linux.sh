@@ -51,9 +51,26 @@ case "$mode" in
     common+=(-DENT_ENABLE_SQLITE=OFF)
     build_library "$base_source" "$root/base-abi-$base_sha" "-g -Og"
     build_library "$repo" "$root/current-abi" "-g -Og"
+    # Libabigail reports pure symbol additions with exit bit 4. Allow only
+    # reviewed additive *function* changes; never ignore removed/changed
+    # interfaces or type/layout breaks. Retain the full ABI report as evidence.
+    set +e
     abidiff --headers-dir1 "$base_source/inc" --headers-dir2 "$repo/inc" \
       "$root/base-abi-$base_sha/lib/libent.so" "$root/current-abi/lib/libent.so" \
       2>&1 | tee "$root/abi.txt"
+    abi_status=${PIPESTATUS[0]}
+    set -e
+    if (( abi_status == 4 )); then
+      if ! grep -Eq '^Functions changes summary: 0 Removed, 0 Changed, [1-9][0-9]* Added functions?' "$root/abi.txt" ||
+         ! grep -Eq '^Variables changes summary: 0 Removed, 0 Changed, 0 Added variable' "$root/abi.txt" ||
+         grep -Eq '^  \[[^A]\] ' "$root/abi.txt"; then
+        echo "ABI review required: not a pure added-function change" >&2
+        exit "$abi_status"
+      fi
+      echo "ABI compatible: additive public functions only (reviewed)"
+    elif (( abi_status != 0 )); then
+      exit "$abi_status"
+    fi
     ;;
   sdk)
     build_library "$repo" "$root/current-sdk" ""
