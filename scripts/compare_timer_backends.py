@@ -21,6 +21,34 @@ from timer_baseline import (
     DEFAULT_SCENARIOS, METRICS, OPTIONAL, REQUIRED, machine_metadata, parse_case, parse_result, rank
 )
 
+def check_cpu_quota_capacity(cpu_max, required_cores):
+    """Fail closed if cgroup v2 cannot demonstrate the requested CPU quota.
+
+    An unlimited cpu.max passes this quota *preflight*, but does not guarantee
+    four dedicated physical CPUs, a host without noisy neighbors, or a real-time
+    scheduling policy.
+    """
+    if cpu_max is None:
+        raise ValueError("cannot verify CPU quota: /sys/fs/cgroup/cpu.max unavailable")
+    fields = cpu_max.split()
+    if len(fields) != 2:
+        raise ValueError("cannot verify CPU quota: invalid cpu.max format")
+    quota_text, period_text = fields
+    try:
+        period = int(period_text)
+        quota = None if quota_text == "max" else int(quota_text)
+    except ValueError as exc:
+        raise ValueError("cannot verify CPU quota: invalid cpu.max numbers") from exc
+    if period <= 0 or (quota is not None and quota <= 0):
+        raise ValueError("cannot verify CPU quota: non-positive cpu.max values")
+    if quota is not None and quota < required_cores * period:
+        raise ValueError(
+            f"CPU quota permits only {quota / period:.3f} cores, "
+            f"below required {required_cores}; adjust runner slice/host limit"
+        )
+    return None if quota is None else quota / period
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--legacy-bin", type=Path, required=True)
@@ -36,6 +64,8 @@ def main():
                         help="bounded background load on first selected CPU (0..50%%)")
     parser.add_argument("--require-unrestricted-cpus", type=int, choices=range(1, 5),
                         metavar="N", help="do not pin backends; require exactly N allowed CPUs (1..4)")
+    parser.add_argument("--require-cpu-quota-capacity", action="store_true",
+                        help="fail closed unless cgroup v2 cpu.max allows N full CPUs; requires --require-unrestricted-cpus N")
     args = parser.parse_args()
     if not 1 <= args.trials <= 100 or not 250 <= args.duration_ms <= 5000:
         parser.error("trials=1..100 and duration-ms=250..5000 required")
@@ -58,11 +88,21 @@ def main():
     )
     if width < 0 or width > 4 or (args.cpu_width is not None and width == 0):
         parser.error("--cpu-width must be 1..4 (or omit for unrestricted affinity)")
+    if args.require_cpu_quota_capacity and args.require_unrestricted_cpus is None:
+        parser.error("--require-cpu-quota-capacity requires --require-unrestricted-cpus N")
     if args.require_unrestricted_cpus is not None:
         if width:
             parser.error("--require-unrestricted-cpus cannot be combined with CPU pinning")
         if len(affinity) != args.require_unrestricted_cpus:
             parser.error(f"expected exactly {args.require_unrestricted_cpus} allowed CPUs, got {len(affinity)}")
+    cpu_quota_capacity_cores = None
+    if args.require_cpu_quota_capacity:
+        try:
+            cpu_quota_capacity_cores = check_cpu_quota_capacity(
+                meta.get("cpu_cgroup_max"), args.require_unrestricted_cpus
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
     if width and (len(affinity) < width or shutil.which("taskset") is None):
         parser.error("insufficient allowed CPUs or taskset unavailable")
     cpus = affinity[:width] if width else []
@@ -83,6 +123,8 @@ def main():
         "benchmark_affinity_cpus": cpus if cpus else affinity,
         "benchmark_affinity_mode": "subset_pinned" if cpus else "inherited_full_allowed",
         "unrestricted_cpu_count_required": args.require_unrestricted_cpus,
+        "cpu_quota_capacity_required": bool(args.require_cpu_quota_capacity),
+        "cpu_quota_capacity_cores": cpu_quota_capacity_cores,
         "background_load": {
             "duty_percent_of_one_core": args.load_duty_percent,
             "cpu": load_cpu,

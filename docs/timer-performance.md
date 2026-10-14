@@ -246,6 +246,19 @@ partial data and error.txt; do not call the gate passed. This manual run
 does **not** replace the separate, previously archived pinned single-core
 baseline and does not qualify as representative controlled field load.
 
+The opt-in four-CPU long experiment also requires
+`--require-cpu-quota-capacity`: the collector must read and validate
+`/sys/fs/cgroup/cpu.max` (cgroup v2). A finite quota of fewer than
+four complete logical CPUs (for example, `300000 100000` = 3 cores)
+fails **before sampling starts**. An unlimited quota (`max 100000`)
+passes this particular quota check. Missing, invalid, or unsupported
+quota evidence is a hard error for this manual acceptance experiment.
+The raw `cpu_cgroup_max` field and resolved capacity remain in metadata.
+This prevents a four-CPU *affinity* measurement under a smaller
+cgroup CPU-time ceiling from being represented as a full four-CPU
+capacity measurement. It still does not reserve dedicated cores, eliminate
+CPU steal, or make a hard real-time guarantee.
+
 A short four-CPU collector smoke runs automatically on ARM64 only when
 the runner offers exactly four allowed CPUs. The standard PR tests also
 exercise paired-summary semantics with deterministic fake backends; neither
