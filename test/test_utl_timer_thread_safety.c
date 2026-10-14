@@ -583,6 +583,241 @@ CLEANUP:
     return rc;
 }
 
+/*
+ * Deterministic external Delete/Close ordering. The callback is held in a
+ * condition-variable gate so the owner thread can establish the race order
+ * without relying on arbitrary sleeps or dereferencing a freed timer handle.
+ */
+typedef struct TIMER_EXTERNAL_RACE_PROBE
+{
+    pthread_mutex_t lock;
+    pthread_cond_t cv;
+    UTL_TIMER_T timer;
+    int callback_started;
+    int release_callback;
+    int close_finished;
+    MSG_ID_T delete_status;
+    MSG_ID_T close_status;
+} TIMER_EXTERNAL_RACE_PROBE;
+
+static void* external_race_callback(void* data)
+{
+    TIMER_EXTERNAL_RACE_PROBE* probe = (TIMER_EXTERNAL_RACE_PROBE*)data;
+
+    pthread_mutex_lock(&probe->lock);
+    probe->callback_started = 1;
+    pthread_cond_broadcast(&probe->cv);
+    while(!probe->release_callback)
+    {
+        pthread_cond_wait(&probe->cv, &probe->lock);
+    }
+    pthread_mutex_unlock(&probe->lock);
+    return NULL;
+}
+
+static void* external_race_delete_thread(void* data)
+{
+    TIMER_EXTERNAL_RACE_PROBE* probe = (TIMER_EXTERNAL_RACE_PROBE*)data;
+    probe->delete_status = UTL_TimerDelete(&probe->timer);
+    return NULL;
+}
+
+static void* external_race_close_thread(void* data)
+{
+    TIMER_EXTERNAL_RACE_PROBE* probe = (TIMER_EXTERNAL_RACE_PROBE*)data;
+    MSG_ID_T status = UTL_TimerClose();
+
+    pthread_mutex_lock(&probe->lock);
+    probe->close_status = status;
+    probe->close_finished = 1;
+    pthread_cond_broadcast(&probe->cv);
+    pthread_mutex_unlock(&probe->lock);
+    return NULL;
+}
+
+static int wait_timer_lifecycle(int wait_for_close)
+{
+    int i;
+    for(i = 0; i < 2000; ++i)
+    {
+        if(wait_for_close ? iUTL_TimerTestClosing() :
+                            (iUTL_TimerTestLifecycleOpCount() == 1))
+        {
+            return 0;
+        }
+        sleep_ms(1);
+    }
+    return -1;
+}
+
+static int test_external_delete_close_order(int use_us, int close_first)
+{
+    TIMER_EXTERNAL_RACE_PROBE probe;
+    pthread_t deleter;
+    pthread_t closer;
+    int initialized = 0;
+    int delete_started = 0;
+    int close_started = 0;
+    int failed = 1;
+    int close_finished_early = 0;
+    MSG_ID_T rejected_delete = ENT_SYS_NORMAL;
+
+    memset(&probe, 0, sizeof(probe));
+    probe.close_status = -999;
+    probe.delete_status = -999;
+    if(pthread_mutex_init(&probe.lock, NULL) != 0)
+    {
+        return 1;
+    }
+    if(pthread_cond_init(&probe.cv, NULL) != 0)
+    {
+        pthread_mutex_destroy(&probe.lock);
+        return 1;
+    }
+
+    if(UTL_TimerInit() != ENT_SYS_NORMAL)
+    {
+        fprintf(stderr, "external race: timer init failed\n");
+        goto RELEASE_AND_JOIN;
+    }
+    initialized = 1;
+#ifdef __linux__
+    if(use_us)
+    {
+        if(UTL_TimerCreateUs(&probe.timer, UTL_TIMER_E_PERIOD, 1000,
+                             external_race_callback, &probe) != ENT_SYS_NORMAL)
+        {
+            fprintf(stderr, "external race: microsecond timer create failed\n");
+            goto RELEASE_AND_JOIN;
+        }
+    }
+    else
+#else
+    (void)use_us;
+#endif
+    {
+        if(UTL_TimerCreate(&probe.timer, UTL_TIMER_E_PERIOD, 1,
+                           external_race_callback, &probe) != ENT_SYS_NORMAL)
+        {
+            fprintf(stderr, "external race: millisecond timer create failed\n");
+            goto RELEASE_AND_JOIN;
+        }
+    }
+
+    if(wait_flag(&probe.lock, &probe.cv, &probe.callback_started) != 0)
+    {
+        fprintf(stderr, "external race: callback did not enter gate\n");
+        goto RELEASE_AND_JOIN;
+    }
+
+    if(close_first)
+    {
+        if(pthread_create(&closer, NULL, external_race_close_thread, &probe) != 0)
+        {
+            goto RELEASE_AND_JOIN;
+        }
+        close_started = 1;
+        if(wait_timer_lifecycle(1) != 0)
+        {
+            fprintf(stderr, "external race: close did not enter closing state\n");
+            goto RELEASE_AND_JOIN;
+        }
+
+        /* Close now owns the timer; Delete must refuse entry before reading
+         * the soon-to-be-stale caller handle. */
+        rejected_delete = UTL_TimerDelete(&probe.timer);
+        if(rejected_delete != ENT_TMR_NOT_INITIALIZED)
+        {
+            fprintf(stderr, "external race: Delete accepted after Close began (%d)\n",
+                    rejected_delete);
+            goto RELEASE_AND_JOIN;
+        }
+    }
+    else
+    {
+        if(pthread_create(&deleter, NULL, external_race_delete_thread, &probe) != 0)
+        {
+            goto RELEASE_AND_JOIN;
+        }
+        delete_started = 1;
+        if(wait_timer_lifecycle(0) != 0)
+        {
+            fprintf(stderr, "external race: Delete did not retain lifecycle op\n");
+            goto RELEASE_AND_JOIN;
+        }
+        if(pthread_create(&closer, NULL, external_race_close_thread, &probe) != 0)
+        {
+            goto RELEASE_AND_JOIN;
+        }
+        close_started = 1;
+        if(wait_timer_lifecycle(1) != 0 ||
+           iUTL_TimerTestLifecycleOpCount() != 1)
+        {
+            fprintf(stderr, "external race: Close did not wait for Delete op\n");
+            goto RELEASE_AND_JOIN;
+        }
+    }
+
+    pthread_mutex_lock(&probe.lock);
+    close_finished_early = probe.close_finished;
+    pthread_mutex_unlock(&probe.lock);
+    if(close_finished_early)
+    {
+        fprintf(stderr, "external race: Close escaped while callback was blocked\n");
+        goto RELEASE_AND_JOIN;
+    }
+    failed = 0;
+
+RELEASE_AND_JOIN:
+    /* Never hold the probe lock while joining either thread. */
+    pthread_mutex_lock(&probe.lock);
+    probe.release_callback = 1;
+    pthread_cond_broadcast(&probe.cv);
+    pthread_mutex_unlock(&probe.lock);
+
+    if(delete_started)
+    {
+        pthread_join(deleter, NULL);
+        if(probe.delete_status != ENT_SYS_NORMAL || probe.timer != NULL)
+        {
+            fprintf(stderr, "external race: Delete failed to reclaim timer\n");
+            failed = 1;
+        }
+    }
+    if(close_started)
+    {
+        pthread_join(closer, NULL);
+        if(probe.close_status != ENT_SYS_NORMAL ||
+           iUTL_TimerTestClosing() ||
+           iUTL_TimerTestLifecycleOpCount() != 0)
+        {
+            fprintf(stderr, "external race: Close failed to drain timer service\n");
+            failed = 1;
+        }
+        /* For Close-first only, the caller's handle becomes stale when
+         * Close reclaims the timer. Never read/dereference it again. */
+        if(close_first)
+        {
+            probe.timer = NULL;
+        }
+    }
+    else if(initialized)
+    {
+        if(probe.timer != NULL && UTL_TimerDelete(&probe.timer) != ENT_SYS_NORMAL)
+        {
+            failed = 1;
+        }
+        if(UTL_TimerClose() != ENT_SYS_NORMAL)
+        {
+            failed = 1;
+        }
+    }
+
+    pthread_cond_destroy(&probe.cv);
+    pthread_mutex_destroy(&probe.lock);
+    return failed;
+}
+
 int main(void)
 {
     enum { ITERATIONS = 100 };
@@ -670,6 +905,21 @@ int main(void)
         fprintf(stderr, "self-delete detach-failure recovery probe failed\n");
         return EXIT_FAILURE;
     }
+    if(test_external_delete_close_order(0, 0) != 0 ||
+       test_external_delete_close_order(0, 1) != 0)
+    {
+        fprintf(stderr, "external millisecond Delete/Close ordering failed\n");
+        return EXIT_FAILURE;
+    }
+
+#ifdef __linux__
+    if(test_external_delete_close_order(1, 0) != 0 ||
+       test_external_delete_close_order(1, 1) != 0)
+    {
+        fprintf(stderr, "external microsecond Delete/Close ordering failed\n");
+        return EXIT_FAILURE;
+    }
+#endif
 
     return EXIT_SUCCESS;
 }
