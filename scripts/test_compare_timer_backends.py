@@ -13,6 +13,7 @@ import tempfile
 import unittest
 
 from timer_baseline import OPTIONAL, REQUIRED
+from compare_timer_backends import check_cpu_quota_capacity
 
 
 SCRIPT = Path(__file__).with_name("compare_timer_backends.py")
@@ -83,6 +84,29 @@ class PairedTimerCollectorTests(unittest.TestCase):
         self.assertIn("missing deadline_lag_", result.stderr)
         self.assertTrue((self.root / "out" / "error.txt").exists())
         self.assertFalse((self.root / "out" / "summary.json").exists())
+
+    def test_cgroup_quota_capacity_is_fail_closed(self):
+        # V2 cgroup: max permits the full requested CPU count. A finite
+        # quota must cover all four cores for this acceptance experiment.
+        self.assertIsNone(check_cpu_quota_capacity("max 100000", 4))
+        self.assertEqual(check_cpu_quota_capacity("400000 100000", 4), 4)
+        self.assertEqual(check_cpu_quota_capacity("80000 20000", 4), 4)
+        with self.assertRaisesRegex(ValueError, "only 3.000 cores"):
+            check_cpu_quota_capacity("300000 100000", 4)
+        for value in (None, "bad", "max", "nan 100000", "400000 0", "0 100000"):
+            with self.subTest(cpu_max=value):
+                with self.assertRaises(ValueError):
+                    check_cpu_quota_capacity(value, 4)
+
+    def test_cgroup_quota_capacity_needs_explicit_affinity_gate(self):
+        legacy = self.fake_binary("legacy", 110, 130)
+        timerfd = self.fake_binary("timerfd", 70, 80)
+        result = self.collect(
+            legacy, timerfd, "--scenario", "ms:1:20",
+            "--require-cpu-quota-capacity",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires --require-unrestricted-cpus N", result.stderr)
 
     @unittest.skipUnless(hasattr(os, "sched_getaffinity"),
                          "Linux CPU affinity API required")
