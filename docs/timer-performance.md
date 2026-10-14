@@ -112,6 +112,15 @@ The prototype's `timer_close_us` also includes joining the dispatcher.
 Consequently these values are resource/feasibility evidence, **not sufficient
 for a production architecture migration**.
 
+### ARM64 20-trial A/B evidence (2026-10-14)
+
+See [measured comparison and decision boundaries](timerfd-ab-evidence-20261014.md).
+The 20-trial dataset is attached to
+[Actions run #38523577481](https://github.com/if16888/ent/actions/runs/38523577481)
+as `timerfd-comparison-arm64`. A separate follow-up benchmark correction
+stabilizes the post-shutdown thread-count snapshot; it **does not** revise
+or silently replace the archived original measurements.
+
 ### timerfd/eventfd architecture decision gate
 
 Before changing the runtime implementation, create an **independent** Linux

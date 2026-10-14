@@ -70,6 +70,21 @@ static int threads(void) {
     fclose(f);
     return count;
 }
+/* Immediately after join, /proc may still count a departing task briefly.
+ * Allow up to 100 ms for the thread-count snapshot to settle. This wait
+ * happens outside the measured CPU/wall benchmark interval. */
+static int threads_after_settle(int expected)
+{
+    struct timespec pause = {0, 5000000L};
+    int n = threads();
+    int retry;
+    for(retry = 0; expected >= 0 && n > expected && retry < 20; ++retry)
+    {
+        (void)nanosleep(&pause, NULL);
+        n = threads();
+    }
+    return n;
+}
 static void* callback(void* data) {
     TIMER_PROBE* p = (TIMER_PROBE*)data;
     /* Timer runtime serializes callback invocations for a given timer. */
@@ -146,7 +161,7 @@ int main(int argc, char** argv) {
     cpu_b = ns(CLOCK_PROCESS_CPUTIME_ID);
     wall_b = ns(CLOCK_MONOTONIC);
     if(close_b < close_a || cpu_b < 0 || wall_b <= wall_a) goto CLEANUP;
-    after = threads();
+    after = threads_after_settle(before);
     deviation_us = (double*)malloc((size_t)count * (SAMPLES_PER_TIMER - 1) * sizeof(double));
     if(!deviation_us) goto CLEANUP;
     for(i = 0; i < count; ++i) {
