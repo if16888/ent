@@ -40,7 +40,11 @@ case "$mode" in
     cmake -S "$repo" -B "$root/coverage" "${common[@]}" -DENT_ENABLE_COVERAGE=ON
     cmake --build "$root/coverage" --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
     ctest --test-dir "$root/coverage" --output-on-failure
+    # GCC gcov can emit negative branch-hit counters under instrumented
+    # concurrent tests. Permit only this known gcov parser anomaly, while
+    # keeping all other gcovr parsing errors fatal.
     gcovr --root "$repo" --filter "$repo/comm/" --exclude-unreachable-branches \
+      --gcov-ignore-parse-errors negative_hits.warn_once_per_file \
       --json "$root/coverage.json" --xml "$root/coverage.xml" \
       --html-details "$root/coverage.html" --print-summary "$root/coverage"
     ;;
