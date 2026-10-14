@@ -121,10 +121,9 @@ Key findings:
 Key findings:
 
 - `ENT_DbCloseHandle()` is already a strong close-and-drain implementation.
-- `ENT_DbInitHandle()` treats its pointer argument as output-only and clears it before
-  reading or allocating database state, so an uninitialized local output variable is
-  safe. Callers must close any live handle before reusing that variable; initialization
-  does not close or preserve prior contents.
+- `ENT_DbInitHandle()` is create-only and requires a caller-initialized NULL
+  handle slot; a non-NULL slot is rejected without overwriting a live handle.
+  Close the existing handle explicitly before reinitializing.
 - The handle is not tied to `ENT_CTX` yet, so runtime-owned shutdown is still a design
   question rather than an implementation fact.
 
