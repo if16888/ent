@@ -17,11 +17,8 @@ import sys
 import time
 
 from timer_baseline import (
-    DEFAULT_SCENARIOS, METRICS, REQUIRED, machine_metadata, parse_case, parse_result, rank
+    DEFAULT_SCENARIOS, METRICS, OPTIONAL, REQUIRED, machine_metadata, parse_case, parse_result, rank
 )
-
-OPTIONAL = ("deadline_lag_p50_us", "deadline_lag_p95_us", "deadline_lag_p99_us")
-
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)

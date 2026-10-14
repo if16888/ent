@@ -167,9 +167,11 @@ time minus that stored deadline and emits
 `deadline_lag_p50_us/p95_us/p99_us`, matching the timerfd prototype's
 absolute-deadline-to-observed-callback definition.
 
-The paired comparison collector **requires** valid nonnegative deadline
-metrics from *both backends* for `ms` scenarios and aggregates them across
-trials. Do not silently compare an old benchmark executable lacking the
+The standalone baseline collector includes these optional deadline fields
+in its CSV and per-scenario summaries when present (leaving them blank for
+microsecond timers). The paired comparison collector **requires** valid
+nonnegative deadline metrics from *both backends* for `ms` scenarios and
+aggregates them across trials. Do not silently compare an old benchmark executable lacking the
 hook: it now fails explicitly. This is not a formal real-time guarantee,
 and instrumentation overhead, different callback dispatch architecture
 and CPU contention remain relevant.
