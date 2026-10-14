@@ -791,6 +791,59 @@ CLEANUP:
     return rc;
 }
 #ifndef _WIN32
+int iUTL_TimerTestWakeWithoutStop(UTL_TIMER_T timer);
+
+/* A stream of wakeups must not postpone the next callback forever.
+ * Previously each wake restarted the full relative timeout. */
+static int test_timer_period_ignores_spurious_wakes(void)
+{
+    UTL_TIMER_T timer = NULL;
+    TIMER_WAIT_PROBE probe;
+    int i;
+    int hits;
+    int failures = 0;
+
+    if(timer_wait_probe_init(&probe) != 0)
+    {
+        return 1;
+    }
+    if(expect_true(UTL_TimerInit() == ENT_SYS_NORMAL,
+                   "TimerInit must succeed for spurious-wake regression") != 0)
+    {
+        timer_wait_probe_destroy(&probe);
+        return 1;
+    }
+    if(expect_true(UTL_TimerCreate(&timer, UTL_TIMER_E_PERIOD, 160,
+                                   timer_wait_probe_cb, &probe) == ENT_SYS_NORMAL,
+                   "periodic timer must start for spurious-wake regression") != 0)
+    {
+        UTL_TimerClose();
+        timer_wait_probe_destroy(&probe);
+        return 1;
+    }
+
+    /* 35 wakeups spaced roughly 10ms apart cover over two full periods.
+     * No individual gap should approach the 160ms timer period. */
+    for(i = 0; i < 35; ++i)
+    {
+        UTL_Sleep(10);
+        if(!iUTL_TimerTestWakeWithoutStop(timer))
+        {
+            failures++;
+            break;
+        }
+    }
+    hits = timer_wait_probe_hits(&probe);
+    failures += expect_true(hits >= 1,
+                           "spurious wakeups must not defer every timer callback");
+    failures += expect_true(UTL_TimerDelete(&timer) == ENT_SYS_NORMAL,
+                           "timer must be deletable after repeated wakeups");
+    failures += expect_true(UTL_TimerClose() == ENT_SYS_NORMAL,
+                           "timer runtime must close after wakeup regression");
+    timer_wait_probe_destroy(&probe);
+    return failures;
+}
+
 static int test_timer_delete_interrupts_long_sleep(void)
 {
     UTL_TIMER_T timer = NULL;
@@ -1301,6 +1354,7 @@ int main(void)
     failures += test_periodic_timer_fires_until_deleted();
 #ifndef _WIN32
     failures += test_timer_delete_interrupts_long_sleep();
+    failures += test_timer_period_ignores_spurious_wakes();
 #endif
     failures += test_periodic_timer_remains_stable_with_slow_callback();
     failures += test_timer_delete_allows_reentrant_callback_timer_api();

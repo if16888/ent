@@ -35,6 +35,17 @@ clock; other POSIX implementations use the system real-time clock.
 Only a successful wait is `ENT_SYS_NORMAL`; expired waits return
 `ENT_UTHD_WAIT_TIMEOUT`.
 
+### POSIX timer wakeup precision
+
+Normal POSIX millisecond timers retain **fixed-delay** scheduling: a new
+period begins when the prior callback returns. The worker uses an absolute
+deadline calculated from the condition-variable clock (monotonic on Linux),
+so spurious condition-variable notifications never restart the entire
+period. Deleting or stopping a timer wakes the blocked worker immediately.
+Callback latency can still increase under scheduler contention; this is
+not a hard real-time guarantee. Linux microsecond RT timers use a separate
+scheduler and are unchanged.
+
 ## Thread handles
 
 ### `ENT_ThreadClose()`
