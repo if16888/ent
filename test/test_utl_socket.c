@@ -25,6 +25,8 @@ void iENT_SocketTestInjectCloseEintr(void);
 unsigned int iENT_SocketTestCloseCallCount(void);
 void iENT_SocketTestInjectGetSockOptEintr(void);
 unsigned int iENT_SocketTestGetSockOptCallCount(void);
+void iENT_SocketTestInjectConnectEintr(void);
+unsigned int iENT_SocketTestConnectCallCount(void);
 #endif
 
 static int expect_true(int condition, const char* message)
@@ -334,6 +336,9 @@ static int test_socket_local_roundtrip_send_and_recv(void)
         return 1;
     }
 
+#ifndef _WIN32
+    iENT_SocketTestInjectConnectEintr();
+#endif
     if(expect_true(UTL_Connect(client, (struct sockaddr*)&addr, sizeof(addr)) == 0,
                    "UTL_Connect should connect to the listening localhost socket") != 0)
     {
@@ -341,6 +346,16 @@ static int test_socket_local_roundtrip_send_and_recv(void)
         UTL_CloseSocket(server);
         return 1;
     }
+
+#ifndef _WIN32
+    if(expect_true(iENT_SocketTestConnectCallCount() == 1,
+                   "interrupted connection must not call connect a second time") != 0)
+    {
+        UTL_CloseSocket(client);
+        UTL_CloseSocket(server);
+        return 1;
+    }
+#endif
 
     if(expect_true(UTL_Accept(server,
                               (struct sockaddr*)&acceptedAddr,

@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -429,6 +430,19 @@ static int test_db_init_handle_rejects_uninitialized_service(void)
 
     return expect_true(ENT_DbInitHandle(&db_handle, SQLITE_TYPE, NULL, "ignored.db", NULL, NULL, 0) == ENT_DBS_NOT_INITIALIZED,
                        "ENT_DbInitHandle should reject calls before ENT_DbInit");
+}
+
+static int test_db_init_handle_rejects_nonnull_without_dereference(void)
+{
+    DB_HANDLE untrusted = (DB_HANDLE)(uintptr_t)1;
+    MSG_ID_T status = ENT_DbInitHandle(&untrusted, SQLITE_TYPE, NULL, "ignored.db", NULL, NULL, 0);
+    if(expect_true(status == ENT_DBS_IN_USE,
+                   "DB init must reject a non-NULL output without dereferencing it") != 0)
+    {
+        return 1;
+    }
+    return expect_true(untrusted == (DB_HANDLE)(uintptr_t)1,
+                       "DB init must preserve the rejected output slot");
 }
 
 static int test_db_api_rejects_null_handles(void)
@@ -1698,6 +1712,11 @@ static int test_pgsql_roundtrip_if_configured(void)
 int main(void)
 {
     if(test_db_init_handle_rejects_uninitialized_service() != 0)
+    {
+        return 1;
+    }
+
+    if(test_db_init_handle_rejects_nonnull_without_dereference() != 0)
     {
         return 1;
     }

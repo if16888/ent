@@ -214,6 +214,27 @@ static void iENT_DbLifecycleWakeAll(DB_CFG* dbCfg)
 #endif
 }
 
+/* Clear the library-owned password copy before returning its heap block.
+ * Backend/client libraries can maintain independent copies outside this scope. */
+static void iENT_DbWipePassword(char** password)
+{
+    volatile unsigned char* bytes;
+    size_t length;
+
+    if(password == NULL || *password == NULL)
+    {
+        return;
+    }
+    length = strlen(*password);
+    bytes = (volatile unsigned char*)*password;
+    while(length > 0)
+    {
+        bytes[--length] = 0;
+    }
+    free(*password);
+    *password = NULL;
+}
+
 static void iENT_DbFreeConfigStrings(DB_CFG* dbCfg)
 {
     if(dbCfg == NULL)
@@ -237,8 +258,7 @@ static void iENT_DbFreeConfigStrings(DB_CFG* dbCfg)
     }
     if(dbCfg->passwd != NULL)
     {
-        free(dbCfg->passwd);
-        dbCfg->passwd = NULL;
+        iENT_DbWipePassword(&dbCfg->passwd);
     }
 }
 
@@ -538,7 +558,7 @@ MSG_ID_T  iENT_DbReInit(DB_HANDLE dbHandle,
     }
     if(passwd != NULL)
     {
-        free(dbCfg->passwd);
+        iENT_DbWipePassword(&dbCfg->passwd);
         dbCfg->passwd = newPasswd;
         newPasswd = NULL;
     }
@@ -560,7 +580,7 @@ END_OF_ROUTINE:
     }
     if(newPasswd != NULL)
     {
-        free(newPasswd);
+        iENT_DbWipePassword(&newPasswd);
     }
     iENT_DbLifecycleUnlock(dbCfg);
     iENT_DbGlobalUnlock();
@@ -638,16 +658,13 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
         return ENT_DBS_BAD_ARGUMENT;
     }
 
-    dbCfg = (DB_CFG*)*pdbHandle;
-
-    if(dbCfg!=NULL && dbCfg->sTag==ENTDB_S_TAG && dbCfg->eTag == ENTDB_E_TAG)
+    /* An output slot must be explicitly initialized to NULL by its owner.
+     * Never dereference an incoming pointer: it could be stale or foreign.
+     * Reconfiguration and close are separate, explicit operations. */
+    if(*pdbHandle != NULL)
     {
-        sts=ENT_DbCloseHandle(pdbHandle);
-        if(sts < 0)
-        {
-            return sts;
-        }
-        dbCfg = NULL;
+        IENT_LOG_ERROR("DB output handle must be NULL; close an existing handle explicitly.\n");
+        return ENT_DBS_IN_USE;
     }
 
     iENT_DbGlobalLock();

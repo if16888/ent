@@ -608,6 +608,37 @@ static int test_tpool_executes_task_and_end_callback(void)
                        "task and end callbacks should complete exactly once before close returns");
 }
 
+static int test_tpool_submit_owns_result_storage(void)
+{
+    UTL_TPOOL pool = NULL;
+    TPOOL_TEST_PROBE probe;
+    memset(&probe, 0, sizeof(probe));
+    reset_thread_counters();
+    s_use_real_threads = 1;
+    if(expect_true(UTL_TPoolInit(&pool, 1) == ENT_SYS_NORMAL,
+                   "safe submit should create one worker") != 0)
+    {
+        s_use_real_threads = 0;
+        return 1;
+    }
+    if(expect_true(UTL_TPoolSubmit(pool, test_task_cb, test_task_end_cb, &probe) == ENT_SYS_NORMAL,
+                   "safe submit should not require caller result storage") != 0)
+    {
+        UTL_TPoolClose(&pool);
+        s_use_real_threads = 0;
+        return 1;
+    }
+    if(expect_true(UTL_TPoolClose(&pool) == ENT_SYS_NORMAL,
+                   "safe submit should drain work") != 0)
+    {
+        s_use_real_threads = 0;
+        return 1;
+    }
+    s_use_real_threads = 0;
+    return expect_true(probe.task_hits == 1 && probe.end_hits == 1 && probe.observed_ret == 42,
+                       "end callback should observe task-owned result");
+}
+
 static int test_tpool_close_waits_for_running_task_completion(void)
 {
     UTL_TPOOL pool = NULL;
@@ -796,6 +827,7 @@ int main(void)
     failures += test_tpool_close_reclaims_partially_started_workers();
     failures += test_tpool_close_rejects_null_pool();
     failures += test_tpool_executes_task_and_end_callback();
+    failures += test_tpool_submit_owns_result_storage();
     failures += test_tpool_close_waits_for_running_task_completion();
     failures += test_tpool_close_wakes_idle_workers();
     failures += test_tpool_reports_runtime_worker_failure();

@@ -547,7 +547,10 @@ static MSG_ID_T iUTL_LockCloseMutex(UTL_LOCK lock)
 #ifdef _WIN32
     DeleteCriticalSection(&tmp->lock.cs);
 #else
-    pthread_mutex_destroy(&tmp->lock.cs);
+    if(pthread_mutex_destroy(&tmp->lock.cs) != 0)
+    {
+        return -6; /* Keep object and output handle alive for owner cleanup. */
+    }
 #endif
     if(tmp->lockName)
     {
@@ -562,7 +565,10 @@ static MSG_ID_T iUTL_LockCloseRW(UTL_LOCK lock)
     UTL_TH_LOCK* tmp = (UTL_TH_LOCK*)lock;
 #ifdef _WIN32
 #else
-    pthread_rwlock_destroy(&tmp->lock.rw);
+    if(pthread_rwlock_destroy(&tmp->lock.rw) != 0)
+    {
+        return -6;
+    }
 #endif
     if(tmp->lockName)
     {
@@ -579,9 +585,15 @@ static MSG_ID_T iUTL_LockCloseSpin(UTL_LOCK lock)
     DeleteCriticalSection(&tmp->lock.spin);
 #else
 #if ENT_HAS_PTHREAD_SPINLOCK
-    pthread_spin_destroy(&tmp->lock.spin);
+    if(pthread_spin_destroy(&tmp->lock.spin) != 0)
+    {
+        return -6;
+    }
 #else
-    pthread_mutex_destroy(&tmp->lock.spin);
+    if(pthread_mutex_destroy(&tmp->lock.spin) != 0)
+    {
+        return -6;
+    }
 #endif
 #endif
     if(tmp->lockName)
@@ -692,7 +704,10 @@ ENT_PUBLIC MSG_ID_T UTL_CVClose(UTL_CV* cv)
     UTL_TH_CV* tmp = (UTL_TH_CV*)(*cv);
 #ifdef _WIN32
 #else
-    pthread_cond_destroy(&tmp->cv);
+    if(pthread_cond_destroy(&tmp->cv) != 0)
+    {
+        return ENT_UTHD_WAIT_FAILED;
+    }
 #endif
     if(tmp->cvName)
     {

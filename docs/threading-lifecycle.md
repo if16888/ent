@@ -15,7 +15,7 @@ UTL_CVClose(&cv);
 
 These APIs validate the pointer-to-handle argument and set the caller-owned handle to `NULL` after successful close.
 
-They do not make it safe to close a lock or condition variable while another thread is actively using it. The caller must still guarantee that no thread is blocked on or holding the object when it is closed.
+They do not make it safe to close a lock or condition variable while another thread is actively using it. The caller must still guarantee that no thread is blocked on or holding the object when it is closed. On POSIX, if native destruction reports an error, the object storage and the caller's handle are retained rather than freed. This is a best-effort diagnostic, **not** a license to destroy synchronization objects in use (that is undefined behavior).
 
 ## Thread handles
 
@@ -44,7 +44,16 @@ Use `ENT_ThreadWaitById()` when the caller needs to wait for a specific thread e
 
 ## Thread pool
 
-### `UTL_TPoolAddTask()`
+### `UTL_TPoolSubmit()` (preferred)
+
+Use `UTL_TPoolSubmit(pool, taskCb, endCb, taskData)` for asynchronous tasks.
+The result is owned by the library and passed to `endCb` through a borrowed
+`MSG_ID_T*` pointer. The pointer is valid only until `endCb` returns.
+This avoids the common use-after-return error of passing the address of a
+short-lived local variable. `taskData` and callback functions must still
+remain valid until completion. Normal pool close drains submitted work.
+
+### `UTL_TPoolAddTask()` (compatibility)
 
 `UTL_TPoolAddTask()` stores the caller-provided `MSG_ID_T* retVal` pointer and writes the task return value to it when the worker runs the task.
 

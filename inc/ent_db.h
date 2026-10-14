@@ -84,6 +84,11 @@ ENT_PUBLIC MSG_ID_T  ENT_DbInit();
 
 ENT_PUBLIC MSG_ID_T  ENT_DbClose();
 
+/* Create-only: *pdbHandle MUST be initialized to NULL by the caller.
+ * On success, ownership transfers to the caller. A non-NULL slot is rejected
+ * without being dereferenced, closed, freed or overwritten. To replace an
+ * existing handle, close it explicitly before creating another one.
+ * Do not use an uninitialized local DB_HANDLE as the output argument. */
 ENT_PUBLIC MSG_ID_T  ENT_DbInitHandle(DB_HANDLE* pdbHandle,
                       DB_TYPE dbType,
                       const char* host,
