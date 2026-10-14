@@ -37,12 +37,13 @@ run_with_log() {
 run_perf_binary() {
   local name="$1"
   local path="$2"
+  shift 2
 
   echo "Running ${name}"
   if command -v timeout >/dev/null 2>&1; then
-    timeout 180 "${path}"
+    timeout 180 "${path}" "$@"
   else
-    "${path}"
+    "${path}" "$@"
   fi
 }
 
@@ -142,6 +143,10 @@ run_perf() {
       run_perf_binary "perf_utl_socket" "./${build_dir}/bin/perf_utl_socket"
       run_perf_binary "perf_utl_timer" "./${build_dir}/bin/perf_utl_timer"
       run_perf_binary "perf_utl_timer_rt" "./${build_dir}/bin/perf_utl_timer_rt"
+      run_perf_binary "timer-ms-1" "./${build_dir}/bin/perf_timer_scale" ms 1 20 650
+      run_perf_binary "timer-ms-16" "./${build_dir}/bin/perf_timer_scale" ms 16 20 650
+      run_perf_binary "timer-ms-64" "./${build_dir}/bin/perf_timer_scale" ms 64 20 650
+      run_perf_binary "timer-us-16" "./${build_dir}/bin/perf_timer_scale" us 16 1000 650
       run_perf_binary "perf_utl_tpool" "./${build_dir}/bin/perf_utl_tpool"
       run_perf_binary "perf_ent_log" "./${build_dir}/bin/perf_ent_log"
     } 2>&1 | tee "${perf_log}"
@@ -149,6 +154,10 @@ run_perf() {
     run_perf_binary "perf_utl_socket" "./${build_dir}/bin/perf_utl_socket"
     run_perf_binary "perf_utl_timer" "./${build_dir}/bin/perf_utl_timer"
     run_perf_binary "perf_utl_timer_rt" "./${build_dir}/bin/perf_utl_timer_rt"
+    run_perf_binary "timer-ms-1" "./${build_dir}/bin/perf_timer_scale" ms 1 20 650
+    run_perf_binary "timer-ms-16" "./${build_dir}/bin/perf_timer_scale" ms 16 20 650
+    run_perf_binary "timer-ms-64" "./${build_dir}/bin/perf_timer_scale" ms 64 20 650
+    run_perf_binary "timer-us-16" "./${build_dir}/bin/perf_timer_scale" us 16 1000 650
     run_perf_binary "perf_utl_tpool" "./${build_dir}/bin/perf_utl_tpool"
     run_perf_binary "perf_ent_log" "./${build_dir}/bin/perf_ent_log"
   fi
