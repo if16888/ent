@@ -92,9 +92,11 @@ int main(int argc, char** argv) {
     int before, active, after, sample_count = 0, total_hits = 0;
     int status = EXIT_FAILURE;
     long long base_ns, wall_a, wall_b, cpu_a, cpu_b;
+    long long close_a, close_b;
     UTL_TIMER_T* timers = NULL;
     TIMER_PROBE* probes = NULL;
     double* deviation_us = NULL;
+    double* deletion_us = NULL;
     struct rusage resource;
 
     if(argc != 5 || (strcmp(argv[1], "ms") != 0 && strcmp(argv[1], "us") != 0) ||
@@ -108,7 +110,8 @@ int main(int argc, char** argv) {
     base_ns = (long long)period * (mode_us ? 1000LL : 1000000LL);
     timers = (UTL_TIMER_T*)calloc((size_t)count, sizeof(*timers));
     probes = (TIMER_PROBE*)calloc((size_t)count, sizeof(*probes));
-    if(timers == NULL || probes == NULL) goto CLEANUP;
+    deletion_us = (double*)calloc((size_t)count, sizeof(*deletion_us));
+    if(timers == NULL || probes == NULL || deletion_us == NULL) goto CLEANUP;
     before = threads();
     if(UTL_TimerInit() != ENT_SYS_NORMAL) goto CLEANUP;
     started = 1;
@@ -128,13 +131,21 @@ int main(int argc, char** argv) {
     active = threads();
     UTL_Sleep(duration);
     for(i = 0; i < open; ++i) {
-        if(UTL_TimerDelete(&timers[i]) != ENT_SYS_NORMAL) goto CLEANUP;
+        long long deletion_a = ns(CLOCK_MONOTONIC);
+        long long deletion_b;
+        if(deletion_a < 0 || UTL_TimerDelete(&timers[i]) != ENT_SYS_NORMAL)
+            goto CLEANUP;
+        deletion_b = ns(CLOCK_MONOTONIC);
+        if(deletion_b < deletion_a) goto CLEANUP;
+        deletion_us[i] = (double)(deletion_b - deletion_a) / 1000.0;
     }
+    close_a = ns(CLOCK_MONOTONIC);
+    if(close_a < 0 || UTL_TimerClose() != ENT_SYS_NORMAL) goto CLEANUP;
+    started = 0;
+    close_b = ns(CLOCK_MONOTONIC);
     cpu_b = ns(CLOCK_PROCESS_CPUTIME_ID);
     wall_b = ns(CLOCK_MONOTONIC);
-    if(cpu_b < 0 || wall_b <= wall_a) goto CLEANUP;
-    if(UTL_TimerClose() != ENT_SYS_NORMAL) goto CLEANUP;
-    started = 0;
+    if(close_b < close_a || cpu_b < 0 || wall_b <= wall_a) goto CLEANUP;
     after = threads();
     deviation_us = (double*)malloc((size_t)count * (SAMPLES_PER_TIMER - 1) * sizeof(double));
     if(!deviation_us) goto CLEANUP;
@@ -152,12 +163,15 @@ int main(int argc, char** argv) {
         goto CLEANUP;
     }
     qsort(deviation_us, (size_t)sample_count, sizeof(double), cmp);
+    qsort(deletion_us, (size_t)count, sizeof(double), cmp);
     memset(&resource, 0, sizeof(resource));
     (void)getrusage(RUSAGE_SELF, &resource);
     printf("timer_scale mode=%s timers=%d period=%d duration_ms=%d hits=%d intervals=%d "
            "abs_interarrival_error_p50_us=%.3f p95_us=%.3f p99_us=%.3f max_us=%.3f "
            "cpu_process_ms=%.3f wall_ms=%.3f cpu_pct_single_core=%.2f "
-           "threads_before=%d threads_active=%d threads_after=%d ru_maxrss_kib=%ld\n",
+           "threads_before=%d threads_active=%d threads_after=%d ru_maxrss_kib=%ld "
+           "delete_p50_us=%.3f delete_p95_us=%.3f delete_p99_us=%.3f "
+           "delete_max_us=%.3f timer_close_us=%.3f\n",
            argv[1], count, period, duration, total_hits, sample_count,
            pct(deviation_us, sample_count, 50),
            pct(deviation_us, sample_count, 95),
@@ -165,7 +179,10 @@ int main(int argc, char** argv) {
            deviation_us[sample_count-1],
            (double)(cpu_b-cpu_a) / 1e6, (double)(wall_b-wall_a) / 1e6,
            100.0 * (double)(cpu_b-cpu_a) / (double)(wall_b-wall_a),
-           before, active, after, resource.ru_maxrss);
+           before, active, after, resource.ru_maxrss,
+           pct(deletion_us, count, 50), pct(deletion_us, count, 95),
+           pct(deletion_us, count, 99), deletion_us[count - 1],
+           (double)(close_b - close_a) / 1000.0);
     status = EXIT_SUCCESS;
 CLEANUP:
     if(timers) for(i = 0; i < open; ++i)
@@ -174,5 +191,6 @@ CLEANUP:
     free(timers);
     free(probes);
     free(deviation_us);
+    free(deletion_us);
     return status;
 }
