@@ -106,6 +106,9 @@ jobs:
             "$BUILD_DIR/bin/test_utl_timer"
           done
 
+      - name: Benchmark collector regression tests
+        run: python3 -m unittest discover -s scripts -p 'test_compare_timer_backends.py'
+
       - name: Timer baseline and resource smoke (non-threshold)
         shell: bash
         run: |
