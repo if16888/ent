@@ -79,6 +79,9 @@ jobs:
       - name: Performance Smoke
         run: ./scripts/run-ci-linux.sh perf
 
+      - name: Benchmark collector regression tests
+        run: python3 -m unittest discover -s scripts -p 'test_compare_timer_backends.py'
+
       - name: Reproducible baseline collector smoke
         run: |
           python3 scripts/timer_baseline.py \

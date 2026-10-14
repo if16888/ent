@@ -196,6 +196,42 @@ timerfd benchmark lifecycle-equivalent. Production migration still requires
 deterministic concurrent Close/Delete, self-deletion, callback overrun and
 FD/thread cleanup evidence with sanitizer and repeated-stress coverage.
 
+### Paired deadline-lag evidence and four-CPU collection
+
+After the benchmark-only `ENT_TIMER_TEST_HOOKS` instrumentation, Linux
+millisecond timer comparisons now expose **paired** `deadline_lag_p99_us`
+winner counts in `summary.json`, in addition to inter-arrival P99 wins.
+Each row in `paired_samples.csv` retains the raw per-run deadline metrics.
+Microsecond timer scenarios have **no** paired deadline-lag comparison:
+only their inter-arrival measurements are currently comparable. These
+comparisons are observational, not a hard real-time guarantee.
+
+`--require-unrestricted-cpus 4` is a **fail-closed** host prerequisite for
+four-CPU experiments: the benchmark child processes inherit the entire
+four-CPU allowed affinity from the job without `taskset` pinning. The
+collector rejects hosts whose allowed CPU affinity is not *exactly* four;
+a CPU cgroup quota or noisy neighbors can still prevent four full CPUs of
+capacity. The optional background loader is pinned to the first allowed
+CPU, while both benchmark backends retain full inherited affinity.
+
+Run from **Actions → ARM64 Self-hosted Validation → Run workflow** on the
+chosen, fixed SHA with `full_four_cpu_ab=true`. This opt-in mode adds
+20 paired trials × five scenarios × two backends for each of two conditions:
+idle and 25%-duty single-CPU synthetic interference (**400 subprocess
+runs total**). Raw CSV, summaries, exact git SHA, allowed affinity, CPU
+cgroup metadata and the requested loader duty are retained in artifact
+`timerfd-fourcpu-arm64-deadline-lag`. On failure, inspect the archived
+partial data and error.txt; do not call the gate passed. This manual run
+does **not** replace the separate, previously archived pinned single-core
+baseline and does not qualify as representative controlled field load.
+
+A short four-CPU collector smoke runs automatically on ARM64 only when
+the runner offers exactly four allowed CPUs. The standard PR tests also
+exercise paired-summary semantics with deterministic fake backends; neither
+smoke result establishes a latency budget. Evaluate both per-trial P99
+medians and **worst-run** P99 deadline lag, alongside CPU, threads, memory,
+lifecycle equivalence and rollback before deciding on migration.
+
 ### timerfd/eventfd architecture decision gate
 
 Before changing the runtime implementation, create an **independent** Linux

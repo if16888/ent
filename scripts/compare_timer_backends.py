@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Alternate independent ent timer and Linux timerfd benchmarks on one host.
 
-Experimental only. Inter-arrival P99 is comparable; prototype-only deadline lag
-is diagnostic and MUST NOT be interpreted as a measured production timer SLA.
+Experimental only. Inter-arrival P99 is comparable; absolute deadline lag is
+comparable for instrumented Linux millisecond timers only. Neither metric
+establishes a production timer real-time SLA.
 """
 import argparse
 import csv
@@ -32,7 +33,9 @@ def main():
     parser.add_argument("--cpu-width", type=int,
                         help="pin both backends to the first N allowed CPUs (1..4)")
     parser.add_argument("--load-duty-percent", type=int, default=0,
-                        help="bounded background load on first pinned CPU (0..50%%)")
+                        help="bounded background load on first selected CPU (0..50%%)")
+    parser.add_argument("--require-unrestricted-cpus", type=int, choices=range(1, 5),
+                        metavar="N", help="do not pin backends; require exactly N allowed CPUs (1..4)")
     args = parser.parse_args()
     if not 1 <= args.trials <= 100 or not 250 <= args.duration_ms <= 5000:
         parser.error("trials=1..100 and duration-ms=250..5000 required")
@@ -55,11 +58,19 @@ def main():
     )
     if width < 0 or width > 4 or (args.cpu_width is not None and width == 0):
         parser.error("--cpu-width must be 1..4 (or omit for unrestricted affinity)")
+    if args.require_unrestricted_cpus is not None:
+        if width:
+            parser.error("--require-unrestricted-cpus cannot be combined with CPU pinning")
+        if len(affinity) != args.require_unrestricted_cpus:
+            parser.error(f"expected exactly {args.require_unrestricted_cpus} allowed CPUs, got {len(affinity)}")
     if width and (len(affinity) < width or shutil.which("taskset") is None):
         parser.error("insufficient allowed CPUs or taskset unavailable")
     cpus = affinity[:width] if width else []
-    if args.load_duty_percent and not cpus:
-        parser.error("controlled load requires --cpu-width or --pin-first-allowed")
+    if args.load_duty_percent and not (cpus or args.require_unrestricted_cpus):
+        parser.error("controlled load requires --cpu-width, --pin-first-allowed or --require-unrestricted-cpus")
+    if args.load_duty_percent and shutil.which("taskset") is None:
+        parser.error("controlled background load requires taskset")
+    load_cpu = (cpus[0] if cpus else affinity[0]) if args.load_duty_percent else None
     cpu_list = ",".join(str(cpu) for cpu in cpus)
 
     meta.update({
@@ -69,10 +80,12 @@ def main():
         "duration_ms": args.duration_ms,
         "scenarios": [":".join(map(str, case)) for case in cases],
         "pinned_cpu": cpus[0] if len(cpus) == 1 else None,
-        "benchmark_affinity_cpus": cpus,
+        "benchmark_affinity_cpus": cpus if cpus else affinity,
+        "benchmark_affinity_mode": "subset_pinned" if cpus else "inherited_full_allowed",
+        "unrestricted_cpu_count_required": args.require_unrestricted_cpus,
         "background_load": {
             "duty_percent_of_one_core": args.load_duty_percent,
-            "cpu": cpus[0] if args.load_duty_percent else None,
+            "cpu": load_cpu,
             "cycle_ms": 100,
             "description": "bounded busy/sleep load; not a guarantee of host utilization",
         },
@@ -87,7 +100,7 @@ def main():
         if args.load_duty_percent:
             helper = Path(__file__).resolve().with_name("timer_benchmark_load.py")
             loader = subprocess.Popen(
-                ["taskset", "-c", str(cpus[0]), sys.executable,
+                ["taskset", "-c", str(load_cpu), sys.executable,
                  str(helper), "--duty-percent", str(args.load_duty_percent)],
                 stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
             )
@@ -195,6 +208,16 @@ def main():
             "total_pairs": args.trials,
             "definition": "prototype per-run interarrival P99 strictly lower",
         }
+        if mode == "ms":
+            summaries[key]["paired_deadline_lag_p99"] = {
+                "timerfd_better_runs": sum(
+                    float(prototype[t]["deadline_lag_p99_us"]) <
+                    float(legacy[t]["deadline_lag_p99_us"])
+                    for t in legacy
+                ),
+                "total_pairs": args.trials,
+                "definition": "timerfd scheduled-deadline-to-callback P99 strictly lower (Linux ms only)",
+            }
     (args.output_dir / "summary.json").write_text(
         json.dumps({"metadata": meta, "summaries": summaries},
                    indent=2, ensure_ascii=False, allow_nan=False) + "\n",
