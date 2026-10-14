@@ -80,6 +80,21 @@ static int threads(void)
     fclose(f);
     return n;
 }
+/* Immediately after join, /proc may still count a departing task briefly.
+ * Allow up to 100 ms for the thread-count snapshot to settle. This wait
+ * happens outside the measured CPU/wall benchmark interval. */
+static int threads_after_settle(int expected)
+{
+    struct timespec pause = {0, 5000000L};
+    int n = threads();
+    int retry;
+    for(retry = 0; expected >= 0 && n > expected && retry < 20; ++retry)
+    {
+        (void)nanosleep(&pause, NULL);
+        n = threads();
+    }
+    return n;
+}
 static int arm(PROBE *p)
 {
     struct itimerspec req;
@@ -256,7 +271,7 @@ int main(int argc, char **argv)
     thread_started = 0;
     close_b = monotonic_ns();
     wall_b = monotonic_ns(); cpu_b = cpu_ns();
-    after = threads();
+    after = threads_after_settle(before);
     if(b.worker_error || !wall_b || !cpu_b || wall_b <= wall_a || close_b < close_a)
         goto CLEANUP;
 
