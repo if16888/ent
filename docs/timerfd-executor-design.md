@@ -36,6 +36,41 @@ The executable model is at test/test_timerfd_executor_model.c, registered as Lin
 
 Passing the model test demonstrates candidate-contract consistency **only**. It does not establish real-time jitter, capacity, existing API parity or real FD resource safety.
 
+## Experimental real-expiration integration fixture (still NO-GO)
+
+Linux-only `test/test_timerfd_dispatch_executor.c` connects actual **one-shot
+`timerfd` readiness** to an `epoll` dispatcher and **two dedicated callback
+workers** through a **one-slot bounded queue**. A separate `eventfd` wakes
+shutdown. The dispatcher itself never runs application callbacks.
+
+The deterministic fixture exercises, on the real expiration path:
+
+- A gated slow callback on timer 0 while timer 1 finishes on the other
+  worker without releasing timer 0 first.
+- Both workers occupied; one pending callback accepted, the next expiration
+  rejected as `FULL` without blocking the dispatcher.
+- Re-arming a busy timer yields `COALESCED`, without concurrent callbacks.
+- Cancelling a pending timer removes it from the queue and subsequent
+  expirations yield `CANCELLED`.
+- **20 construction/shutdown cycles** with `/proc/self/fd` and thread-count
+  checks after all workers are joined. A three-second condition-variable
+  timeout reports failed progress instead of relying on unbounded sleeps.
+
+It is included in Linux CTest as `test_timerfd_dispatch_executor`; it is
+test-only, does not build into `ent`, does not alter production timer source,
+and does not change its API or ABI. This proves **bounded callback isolation
+on actual kernel timer events in the narrow fixture only**, not correctness
+under arbitrary concurrency or hard real-time deadline compliance.
+
+**Still missing** before production use: generation-safe public handles,
+callback self-delete and reentrancy semantics, concurrent Delete/Close/Destroy
+ownership and fault injection, persistent overload/backpressure policy for
+control-critical timers, fixed-delay re-arm parity and the distinct microsecond
+worker contract, callback-inclusive comparable P99 deadline-lag benchmarks
+under full effective four-CPU load, and explicit resource/rollback budgets.
+The fixture intentionally does not replace the separate performance prototype.
+Production timerfd migration stays **NO-GO**.
+
 ## Unresolved production architecture gates
 
 - Classify timers by deadline-critical versus best-effort behavior: whether coalescing or queue-full dropping is acceptable must be explicitly proven, especially for protection/control.
