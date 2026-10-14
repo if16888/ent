@@ -41,6 +41,7 @@ int main(void)
         return EXIT_FAILURE;
     }
 
+    /* Create-only API must never close, free or replace a live handle. */
     sts = ENT_DbInitHandle(&db_handle,
                            (DB_TYPE)999,
                            "unused",
@@ -48,26 +49,41 @@ int main(void)
                            "unused",
                            "unused",
                            0);
-    if(expect_true(sts == ENT_DBS_UNSUPPORTED,
-                   "reinitializing an existing handle to an unsupported backend should fail safely") != 0)
+    if(expect_true(sts == ENT_DBS_IN_USE && db_handle != NULL,
+                   "create-only API must reject replacement and retain the old handle") != 0)
     {
-        if(db_handle != NULL)
-        {
-            ENT_DbCloseHandle(&db_handle);
-        }
+        ENT_DbCloseHandle(&db_handle);
         ENT_DbClose();
         return EXIT_FAILURE;
     }
 
-    if(expect_true(db_handle == NULL,
-                   "unsupported reinit should leave no live DB handle") != 0)
+    if(expect_true(ENT_DbOpen(db_handle) == ENT_SYS_NORMAL,
+                   "rejected replacement must leave the SQLite handle usable") != 0 ||
+       expect_true(ENT_DbCloseHandle(&db_handle) == ENT_SYS_NORMAL && db_handle == NULL,
+                   "caller must close the old handle explicitly") != 0)
+    {
+        if(db_handle != NULL)
+            ENT_DbCloseHandle(&db_handle);
+        ENT_DbClose();
+        return EXIT_FAILURE;
+    }
+
+    sts = ENT_DbInitHandle(&db_handle,
+                           (DB_TYPE)999,
+                           "unused",
+                           "unused",
+                           "unused",
+                           "unused",
+                           0);
+    if(expect_true(sts == ENT_DBS_UNSUPPORTED && db_handle == NULL,
+                   "unsupported backend must reject a fresh NULL slot") != 0)
     {
         ENT_DbClose();
         return EXIT_FAILURE;
     }
 
     return expect_true(ENT_DbClose() == ENT_SYS_NORMAL,
-                       "unsupported reinit should release the old handle exactly once") == 0
+                       "explicit close must release the last live DB handle") == 0
                ? EXIT_SUCCESS
                : EXIT_FAILURE;
 }
