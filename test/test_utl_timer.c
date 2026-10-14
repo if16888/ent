@@ -790,6 +790,56 @@ CLEANUP:
     timer_wait_probe_destroy(&probe);
     return rc;
 }
+#ifndef _WIN32
+static int test_timer_delete_interrupts_long_sleep(void)
+{
+    UTL_TIMER_T timer = NULL;
+    struct timespec start, end;
+    long elapsed_ms;
+    int hits = 0;
+
+    if(expect_true(UTL_TimerInit() == ENT_SYS_NORMAL,
+                   "timer initialization should succeed") != 0)
+        return 1;
+    if(expect_true(UTL_TimerCreate(&timer, UTL_TIMER_E_PERIOD, 3000,
+                                   timer_cb, &hits) == ENT_SYS_NORMAL,
+                   "long-period timer creation should succeed") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+    UTL_Sleep(30);
+    if(clock_gettime(CLOCK_MONOTONIC, &start) != 0)
+    {
+        UTL_TimerDelete(&timer);
+        UTL_TimerClose();
+        return 1;
+    }
+    if(expect_true(UTL_TimerDelete(&timer) == ENT_SYS_NORMAL,
+                   "timer deletion should interrupt the wait") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+    if(clock_gettime(CLOCK_MONOTONIC, &end) != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+    elapsed_ms = (long)(end.tv_sec - start.tv_sec) * 1000L +
+                 (long)(end.tv_nsec - start.tv_nsec) / 1000000L;
+    if(expect_true(elapsed_ms < 350,
+                   "deleting an idle 3-second timer must finish promptly") != 0 ||
+       expect_true(hits == 0, "cancellation must not dispatch a callback") != 0)
+    {
+        UTL_TimerClose();
+        return 1;
+    }
+    return expect_true(UTL_TimerClose() == ENT_SYS_NORMAL,
+                       "timer runtime should close after deletion");
+}
+#endif
+
 static int test_timer_create_us_has_consistent_failure_contract(void)
 {
     UTL_TIMER_T timer = (UTL_TIMER_T)0x1;
@@ -1249,6 +1299,9 @@ int main(void)
     failures += test_timer_close_retry_keeps_partial_close_unavailable();
     failures += test_oneshot_timer_fires_once();
     failures += test_periodic_timer_fires_until_deleted();
+#ifndef _WIN32
+    failures += test_timer_delete_interrupts_long_sleep();
+#endif
     failures += test_periodic_timer_remains_stable_with_slow_callback();
     failures += test_timer_delete_allows_reentrant_callback_timer_api();
     failures += test_timer_create_us_has_consistent_failure_contract();

@@ -95,6 +95,12 @@ typedef MSG_ID_T (*UTL_TP_TASK_END_F)(void*,MSG_ID_T*);
 ENT_PUBLIC MSG_ID_T  UTL_TPoolInit(UTL_TPOOL*  pool,int num);
 /* maxPendingTasks bounds queued tasks; zero or negative values are invalid. */
 ENT_PUBLIC MSG_ID_T  UTL_TPoolInitEx(UTL_TPOOL* pool,int num,int maxPendingTasks);
+/* Strict policy: workers must be > 0 and ALL workers must start.
+ * On partial startup, close all started workers, leave *pool = NULL and
+ * return ENT_TPL_WORKER_CREATEFAIL. Use this for fixed-capacity systems.
+ * UTL_TPoolInit/Ex retain their existing best-effort worker count policy. */
+ENT_PUBLIC MSG_ID_T UTL_TPoolInitStrict(UTL_TPOOL* pool,int workers);
+ENT_PUBLIC MSG_ID_T UTL_TPoolInitStrictEx(UTL_TPOOL* pool,int workers,int maxPendingTasks);
 ENT_PUBLIC MSG_ID_T  UTL_TPoolClose(UTL_TPOOL* pool);
 /* Preferred asynchronous task submission. Completion callback borrows a pointer
  * to the result owned by the task; the pointer expires when callback returns.
