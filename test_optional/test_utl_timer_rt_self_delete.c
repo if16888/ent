@@ -136,7 +136,7 @@ int main(void)
 
         create_sts = UTL_TimerCreateUs(&probe.timer,
                                        UTL_TIMER_E_PERIOD,
-                                       10000,
+                                       1000,
                                        self_delete_cb,
                                        &probe);
         if(expect_true(create_sts == ENT_SYS_NORMAL,
