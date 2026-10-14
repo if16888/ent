@@ -183,6 +183,19 @@ and optional prototype-only lag values. Do not compare those lags to
 legacy scheduling metrics or claim a common deadline-latency result for
 microsecond timers.
 
+### Reentrant shutdown regression (production timer)
+
+`test_utl_timer` exercises the production `UTL_TimerClose` callback guard
+with both the ordinary millisecond timer and, on Linux, the separate
+microsecond callback worker. A callback attempting to close the runtime must
+receive `ENT_TMR_THREAD_FAILED` without shutting down the service. The owner
+must subsequently be able to delete the timer and close the service.
+
+This protects existing runtime behavior; it **does not** make the independent
+timerfd benchmark lifecycle-equivalent. Production migration still requires
+deterministic concurrent Close/Delete, self-deletion, callback overrun and
+FD/thread cleanup evidence with sanitizer and repeated-stress coverage.
+
 ### timerfd/eventfd architecture decision gate
 
 Before changing the runtime implementation, create an **independent** Linux
