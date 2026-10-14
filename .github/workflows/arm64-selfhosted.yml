@@ -122,6 +122,17 @@ jobs:
             --trials 1 --duration-ms 350 \
             --scenario ms:16:20 --scenario us:4:1000
 
+      - name: Bounded multicore and loaded A/B collector smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/compare_timer_backends.py \
+            --legacy-bin "$BUILD_DIR/bin/perf_timer_scale" \
+            --prototype-bin "$BUILD_DIR/bin/perf_timerfd_scale" \
+            --output-dir "$RUNNER_TEMP/timerfd-multicore-loaded-smoke" \
+            --trials 1 --duration-ms 350 --cpu-width 2 \
+            --load-duty-percent 25 --scenario ms:16:20
+
       - name: Repeat pinned timer baseline (manual dispatch only)
         if: github.event_name == 'workflow_dispatch'
         shell: bash
