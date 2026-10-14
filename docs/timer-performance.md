@@ -278,6 +278,14 @@ partial data and error.txt; do not call the gate passed. This manual run
 does **not** replace the separate, previously archived pinned single-core
 baseline and does not qualify as representative controlled field load.
 
+For `full_four_cpu_ab=true`, the ARM64 manual workflow first runs an
+**early preflight before configuring, building or running the long pinned
+baselines**: exactly four allowed CPUs, sufficient visible cgroup v2 CPU
+quota, and `taskset` must all be available. Failure stops the workflow
+without running the expensive experiments. The collector independently
+rechecks CPU constraints at experiment start; passing the preflight does
+not guarantee dedicated cores, ancestor cgroup capacity or low CPU steal.
+
 The opt-in four-CPU long experiment also requires
 `--require-cpu-quota-capacity`: the collector must read and validate
 `/sys/fs/cgroup/cpu.max` (cgroup v2). A finite quota of fewer than
