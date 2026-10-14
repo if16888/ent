@@ -196,6 +196,27 @@ timerfd benchmark lifecycle-equivalent. Production migration still requires
 deterministic concurrent Close/Delete, self-deletion, callback overrun and
 FD/thread cleanup evidence with sanitizer and repeated-stress coverage.
 
+### External timer Delete/Close ordering regressions
+
+The POSIX-only `test_utl_timer_thread_safety` now explicitly gates a live,
+blocked callback while two external threads contend for shutdown. Its
+test-only lifecycle counters establish each ordering without using a
+timing assumption:
+
+- **Delete-first:** the external Delete retains a lifecycle operation,
+  then Close starts; Close must wait until Delete and callback completion
+  before releasing the timer subsystem.
+- **Close-first:** Close marks the subsystem closing, and a subsequent
+  Delete must return `ENT_TMR_NOT_INITIALIZED` without dereferencing a
+  stale handle. After Close completes, the owner must discard that handle.
+
+Both orderings run for ordinary millisecond timers on POSIX, and for the
+separate microsecond callback-worker path on Linux. The normal Linux x64
+and ARM64 CI stress loops repeat these tests; sanitizer lanes additionally
+exercise them. This establishes the **existing production** lifecycle
+contract only. It does not prove the timerfd prototype implements
+equivalent handle ownership or callback behavior.
+
 ### Paired deadline-lag evidence and four-CPU collection
 
 After the benchmark-only `ENT_TIMER_TEST_HOOKS` instrumentation, Linux
