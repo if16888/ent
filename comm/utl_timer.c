@@ -1079,7 +1079,17 @@ static void* iUTL_TimerRtWorker(void* data)
             break;
         }
 
-        timerCtx->next_deadline_ns += timerCtx->period_ns;
+        /* Advance over all expired ticks in one step rather than spinning
+         * once per missed period (callbacks are already coalesced to one). */
+        {
+            long long now = iUTL_TimerMonotonicNs();
+            long long missed = 0;
+            if(now > timerCtx->next_deadline_ns)
+            {
+                missed = (now - timerCtx->next_deadline_ns) / timerCtx->period_ns;
+            }
+            timerCtx->next_deadline_ns += (missed + 1) * timerCtx->period_ns;
+        }
     }
 
     return NULL;

@@ -15,7 +15,7 @@ UTL_CVClose(&cv);
 
 These APIs validate the pointer-to-handle argument and set the caller-owned handle to `NULL` after successful close.
 
-They do not make it safe to close a lock or condition variable while another thread is actively using it. The caller must still guarantee that no thread is blocked on or holding the object when it is closed.
+They do not make it safe to close a lock or condition variable while another thread is actively using it. The caller must still guarantee that no thread is blocked on or holding the object when it is closed. On POSIX, if native destruction reports an error, the object storage and the caller's handle are retained rather than freed. This is a best-effort diagnostic, **not** a license to destroy synchronization objects in use (that is undefined behavior).
 
 ## Thread handles
 
