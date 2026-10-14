@@ -21,6 +21,7 @@
 #include <Windows.h>
 #else
 #include <sys/socket.h>
+#include <poll.h>
 #include <stdlib.h>	 /* Required by getenv()			     */
 #include <errno.h>
 #include <limits.h>
@@ -33,14 +34,62 @@
 #include "ent_msg.h"
 #include "ent_utility.h"
 
-static bool sUtlInitFlag  = false;
-static bool sUtlRetryFlag = true;
+/* Synchronize process-wide initialization across all socket API callers. */
+#ifdef _WIN32
+static volatile LONG sUtlInitFlag = 0;
+static int iUTL_SocketIsInitialized(void)
+{
+    return InterlockedCompareExchange(&sUtlInitFlag, 0, 0) != 0;
+}
+static void iUTL_SocketMarkInitialized(void)
+{
+    InterlockedExchange(&sUtlInitFlag, 1);
+}
+#else
+static int sUtlInitFlag = 0;
+static int iUTL_SocketIsInitialized(void)
+{
+    return __atomic_load_n(&sUtlInitFlag, __ATOMIC_ACQUIRE) != 0;
+}
+static void iUTL_SocketMarkInitialized(void)
+{
+    __atomic_store_n(&sUtlInitFlag, 1, __ATOMIC_RELEASE);
+}
+#endif
+static const bool sUtlRetryFlag = true;
 
 #if !defined(_WIN32) && defined(ENT_SOCKET_TEST_HOOKS)
 static unsigned int sSocketCloseEintrInject = 0;
 static unsigned int sSocketCloseCallCount = 0;
 static unsigned int sSocketGetSockOptEintrInject = 0;
 static unsigned int sSocketGetSockOptCallCount = 0;
+static unsigned int sSocketConnectEintrInject = 0;
+static unsigned int sSocketConnectCallCount = 0;
+
+void iENT_SocketTestInjectConnectEintr(void)
+{
+    sSocketConnectEintrInject = 1;
+    sSocketConnectCallCount = 0;
+}
+
+unsigned int iENT_SocketTestConnectCallCount(void)
+{
+    return sSocketConnectCallCount;
+}
+
+int iENT_SocketTestConnect(int fd, const struct sockaddr* addr, socklen_t addrSize)
+{
+    int rc;
+    sSocketConnectCallCount++;
+    rc = connect(fd, addr, addrSize);
+    if(sSocketConnectEintrInject > 0 && rc == 0)
+    {
+        sSocketConnectEintrInject--;
+        errno = EINTR;
+        return -1;
+    }
+    return rc;
+}
 
 void iENT_SocketTestInjectCloseEintr(void)
 {
@@ -127,7 +176,7 @@ ENT_PUBLIC MSG_ID_T UTL_SocketInit()
     int err;
     
     AcquireSRWLockExclusive(&sUtlInitLock);
-    if(sUtlInitFlag)
+    if(iUTL_SocketIsInitialized())
     {
         ReleaseSRWLockExclusive(&sUtlInitLock);
         return ENT_SYS_NORMAL;
@@ -159,7 +208,7 @@ ENT_PUBLIC MSG_ID_T UTL_SocketInit()
         ReleaseSRWLockExclusive(&sUtlInitLock);
         return ENT_SOCK_VERSION_UNSUPPORTED; 
     }
-    sUtlInitFlag = true;
+    iUTL_SocketMarkInitialized();
     ReleaseSRWLockExclusive(&sUtlInitLock);
     return ENT_SYS_NORMAL;
 }
@@ -187,7 +236,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Socket(
 {
     MSG_ID_T  sts = 0;	       
 
-	if (!sUtlInitFlag) 
+	if(!iUTL_SocketIsInitialized()) 
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
@@ -233,7 +282,7 @@ MSG_ID_T	UTL_Bind(
     MSG_ID_T	    sts = 0;	     	          
     int     	    stat;
 
-    if (!sUtlInitFlag)
+    if(!iUTL_SocketIsInitialized())
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
@@ -283,7 +332,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Connect(
     int      	     stat;
     DWORD		     winerr;
 
-    if (!sUtlInitFlag) 
+    if(!iUTL_SocketIsInitialized()) 
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
@@ -335,7 +384,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Listen(
     MSG_ID_T  sts = 0;	       
     int       stat;
 
-    if (!sUtlInitFlag) 
+    if(!iUTL_SocketIsInitialized()) 
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
@@ -383,7 +432,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Accept(
     MSG_ID_T	    sts = 0;
     SOCKET          ret;
 
-    if (!sUtlInitFlag)
+    if(!iUTL_SocketIsInitialized())
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
@@ -437,7 +486,7 @@ ENT_PUBLIC MSG_ID_T  UTL_CloseSocket(
     MSG_ID_T  sts = 0;
     int       stat;
 
-    if (!sUtlInitFlag) 
+    if(!iUTL_SocketIsInitialized()) 
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
@@ -481,7 +530,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Recv(
     MSG_ID_T  sts = 0;	       
     int       BytesRecvd;
 
-    if (!sUtlInitFlag) 
+    if(!iUTL_SocketIsInitialized()) 
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
@@ -537,7 +586,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Send(
     MSG_ID_T  sts = 0;	       
     int     TempBytesSent;
 
-    if (!sUtlInitFlag) 
+    if(!iUTL_SocketIsInitialized()) 
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
@@ -593,7 +642,7 @@ ENT_PUBLIC MSG_ID_T  UTL_SetSockOpt(
     MSG_ID_T  sts = 0;	       /* Completion status			       */
     int       stat;
 
-    if (!sUtlInitFlag)
+    if(!iUTL_SocketIsInitialized())
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
@@ -644,7 +693,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Shutdown(
     MSG_ID_T  sts = 0;	      
     int       stat;
 
-    if (!sUtlInitFlag) 
+    if(!iUTL_SocketIsInitialized()) 
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
@@ -690,7 +739,7 @@ ENT_PUBLIC MSG_ID_T  UTL_GetSockOpt(
     int       stat;
     int       requestedOptionLength;
 
-    if (!sUtlInitFlag)
+    if(!iUTL_SocketIsInitialized())
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
@@ -741,12 +790,12 @@ ENT_PUBLIC MSG_ID_T  UTL_GetSockOpt(
  */
 ENT_PUBLIC MSG_ID_T UTL_SocketInit()
 {   
-    if(sUtlInitFlag)
+    if(iUTL_SocketIsInitialized())
     {
         return ENT_SYS_NORMAL;
     }
 
-    sUtlInitFlag = true;
+    iUTL_SocketMarkInitialized();
     return ENT_SYS_NORMAL;
 }
 /*+++++++++++++++++++++++++ FUNCTION DESCRIPTION ++++++++++++++++++++++++++++++
@@ -773,7 +822,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Socket(
 {
     MSG_ID_T  sts = 0;	       
 
-    if (!sUtlInitFlag)
+    if(!iUTL_SocketIsInitialized())
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
@@ -819,7 +868,7 @@ MSG_ID_T	UTL_Bind(
     MSG_ID_T	    sts = 0;	     	          
     int     	    stat;
 
-    if (!sUtlInitFlag) 
+    if(!iUTL_SocketIsInitialized()) 
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
@@ -873,7 +922,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Connect(
     MSG_ID_T	     sts = 0;	       
     int      	     stat;
 
-    if (!sUtlInitFlag) 
+    if(!iUTL_SocketIsInitialized()) 
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
@@ -884,15 +933,38 @@ ENT_PUBLIC MSG_ID_T  UTL_Connect(
         return ENT_SOCK_BAD_ARGUMENT;
     }
 
-	while ( (stat = connect (
-	    SocketDesc,
-	    addr,
-	    addr_size)) < 0 )
+    /* EINTR leaves a blocking connect in progress on POSIX. Do not retry
+     * connect(); wait for completion and inspect SO_ERROR instead. */
+#ifdef ENT_SOCKET_TEST_HOOKS
+    stat = iENT_SocketTestConnect(SocketDesc, addr, (socklen_t)addr_size);
+#else
+    stat = connect(SocketDesc, addr, (socklen_t)addr_size);
+#endif
+    if(stat < 0 && errno == EINTR && sUtlRetryFlag)
     {
-	    if ( (errno == EINTR) && sUtlRetryFlag )
-		    continue;
-        break;
-	}
+        struct pollfd ready;
+        int pollSts;
+        int soError = 0;
+        socklen_t soErrorLen = sizeof(soError);
+
+        memset(&ready, 0, sizeof(ready));
+        ready.fd = SocketDesc;
+        ready.events = POLLOUT;
+        do
+        {
+            pollSts = poll(&ready, 1, -1);
+        }
+        while(pollSts < 0 && errno == EINTR && sUtlRetryFlag);
+
+        if(pollSts > 0 &&
+           getsockopt(SocketDesc, SOL_SOCKET, SO_ERROR, &soError, &soErrorLen) == 0)
+        {
+            if(soError == 0)
+                stat = 0;
+            else
+                errno = soError;
+        }
+    }
 
 	if ( stat < 0 )
     {
@@ -926,7 +998,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Listen(
     MSG_ID_T  sts = 0;	       
     int       stat;
 
-    if (!sUtlInitFlag) 
+    if(!iUTL_SocketIsInitialized()) 
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
@@ -976,7 +1048,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Accept(
     socklen_t*      pSockaddrLen = NULL;
     int             ret;
 
-    if (!sUtlInitFlag)
+    if(!iUTL_SocketIsInitialized())
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
@@ -1039,7 +1111,7 @@ ENT_PUBLIC MSG_ID_T  UTL_CloseSocket(
     MSG_ID_T  sts = 0;	       
     int       stat;		       
 
-    if (!sUtlInitFlag) 
+    if(!iUTL_SocketIsInitialized()) 
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
@@ -1089,7 +1161,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Recv(
     MSG_ID_T  sts = 0;	       
     int       BytesRecvd;
 
-    if (!sUtlInitFlag) 
+    if(!iUTL_SocketIsInitialized()) 
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
@@ -1145,7 +1217,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Send(
     MSG_ID_T  sts = 0;	       
     int     TempBytesSent;
 
-    if (!sUtlInitFlag) 
+    if(!iUTL_SocketIsInitialized()) 
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
@@ -1207,7 +1279,7 @@ ENT_PUBLIC MSG_ID_T  UTL_SetSockOpt(
     MSG_ID_T  sts = 0;	       /* Completion status			       */
     int       stat;
 
-    if (!sUtlInitFlag)
+    if(!iUTL_SocketIsInitialized())
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
@@ -1258,7 +1330,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Shutdown(
     MSG_ID_T  sts = 0;	      
     int       stat;
 
-    if (!sUtlInitFlag) 
+    if(!iUTL_SocketIsInitialized()) 
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
@@ -1305,7 +1377,7 @@ ENT_PUBLIC MSG_ID_T  UTL_GetSockOpt(
     socklen_t nativeOptionLength;
     socklen_t requestedOptionLength;
 
-    if (!sUtlInitFlag)
+    if(!iUTL_SocketIsInitialized())
     {
         IENT_LOG_ERROR("unintilized.\n");
         return ENT_SOCK_NOT_INITIALIZED;
