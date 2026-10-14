@@ -685,6 +685,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   # Experimental benchmark only: independent of ent timer runtime/API.
   add_executable(perf_timerfd_scale perf_timerfd_scale.c)
   target_link_libraries(perf_timerfd_scale PRIVATE pthread)
+  # Intentional diagnostic: a blocked callback in one dispatcher delays
+  # unrelated timers. It does not validate lifecycle/API equivalence.
+  add_test(NAME test_timerfd_dispatch_hol COMMAND perf_timerfd_scale --selftest-hol)
+  set_tests_properties(test_timerfd_dispatch_hol PROPERTIES TIMEOUT 10)
 endif()
 
 if(UNIX AND NOT APPLE)

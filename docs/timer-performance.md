@@ -196,6 +196,26 @@ timerfd benchmark lifecycle-equivalent. Production migration still requires
 deterministic concurrent Close/Delete, self-deletion, callback overrun and
 FD/thread cleanup evidence with sanitizer and repeated-stress coverage.
 
+### Shared timerfd dispatcher: deterministic head-of-line warning
+
+The benchmark-only `perf_timerfd_scale --selftest-hol` mode gates timer 1
+*inside the real experimental timerfd/epoll dispatcher* and only then arms
+timer 2. Timer 2's monotonic deadline expires while timer 1's synthetic
+callback remains blocked. After releasing the gate, the test requires timer 2
+to be observed with **at least 15 ms of lateness**, following a 30 ms
+controlled block. It also compares process FD and thread counts before and
+after shutdown to detect resource leaks in this isolated diagnostic.
+
+This is a deliberate **negative architecture test**: the single dispatcher
+cannot run an unrelated callback while its only worker is busy. It does
+not mean fixed-delay timing or callback isolation is implemented, does not
+establish parity with the public timer API, and should not be turned into a
+benchmark latency result. It exposes a critical trade-off requiring an
+explicit callback execution design (e.g., separate bounded workers with
+specified ordering/backpressure semantics) before production migration.
+Ordinary benchmark invocations are unchanged: the gate runs only under
+`--selftest-hol`, and Linux CTest exercises the negative test in CI.
+
 ### External timer Delete/Close ordering regressions
 
 The POSIX-only `test_utl_timer_thread_safety` now explicitly gates a live,
