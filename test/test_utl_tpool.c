@@ -566,6 +566,43 @@ static int test_tpool_close_reclaims_partially_started_workers(void)
                        "UTL_TPoolClose should close the shared thread context after partial startup");
 }
 
+static int test_tpool_strict_requires_full_worker_count(void)
+{
+    UTL_TPOOL pool = (UTL_TPOOL)1;
+    reset_thread_counters();
+    if(expect_true(UTL_TPoolInitStrictEx(&pool, 0, 4) == ENT_TPL_BAD_ARGUMENT &&
+                   pool == NULL,
+                   "strict pool must reject zero workers") != 0)
+        return 1;
+
+    reset_thread_counters();
+    s_fail_thread_create_on_call = 2;
+    if(expect_true(UTL_TPoolInitStrictEx(&pool, 3, 4) == ENT_TPL_WORKER_CREATEFAIL,
+                   "strict pool must reject a partial worker startup") != 0)
+    {
+        s_fail_thread_create_on_call = 0;
+        return 1;
+    }
+    s_fail_thread_create_on_call = 0;
+    if(expect_true(pool == NULL && s_thread_create_calls == 2 &&
+                   s_thread_close_calls == 1,
+                   "failed strict init must roll back without publishing a handle") != 0)
+        return 1;
+
+    reset_thread_counters();
+    if(expect_true(UTL_TPoolInitStrict(&pool, 3) == ENT_SYS_NORMAL &&
+                   pool != NULL && s_thread_create_calls == 3,
+                   "strict pool should succeed only with all workers started") != 0)
+    {
+        if(pool != NULL)
+            UTL_TPoolClose(&pool);
+        return 1;
+    }
+    return expect_true(UTL_TPoolClose(&pool) == ENT_SYS_NORMAL &&
+                       s_thread_wait_calls == 3,
+                       "strict pool close should reclaim all three workers");
+}
+
 static int test_tpool_close_rejects_null_pool(void)
 {
     return expect_true(UTL_TPoolClose(NULL) == ENT_TPL_BAD_ARGUMENT,
@@ -825,6 +862,7 @@ int main(void)
     failures += test_tpool_init_cleans_up_when_worker_list_insert_fails();
     failures += test_tpool_init_uses_default_worker_count_for_non_positive_input();
     failures += test_tpool_close_reclaims_partially_started_workers();
+    failures += test_tpool_strict_requires_full_worker_count();
     failures += test_tpool_close_rejects_null_pool();
     failures += test_tpool_executes_task_and_end_callback();
     failures += test_tpool_submit_owns_result_storage();

@@ -60,6 +60,14 @@ remain valid until completion. Normal pool close drains submitted work.
 `UTL_TPoolInit()` limits the pending queue to
 `UTL_TPOOL_DEFAULT_MAX_PENDING_TASKS` (4096) tasks. Use
 `UTL_TPoolInitEx(pool, workers, maxPendingTasks)` to choose a positive limit.
+The compatibility initializers (`UTL_TPoolInit` and `UTL_TPoolInitEx`)
+use a best-effort worker count: a pool can start with fewer workers than
+requested, as long as at least one starts. For systems that require
+deterministic capacity, use `UTL_TPoolInitStrict(pool, workers)` or
+`UTL_TPoolInitStrictEx(pool, workers, maxPendingTasks)`. Strict mode
+requires a positive worker count, rolls back any partial startup, and
+returns `ENT_TPL_WORKER_CREATEFAIL` with a NULL output handle.
+
 When all pending slots are occupied, `UTL_TPoolAddTask()` returns
 `ENT_TPL_QUEUE_FULL`; it does not block waiting for capacity. If a worker
 fails at runtime, further submissions return `ENT_TPL_WORKER_FAILED`.

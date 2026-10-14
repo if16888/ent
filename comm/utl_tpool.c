@@ -600,19 +600,20 @@ static void*  iUTL_TPoolTaskProLinux(void* data)
 }
 #endif
 
-ENT_PUBLIC MSG_ID_T  UTL_TPoolInitEx(UTL_TPOOL* pool,int num,int maxPendingTasks)
+static MSG_ID_T iUTL_TPoolInitCore(UTL_TPOOL* pool,int num,int maxPendingTasks,BOOL strict)
 {
     MSG_ID_T          sts=0;
     UTL_TPOOL_CTX*    poolCtx=NULL;
     UTL_TPOOL_THREAD* thCtx = NULL;
     DLL_D_HDR*        tmp = NULL;
+    BOOL              startupIncomplete = FALSE;
     if(pool==NULL)
     {
         IENT_LOG_ERROR("thread pool init handle is null\n");
         return ENT_TPL_BAD_ARGUMENT;
     }
     *pool = NULL;
-    if(maxPendingTasks <= 0)
+    if(maxPendingTasks <= 0 || (strict && num <= 0))
     {
         return ENT_TPL_BAD_ARGUMENT;
     }
@@ -681,6 +682,11 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolInitEx(UTL_TPOOL* pool,int num,int maxPendingTasks
         thCtx = (UTL_TPOOL_THREAD*)malloc(sizeof(UTL_TPOOL_THREAD));
         if(thCtx==NULL)
         {
+            startupIncomplete = TRUE;
+            if(strict)
+            {
+                break;
+            }
             continue;
         }
         memset(thCtx,0,sizeof(UTL_TPOOL_THREAD));
@@ -702,6 +708,11 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolInitEx(UTL_TPOOL* pool,int num,int maxPendingTasks
             poolCtx->threadNum--;
             UTL_LockLeave(poolCtx->taskLock);
             free(thCtx);
+            startupIncomplete = TRUE;
+            if(strict)
+            {
+                break;
+            }
             continue;
         }
 #ifdef ENT_TPOOL_TEST_HOOKS
@@ -725,6 +736,11 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolInitEx(UTL_TPOOL* pool,int num,int maxPendingTasks
                 return ENT_TPL_WORKER_CREATEFAIL;
             }
             free(thCtx);
+            startupIncomplete = TRUE;
+            if(strict)
+            {
+                break;
+            }
             continue;
         }
     }
@@ -732,10 +748,18 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolInitEx(UTL_TPOOL* pool,int num,int maxPendingTasks
     UTL_LockEnter(poolCtx->taskLock);
     sts = poolCtx->threadNum;
     UTL_LockLeave(poolCtx->taskLock);
-    if(sts <= 0)
+    if(sts <= 0 || (strict && (startupIncomplete || sts != tmpNum)))
     {
-        (void)iUTL_TPoolCleanupInitFailure(poolCtx, NULL);
+        MSG_ID_T cleanupSts = iUTL_TPoolCleanupInitFailure(poolCtx, NULL);
+        if(cleanupSts < 0)
+        {
+            IENT_LOG_ERROR("pool startup rollback failed,sts [%d]\n",cleanupSts);
+        }
         return ENT_TPL_WORKER_CREATEFAIL;
+    }
+    if(startupIncomplete)
+    {
+        IENT_LOG_WARN("pool worker count below requested count [%d]\n",tmpNum);
     }
 
     poolCtx->state = UTL_TPOOL_STATE_ACTIVE_E;
@@ -745,9 +769,26 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolInitEx(UTL_TPOOL* pool,int num,int maxPendingTasks
     return ENT_SYS_NORMAL;
 }
 
-ENT_PUBLIC MSG_ID_T  UTL_TPoolInit(UTL_TPOOL* pool,int num)
+/* Compatibility policy: keep a usable pool when some workers start. */
+ENT_PUBLIC MSG_ID_T UTL_TPoolInitEx(UTL_TPOOL* pool,int num,int maxPendingTasks)
+{
+    return iUTL_TPoolInitCore(pool, num, maxPendingTasks, FALSE);
+}
+
+ENT_PUBLIC MSG_ID_T UTL_TPoolInit(UTL_TPOOL* pool,int num)
 {
     return UTL_TPoolInitEx(pool, num, UTL_TPOOL_DEFAULT_MAX_PENDING_TASKS);
+}
+
+/* Deterministic capacity: either start every requested worker or roll back. */
+ENT_PUBLIC MSG_ID_T UTL_TPoolInitStrictEx(UTL_TPOOL* pool,int workers,int maxPendingTasks)
+{
+    return iUTL_TPoolInitCore(pool, workers, maxPendingTasks, TRUE);
+}
+
+ENT_PUBLIC MSG_ID_T UTL_TPoolInitStrict(UTL_TPOOL* pool,int workers)
+{
+    return UTL_TPoolInitStrictEx(pool, workers, UTL_TPOOL_DEFAULT_MAX_PENDING_TASKS);
 }
 
 ENT_PUBLIC MSG_ID_T  UTL_TPoolClose(UTL_TPOOL* pool)
