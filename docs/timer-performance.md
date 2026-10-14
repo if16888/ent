@@ -196,6 +196,18 @@ timerfd benchmark lifecycle-equivalent. Production migration still requires
 deterministic concurrent Close/Delete, self-deletion, callback overrun and
 FD/thread cleanup evidence with sanitizer and repeated-stress coverage.
 
+### Bounded callback executor contract model (non-production)
+
+See [timerfd executor design](timerfd-executor-design.md) and Linux-only
+`test_timerfd_executor_model`. This separate, **test-only model** exercises
+two bounded callback workers and a single pending slot with explicit
+coalescing, overflow, external cancellation, shutdown-drain, callback
+reentrancy rejection, and 20× thread cleanup checks. It is **not** wired to
+the epoll/timerfd prototype or the public timer API. The model's acceptance
+tests are not evidence of the real scheduler's timing or lifecycle parity.
+Migration remains blocked pending API review, integrated callback-inclusive
+benchmarking, full CPU baseline, and explicit rollback.
+
 ### Shared timerfd dispatcher: deterministic head-of-line warning
 
 The benchmark-only `perf_timerfd_scale --selftest-hol` mode gates timer 1

@@ -689,6 +689,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   # unrelated timers. It does not validate lifecycle/API equivalence.
   add_test(NAME test_timerfd_dispatch_hol COMMAND perf_timerfd_scale --selftest-hol)
   set_tests_properties(test_timerfd_dispatch_hol PROPERTIES TIMEOUT 10)
+  # Separate test-only bounded callback-worker contract model.
+  # Not a production timerfd integration or public API.
+  add_executable(test_timerfd_executor_model test_timerfd_executor_model.c)
+  target_link_libraries(test_timerfd_executor_model PRIVATE pthread)
+  add_test(NAME test_timerfd_executor_model COMMAND test_timerfd_executor_model)
+  set_tests_properties(test_timerfd_executor_model PROPERTIES TIMEOUT 15)
 endif()
 
 if(UNIX AND NOT APPLE)
