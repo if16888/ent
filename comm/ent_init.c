@@ -307,15 +307,20 @@ static MSG_ID_T iENT_HandleSetRtAttributes(ENT_HANDLE handle,
         return sts;
     }
 
+    /* Serialize the full attempt, including native calls and the snapshot.
+     * The OS scheduling target remains this calling thread (pthread_self). */
+    UTL_LockEnter(handleCtx->ctx.entLock);
     if(handleCtx->ctx.rtRequested == false)
     {
-        iENT_HandleEndCall(handleCtx);
-        return ENT_RT_NOTRT;
+        sts = ENT_RT_NOTRT;
     }
-
-    prevCtx = iENT_RuntimeSetActiveCtx(&handleCtx->ctx);
-    sts = iENT_CTXApplyRtAttributes(&handleCtx->ctx, rtCpu, rtPolicy, rtPriority);
-    iENT_RuntimeSetActiveCtx(prevCtx);
+    else
+    {
+        prevCtx = iENT_RuntimeSetActiveCtx(&handleCtx->ctx);
+        sts = iENT_CTXApplyRtAttributes(&handleCtx->ctx, rtCpu, rtPolicy, rtPriority);
+        iENT_RuntimeSetActiveCtx(prevCtx);
+    }
+    UTL_LockLeave(handleCtx->ctx.entLock);
     iENT_HandleEndCall(handleCtx);
     return sts;
 }

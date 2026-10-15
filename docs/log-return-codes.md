@@ -80,3 +80,32 @@ context with `ENT_LOG_BAD_HANDLE`.
 
 - `ENT_LOG_OK` exists as the `LOG` submodule success symbol, but the public API success path continues to use `ENT_SYS_NORMAL`.
 - Legacy log return macros are no longer used.
+
+## Migrating context-close callers
+
+Do not treat every negative close result as retryable. First stop new users and
+retain exclusive ownership of the context. Callers of the raw by-value API must
+clear their owner variable on `ENT_SYS_NORMAL` **or** `ENT_LOG_IO_FAILED`, because
+both complete context reclamation. Incomplete worker shutdown returns
+`ENT_LOG_THREAD_FAILED` and keeps the context valid for a later retry. `IN_USE`
+requires synchronization with the thread owning close; `BAD_HANDLE` requires
+ownership diagnosis. Neither is a reason for a blind retry loop.
+
+The compiled [owner helper](../example/log_ctx_close.h) wraps the existing API:
+
+```c
+status = iExample_LogCtxClose(&ctx);
+if(status == ENT_LOG_IO_FAILED) {
+    /* Report lost log data. ctx is NULL; never retry the old pointer. */
+} else if(status == ENT_LOG_THREAD_FAILED) {
+    /* ctx is retained. Resolve the worker failure before a later retry. */
+}
+```
+
+The helper is example code, not a new public API. A second helper call on its
+cleared slot is harmless; this does not make saved raw aliases callable. Discard
+the context-owned log handle and all context aliases after completed close.
+[example03_log_ctx_close.c](../example/example03_log_ctx_close.c) is built and run
+as a smoke test when examples/testing are enabled. The log regression suite uses
+the same helper for both terminal I/O failure and injected retryable worker-stop
+failure, and checks service ownership is fully released only after completion.

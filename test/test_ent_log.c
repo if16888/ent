@@ -24,6 +24,7 @@
 #include "ient_log.h"
 #include "ient_comm.h"
 #include "ient_runtime.h"
+#include "../example/log_ctx_close.h"
 
 /* The log implementation is now split across core/writer/options/compat sources. */
 
@@ -3275,6 +3276,18 @@ static int sInitGateEntered;
 static int sInitGateRelease;
 #endif
 
+#ifdef _WIN32
+static __declspec(thread) bool sFailNextBufferStop;
+#else
+static __thread bool sFailNextBufferStop;
+#endif
+bool iENT_LogTestFailBufferStop(void)
+{
+    bool fail = sFailNextBufferStop;
+    sFailNextBufferStop = false;
+    return fail;
+}
+
 void iENT_LogTestCtxInitReserved(void)
 {
 #ifndef _WIN32
@@ -3363,10 +3376,47 @@ static int test_ctx_completed_io_error_releases_context(void)
     }
     if(ENT_LogCtxInitHandle(ctx, &handle, "CtxIoFailure", dirPath) != ENT_SYS_NORMAL) return 1;
     ((ENT_LOG_CTX_INTERNAL*)handle)->bufferIoStatus = ENT_LOG_IO_FAILED;
-    failed += expect_true(ENT_LogCtxClose(ctx) == ENT_LOG_IO_FAILED,
+    failed += expect_true(iExample_LogCtxClose(&ctx) == ENT_LOG_IO_FAILED && ctx == NULL,
                           "ctx close must report completed logger I/O failure");
+    handle = NULL;
+    failed += expect_true(iExample_LogCtxClose(&ctx) == ENT_SYS_NORMAL && ctx == NULL,
+                          "the owner helper must not pass a released context back to the library");
     failed += expect_true(ENT_LogClose() == ENT_SYS_NORMAL,
                           "completed I/O failure must not leave an orphaned active context");
+    remove_dir_contents(dirPath);
+    return failed;
+}
+
+static int test_ctx_retryable_close_preserves_owner_slot(void)
+{
+    ENT_LOG_CTX ctx = NULL;
+    ENT_LOG_CTX original;
+    ENT_LOG handle = NULL;
+    bool buffering = true;
+    char dirPath[512];
+    int failed = 0;
+    if(make_temp_dir(dirPath, sizeof(dirPath)) != 0)
+    {
+        return 1;
+    }
+    if(ENT_LogInit() != ENT_SYS_NORMAL || ENT_LogCtxInit(&ctx) != ENT_SYS_NORMAL ||
+       ENT_LogCtxInitHandle(ctx, &handle, "RetryClose", dirPath) != ENT_SYS_NORMAL ||
+       ENT_LogCtxSetOption(ctx, handle, ENT_LOG_BUFFER_E, &buffering) != ENT_SYS_NORMAL)
+    {
+        return 1;
+    }
+    original = ctx;
+    sFailNextBufferStop = true;
+    failed += expect_true(iExample_LogCtxClose(&ctx) == ENT_LOG_THREAD_FAILED && ctx == original,
+                          "incomplete worker teardown must preserve the owner slot for retry");
+    failed += expect_true(ENT_LogClose() == ENT_LOG_IN_USE,
+                          "a retryable context and worker must keep the service alive");
+    failed += expect_true(iExample_LogCtxClose(&ctx) == ENT_SYS_NORMAL && ctx == NULL,
+                          "retry must join the worker, release the context and clear the slot");
+    failed += expect_true(iExample_LogCtxClose(&ctx) == ENT_SYS_NORMAL,
+                          "a completed retry must be idempotent through the owner helper");
+    failed += expect_true(ENT_LogClose() == ENT_SYS_NORMAL,
+                          "retry must leave no registered context or worker behind");
     remove_dir_contents(dirPath);
     return failed;
 }
@@ -3377,6 +3427,7 @@ int main(void)
 
     failures += test_log_rejects_uninitialized_calls();
     failures += test_ctx_completed_io_error_releases_context();
+    failures += test_ctx_retryable_close_preserves_owner_slot();
 #ifndef _WIN32
     failures += test_ctx_init_reserves_ownership();
 #endif

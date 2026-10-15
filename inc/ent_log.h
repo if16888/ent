@@ -79,7 +79,10 @@ ENT_PUBLIC MSG_ID_T  ENT_LogCtxInit(ENT_LOG_CTX* pCtx);
 
 /* Close drains entered ctx calls; callers must prevent new calls once close begins.
  * I/O errors may be returned after the context has been released; do not retry
- * ENT_LOG_IO_FAILED. Other teardown failures preserve the context for retry. */
+ * ENT_LOG_IO_FAILED. ENT_LOG_THREAD_FAILED retains a context for retry.
+ * ENT_LOG_IN_USE means another close owns teardown: synchronize the owner before
+ * touching/retrying the context. ENT_LOG_BAD_HANDLE is not a retry instruction.
+ * See example/log_ctx_close.h for an owner-side pointer-clearing helper. */
 ENT_PUBLIC MSG_ID_T  ENT_LogCtxClose(ENT_LOG_CTX ctx);
 
 /* Output-only slot, cleared on failure. One initializer may own a context. */

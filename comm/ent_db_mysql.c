@@ -487,7 +487,15 @@ static MSG_ID_T iENT_DbMySQLCollectRows(MYSQL_STMT* stmt,
             goto END_OF_ROUTINE;
         }
 
-        if(rowCount > 0 && rows != NULL)
+        /* The driver count sizes the matrix; never trust a fetch beyond it. */
+        if(rowIdx >= rowCount)
+        {
+            IENT_LOG_ERROR("mysql fetched more rows than advertised.\n");
+            sts = ENT_DBS_RESULT_FAILED;
+            goto END_OF_ROUTINE;
+        }
+
+        if(rows != NULL)
         {
             for(i = 0; i < fieldCount; i++)
             {
@@ -527,8 +535,15 @@ static MSG_ID_T iENT_DbMySQLCollectRows(MYSQL_STMT* stmt,
                     payloadBytes = newPayloadBytes;
                 }
             }
-            rowIdx++;
         }
+        rowIdx++;
+    }
+
+    if(rowIdx != rowCount)
+    {
+        IENT_LOG_ERROR("mysql fetched fewer rows than advertised.\n");
+        sts = ENT_DBS_RESULT_FAILED;
+        goto END_OF_ROUTINE;
     }
 
     if(userCb != NULL)
