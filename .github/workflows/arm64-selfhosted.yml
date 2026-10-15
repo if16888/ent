@@ -236,6 +236,17 @@ jobs:
             --trials 20 --duration-ms 1500 --require-unrestricted-cpus 4 --require-cpu-quota-capacity \
             --load-duty-percent 25
 
+      - name: Audit complete four-CPU idle and loaded raw evidence
+        if: github.event_name == 'workflow_dispatch' && inputs.full_four_cpu_ab
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/review_timerfd_fourcpu.py \
+            --idle-dir "$RUNNER_TEMP/timerfd-fourcpu-ab/idle" \
+            --loaded-dir "$RUNNER_TEMP/timerfd-fourcpu-ab/loaded25" \
+            --expected-sha "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/timerfd-fourcpu-ab/evidence-audit.json"
+
       - name: Upload full four-CPU timerfd A/B dataset
         if: github.event_name == 'workflow_dispatch' && inputs.full_four_cpu_ab && always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

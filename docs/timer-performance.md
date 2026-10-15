@@ -278,6 +278,23 @@ partial data and error.txt; do not call the gate passed. This manual run
 does **not** replace the separate, previously archived pinned single-core
 baseline and does not qualify as representative controlled field load.
 
+The opt-in workflow now also audits **both raw paired CSV files and summaries**
+after collection and before uploading the dataset. The standard-library
+`scripts/review_timerfd_fourcpu.py` tool enforces exact master SHA, identical
+four-CPU allowed affinity and cgroup quota, five scenarios, 20 complete paired
+AB/BA trials per scenario/backend and **400 independent runs total**. It
+recomputes the per-run P99 median/max and paired win counts from raw rows,
+rejects missing millisecond scheduled-deadline lag measurements, corrupt
+summary statistics and inconsistent idle/25%-loaded metadata, then stores
+`evidence-audit.json` in the artifact. Any mismatch fails the manual workflow
+but the existing `always()` artifact upload retains partial evidence.
+
+**An evidence integrity PASS is not a timer architecture GO.** This remains
+a callback-free prototype and synthetic workload. It does not prove
+callback-inclusive tail latency, safety on concurrent Close/Delete,
+generation-safe handles or actual real-time SLA. Existing CI smoke does not
+run the expensive four-CPU opt-in experiment.
+
 For `full_four_cpu_ab=true`, the ARM64 manual workflow first runs an
 **early preflight before configuring, building or running the long pinned
 baselines**: exactly four allowed CPUs, sufficient visible cgroup v2 CPU

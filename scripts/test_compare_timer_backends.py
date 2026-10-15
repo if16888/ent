@@ -14,6 +14,7 @@ import unittest
 
 from timer_baseline import OPTIONAL, REQUIRED
 from compare_timer_backends import check_cpu_quota_capacity
+from review_timerfd_fourcpu import audit_pair
 
 
 SCRIPT = Path(__file__).with_name("compare_timer_backends.py")
@@ -122,6 +123,148 @@ class PairedTimerCollectorTests(unittest.TestCase):
         report = json.loads((self.root / "out" / "summary.json").read_text())
         self.assertEqual(report["metadata"]["unrestricted_cpu_count_required"], allowed)
         self.assertEqual(len(report["metadata"]["benchmark_affinity_cpus"]), allowed)
+
+
+class FourCpuEvidenceAuditTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.sha = "0123456789abcdef0123456789abcdef01234567"
+        self.idle = self.make_condition("idle", duty=0)
+        self.loaded = self.make_condition("loaded25", duty=25)
+
+    def make_condition(self, name, duty):
+        from timer_baseline import DEFAULT_SCENARIOS
+        from review_timerfd_fourcpu import SCENARIOS
+        root = self.root / name
+        root.mkdir()
+        metadata = {
+            "git_sha": self.sha,
+            "benchmark_affinity_mode": "inherited_full_allowed",
+            "unrestricted_cpu_count_required": 4,
+            "cpu_quota_capacity_required": True,
+            "cpu_cgroup_max": "400000 100000",
+            "cpu_quota_capacity_cores": 4,
+            "cpu_affinity_allowed": [0, 1, 2, 3],
+            "benchmark_affinity_cpus": [0, 1, 2, 3],
+            "duration_ms": 1500,
+            "trials_per_case_per_backend": 20,
+            "scenarios": SCENARIOS,
+            "background_load": {
+                "duty_percent_of_one_core": duty,
+                "cpu": 0 if duty else None,
+            },
+        }
+        self.assertEqual(len(DEFAULT_SCENARIOS), 5)
+        rows = []
+        summaries = {}
+        for scenario in SCENARIOS:
+            mode, count, period = scenario.split(":")
+            summary = {}
+            for backend in ("legacy", "timerfd"):
+                p99 = 120 if backend == "legacy" else 80
+                lag = 140 if backend == "legacy" else 90
+                for trial in range(1, 21):
+                    position = (1 if backend == "legacy" else 2) if trial % 2 else (
+                        2 if backend == "legacy" else 1)
+                    rows.append({
+                        "scenario": scenario, "trial": trial, "backend": backend,
+                        "position": position, "mode": mode, "timers": count,
+                        "period": period, "duration_ms": 1500, "p99_us": p99,
+                        "deadline_lag_p99_us": lag if mode == "ms" else "",
+                    })
+                summary[backend] = {"p99_us": {"median": p99, "max": p99}}
+                if mode == "ms":
+                    summary[backend]["deadline_lag_p99_us"] = {
+                        "median": lag, "max": lag}
+            summary["paired_p99"] = {
+                "timerfd_better_runs": 20, "total_pairs": 20}
+            if mode == "ms":
+                summary["paired_deadline_lag_p99"] = {
+                    "timerfd_better_runs": 20, "total_pairs": 20}
+            summaries[scenario] = summary
+        (root / "summary.json").write_text(
+            json.dumps({"metadata": metadata, "summaries": summaries}))
+        with (root / "paired_samples.csv").open("w", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows(rows)
+        return root
+
+    def rewrite_report(self, path, mutate):
+        document = json.loads(path.read_text())
+        mutate(document)
+        path.write_text(json.dumps(document))
+
+    def rewrite_rows(self, path, mutate):
+        with path.open(newline="") as fh:
+            rows = list(csv.DictReader(fh))
+        mutate(rows)
+        with path.open("w", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows(rows)
+
+    def test_valid_evidence_is_not_production_approval(self):
+        result = audit_pair(self.idle, self.loaded, self.sha)
+        self.assertEqual(result["evidence_integrity"], "PASS")
+        self.assertEqual(result["total_independent_runs"], 400)
+        self.assertEqual(result["production_migration"], "NO-GO")
+        self.assertEqual(result["idle"]["scenarios"]["ms:64:20"]
+                         ["paired_deadline_lag_p99"]["timerfd_better_runs"], 20)
+
+    def test_wrong_sha_is_rejected(self):
+        self.rewrite_report(self.loaded / "summary.json",
+                            lambda d: d["metadata"].update(git_sha="wrong"))
+        with self.assertRaisesRegex(ValueError, "git_sha"):
+            audit_pair(self.idle, self.loaded, self.sha)
+
+    def test_incomplete_raw_trials_are_rejected(self):
+        self.rewrite_rows(self.idle / "paired_samples.csv",
+                          lambda rows: rows.pop())
+        with self.assertRaisesRegex(ValueError, "wrong raw row count"):
+            audit_pair(self.idle, self.loaded, self.sha)
+
+    def test_duplicate_pair_even_with_right_count_is_rejected(self):
+        def replace_pair(rows):
+            rows[1] = dict(rows[0])
+        self.rewrite_rows(self.idle / "paired_samples.csv", replace_pair)
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            audit_pair(self.idle, self.loaded, self.sha)
+
+    def test_order_reversal_is_rejected(self):
+        self.rewrite_rows(self.loaded / "paired_samples.csv",
+                          lambda rows: rows[0].update(position="2"))
+        with self.assertRaisesRegex(ValueError, "alternation"):
+            audit_pair(self.idle, self.loaded, self.sha)
+
+    def test_missing_deadline_sample_is_rejected(self):
+        self.rewrite_rows(self.loaded / "paired_samples.csv",
+                          lambda rows: rows[0].update(deadline_lag_p99_us=""))
+        with self.assertRaisesRegex(ValueError, "missing/non-numeric"):
+            audit_pair(self.idle, self.loaded, self.sha)
+
+    def test_inadequate_quota_is_rejected(self):
+        self.rewrite_report(self.idle / "summary.json",
+                            lambda d: d["metadata"].update(cpu_cgroup_max="300000 100000"))
+        with self.assertRaisesRegex(ValueError, "only 3.000 cores"):
+            audit_pair(self.idle, self.loaded, self.sha)
+
+    def test_summary_does_not_override_raw_samples(self):
+        self.rewrite_report(
+            self.idle / "summary.json",
+            lambda d: d["summaries"]["ms:64:20"]["timerfd"]["p99_us"].update(max=1))
+        with self.assertRaisesRegex(ValueError, "summary=1 raw=80"):
+            audit_pair(self.idle, self.loaded, self.sha)
+
+    def test_mismatched_idle_loaded_cpu_metadata_is_rejected(self):
+        self.rewrite_report(self.loaded / "summary.json", lambda d: d["metadata"].update(
+            cpu_affinity_allowed=[4, 5, 6, 7],
+            benchmark_affinity_cpus=[4, 5, 6, 7],
+            background_load={"duty_percent_of_one_core": 25, "cpu": 4}))
+        with self.assertRaisesRegex(ValueError, "affinity mismatch"):
+            audit_pair(self.idle, self.loaded, self.sha)
 
 
 if __name__ == "__main__":
