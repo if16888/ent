@@ -746,7 +746,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerClose()
     {
         iUTL_TimerLifecycleLockLeave();
         IENT_LOG_WARN("timer close in progress\n");
-        return ENT_SYS_NORMAL;
+        return ENT_TMR_IN_USE;
     }
     sTimerClosing = TRUE;
     sTimerCloseActive = TRUE;

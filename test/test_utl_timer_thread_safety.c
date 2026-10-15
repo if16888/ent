@@ -297,8 +297,9 @@ static int test_self_delete_close_waits_for_cleanup(void)
     }
     pthread_mutex_unlock(&probe.lock);
 
-    if(iUTL_TimerTestLifecycleOpCount() != 1)
+    if(iUTL_TimerTestLifecycleOpCount() != 1 || UTL_TimerClose() != ENT_TMR_IN_USE)
     {
+        fprintf(stderr, "a concurrent timer close must report in-progress, not success\n");
         goto RELEASE_CALLBACK;
     }
 

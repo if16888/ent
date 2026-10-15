@@ -56,6 +56,7 @@ ENTITY_HANDLEFAIL err  7  entity log handle init failed, status[%d]
 ENTITY_LEVELFAIL  err  8  entity log level setup failed, status[%d]
 LOCK_INITFAIL     err  9  entity lock init failed, status[%d]
 CV_INITFAIL       err 10  entity condition variable init failed, status[%d]
+HANDLE_ALLOCFAIL  err 11  allocate runtime handle failed
 
 # ----------------------------------------------------------------------------
 # RT: realtime mode and post-init realtime attribute setup
@@ -135,6 +136,7 @@ LIST_FAILED        err  7  timer list operation failed
 THREAD_FAILED      err  8  timer worker thread operation failed
 RT_FAILED          err  9  timer realtime setup failed
 UNSUPPORTED        err 10  timer feature is unsupported on this platform
+IN_USE             err 11  timer close is already in progress
 ALREADY_INITIALIZED ok  1  timer runtime already initialized
 
 # ----------------------------------------------------------------------------

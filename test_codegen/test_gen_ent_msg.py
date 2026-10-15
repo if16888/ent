@@ -67,6 +67,32 @@ def main() -> int:
         if legacy_c.read_text(encoding="utf-8") != first_c:
             raise AssertionError("source generation is not deterministic")
 
+        extension_args = [
+            "--input", str(legacy_spec), "--header", str(legacy_h), "--source", str(legacy_c),
+            "--extension-symbol", "ENT_INIT_HANDLE_ALLOCFAIL",
+            "--extension-symbol", "ENT_TMR_IN_USE",
+            "--extension-lookup", "iENT_MsgExtensionText",
+        ]
+        run_generator(generator, extension_args)
+        extension_header = legacy_h.read_text(encoding="utf-8")
+        extension_source = legacy_c.read_text(encoding="utf-8")
+        if extension_header != first_h:
+            raise AssertionError("extension lookup must retain every public message definition")
+        item_start = "const ENT_MSG_ITEM_T g_ent_msg_items[] ="
+        legacy_items = first_c.split(item_start, 1)[1].split("};", 1)[0]
+        expected_items = "\n".join(
+            line for line in legacy_items.split("\n")
+            if not line.lstrip().startswith(("{ENT_INIT_HANDLE_ALLOCFAIL,", "{ENT_TMR_IN_USE,"))
+        )
+        extension_items = extension_source.split(item_start, 1)[1].split("};", 1)[0]
+        if extension_items != expected_items:
+            raise AssertionError("extension generation changed existing exported table entries/order")
+        for symbol in ("ENT_INIT_HANDLE_ALLOCFAIL", "ENT_TMR_IN_USE"):
+            if f"case {symbol}:" not in extension_source:
+                raise AssertionError("extension message text is missing")
+        run_generator(generator, extension_args + ["--extension-symbol", "ENT_UNKNOWN_CODE"], expect_success=False)
+        run_generator(generator, extension_args[:-2], expect_success=False)
+
         spec_a = root / "a.msg"
         spec_b = root / "b.msg"
         spec_a.write_text(

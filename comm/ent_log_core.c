@@ -191,13 +191,17 @@ static MSG_ID_T iENT_LogCtxBeginCall(struct ENT_LOG_CTX_TAG* ctx,
     {
         sts = ENT_LOG_BAD_HANDLE;
     }
-    else if(requireEmptyHandle && ctx->logHandle != NULL)
+    else if(requireEmptyHandle && (ctx->logHandle != NULL || ctx->initInProgress))
     {
         sts = ENT_LOG_BAD_HANDLE;
     }
     else
     {
         ctx->activeCalls++;
+        if(requireEmptyHandle)
+        {
+            ctx->initInProgress = true;
+        }
     }
 #ifdef _WIN32
     ReleaseSRWLockExclusive(&sLogMutex);
@@ -707,6 +711,7 @@ MSG_ID_T ENT_LogCtxInit(ENT_LOG_CTX* pCtx)
 #endif
     ctx->state = ENT_LOG_HANDLE_ACTIVE_E;
     ctx->activeCalls = 0;
+    ctx->initInProgress = false;
     ctx->registryNext = NULL;
 #ifdef _WIN32
     iENT_LogGlobalLock();
@@ -797,8 +802,9 @@ MSG_ID_T ENT_LogCtxClose(ENT_LOG_CTX ctx)
 
     if(logCtx->logHandle != NULL)
     {
-        closeSts = iENT_LogCloseHandle(logCtx->logHandle);
-        if(closeSts != ENT_SYS_NORMAL)
+        bool closed = false;
+        closeSts = iENT_LogCloseHandleEx(logCtx->logHandle, &closed);
+        if(!closed)
         {
 #ifdef _WIN32
             iENT_LogGlobalLock();
@@ -848,39 +854,42 @@ MSG_ID_T ENT_LogCtxInitHandle(ENT_LOG_CTX ctx, ENT_LOG* pLogHandle, const char* 
 {
     struct ENT_LOG_CTX_TAG* logCtx = (struct ENT_LOG_CTX_TAG*)ctx;
 
+    if(pLogHandle != NULL)
+    {
+        *pLogHandle = NULL;
+    }
+
     if(sLogMutexInit == false)
     {
         fprintf(stderr, "Func [%s] Line [%d],Uninitialized,please call ENT_LogInit.\n", "ENT_LogCtxInitHandle", __LINE__);
         return ENT_LOG_NOT_INITIALIZED;
     }
 
-    if(iENT_LogCtxBeginCall(logCtx, NULL, false, true) != ENT_SYS_NORMAL)
-    {
-        fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxInitHandle", __LINE__);
-        return ENT_LOG_BAD_HANDLE;
-    }
-
     if(pLogHandle == NULL)
     {
-        fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxInitHandle", __LINE__);
-        iENT_LogCtxEndCall(logCtx);
         return ENT_LOG_BAD_ARGUMENT;
     }
-
-    if(logCtx->logHandle != NULL)
+    if(iENT_LogCtxBeginCall(logCtx, NULL, false, true) != ENT_SYS_NORMAL)
     {
-        fprintf(stderr, "Func [%s] Line [%d],arguments is invalid.\n", "ENT_LogCtxInitHandle", __LINE__);
-        iENT_LogCtxEndCall(logCtx);
         return ENT_LOG_BAD_HANDLE;
     }
 
+#ifdef ENT_LOG_TEST_HOOKS
+    {
+        extern void iENT_LogTestCtxInitReserved(void);
+        iENT_LogTestCtxInitReserved();
+    }
+#endif
     {
         MSG_ID_T sts = iENT_LogInitHandle(pLogHandle, moduleName, logPath);
+        iENT_LogGlobalLock();
         if(sts == ENT_SYS_NORMAL)
         {
             logCtx->logHandle = *pLogHandle;
             ((ENT_LOG_CTX_INTERNAL*)(*pLogHandle))->ownerCtx = logCtx;
         }
+        logCtx->initInProgress = false;
+        iENT_LogGlobalUnlock();
         iENT_LogCtxEndCall(logCtx);
         return sts;
     }
@@ -1200,6 +1209,11 @@ MSG_ID_T iENT_LogInitHandle(ENT_LOG* pLogHandle, const char* moduleName, const c
     MSG_ID_T sts = ENT_SYS_NORMAL;
     ENT_LOG_CTX_INTERNAL* log = NULL;
     ENT_LOG_CTX_INTERNAL* existing = NULL;
+
+    if(pLogHandle != NULL)
+    {
+        *pLogHandle = NULL;
+    }
 
     if(sLogMutexInit == false)
     {

@@ -480,7 +480,7 @@ static MSG_ID_T iENT_DbMySQLCollectRows(MYSQL_STMT* stmt,
 
     while((fetchRc = mysql_stmt_fetch(stmt)) != MYSQL_NO_DATA)
     {
-        if(fetchRc != 0 && fetchRc != MYSQL_DATA_TRUNCATED)
+        if(fetchRc != 0)
         {
             IENT_LOG_ERROR("mysql_stmt_fetch failed:[%d]->[%s]\n", fetchRc, mysql_stmt_error(stmt));
             sts = ENT_DBS_RESULT_FAILED;
@@ -510,13 +510,20 @@ static MSG_ID_T iENT_DbMySQLCollectRows(MYSQL_STMT* stmt,
                         sts = ENT_DBS_ALLOC_FAILED;
                         goto END_OF_ROUTINE;
                     }
-                    rows[cellIdx] = ENT_StrDup(resultCtx.buffers[i]);
+                    if((size_t)resultCtx.lengths[i] >= resultCtx.bufferSizes[i])
+                    {
+                        sts = ENT_DBS_RESULT_FAILED;
+                        goto END_OF_ROUTINE;
+                    }
+                    rows[cellIdx] = (char*)malloc(cellBytes);
                     if(rows[cellIdx] == NULL)
                     {
                         IENT_LOG_ERROR("mysql row cell allocation failed.\n");
                         sts = ENT_DBS_ALLOC_FAILED;
                         goto END_OF_ROUTINE;
                     }
+                    memcpy(rows[cellIdx], resultCtx.buffers[i], cellBytes - 1);
+                    rows[cellIdx][cellBytes - 1] = '\0';
                     payloadBytes = newPayloadBytes;
                 }
             }

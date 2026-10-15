@@ -61,7 +61,9 @@ ENT_PUBLIC MSG_ID_T  UTL_LockClose(UTL_LOCK* lock);
 
 ENT_PUBLIC MSG_ID_T  UTL_CVInit(UTL_CV* cv,const char* name);
 ENT_PUBLIC MSG_ID_T  UTL_CVClose(UTL_CV* cv);
-/* Compatibility interface: ms <= 0 means an UNBOUNDED wait.
+/* CV waits support mutex locks on every platform. RW locks are supported only
+ * on Windows; POSIX returns ENT_UTHD_UNSUPPORTED_LOCK for RW locks.
+ * Compatibility interface: ms <= 0 means an UNBOUNDED wait.
  * Prefer UTL_CVWaitFor / UTL_CVWaitForever for unambiguous semantics. */
 ENT_PUBLIC MSG_ID_T  UTL_CVWait(UTL_CV cv,UTL_LOCK lock,int ms,UTL_LOCK_RW_TYPE_T rwType);
 /* Explicit finite wait: 0 = non-blocking timeout check; positive = maximum
@@ -138,6 +140,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TimerInit(void);
 ENT_PUBLIC MSG_ID_T  UTL_TimerCreate(UTL_TIMER_T* pTimer,unsigned int type, int ms,UTL_TIMER_EV_F evCb,void* data);
 ENT_PUBLIC MSG_ID_T  UTL_TimerCreateUs(UTL_TIMER_T* pTimer,unsigned int type, int period_us,UTL_TIMER_EV_F evCb,void* data);
 ENT_PUBLIC MSG_ID_T  UTL_TimerDelete(UTL_TIMER_T* pTimer);
+/* Returns ENT_TMR_IN_USE while another close is still running. */
 ENT_PUBLIC MSG_ID_T  UTL_TimerClose(void);
 
 #ifdef _WIN32

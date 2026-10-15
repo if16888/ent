@@ -42,6 +42,12 @@
 #include "ent_utility.h"
 
 #ifdef ENT_INIT_TEST_HOOKS
+static bool sEntTestFailHandleAllocation;
+void iENT_InitTestFailHandleAllocation(void)
+{
+    sEntTestFailHandleAllocation = true;
+}
+
 extern void ENT_InitTestHandleCtxFreed(ENT_HANDLE_CTX_T* handleCtx);
 extern void ENT_InitTestHandleCallEnded(ENT_HANDLE_CTX_T* handleCtx);
 extern void ENT_InitTestLogServiceLockProbe(int acquired);
@@ -160,10 +166,19 @@ static MSG_ID_T iENT_HandleInit(ENT_HANDLE* handle,
         return ENT_SYS_ALREADY_INITIALIZED;
     }
 
-    handleCtx = (ENT_HANDLE_CTX_T*)calloc(1, sizeof(*handleCtx));
+#ifdef ENT_INIT_TEST_HOOKS
+    if(sEntTestFailHandleAllocation)
+    {
+        sEntTestFailHandleAllocation = false;
+    }
+    else
+#endif
+    {
+        handleCtx = (ENT_HANDLE_CTX_T*)calloc(1, sizeof(*handleCtx));
+    }
     if(handleCtx == NULL)
     {
-        return ENT_INIT_LOGPATH_ALLOCFAIL;
+        return ENT_INIT_HANDLE_ALLOCFAIL;
     }
 
     handleCtx->magic = ENT_HANDLE_MAGIC;
@@ -292,12 +307,6 @@ static MSG_ID_T iENT_HandleSetRtAttributes(ENT_HANDLE handle,
         return sts;
     }
 
-    if(handleCtx->ctx.stopRequested)
-    {
-        iENT_HandleEndCall(handleCtx);
-        return ENT_SYS_STOPPED;
-    }
-
     if(handleCtx->ctx.rtRequested == false)
     {
         iENT_HandleEndCall(handleCtx);
@@ -336,12 +345,6 @@ static MSG_ID_T iENT_HandleStop(ENT_HANDLE handle)
     if(sts != ENT_SYS_NORMAL)
     {
         return sts;
-    }
-
-    if(handleCtx->ctx.stopRequested)
-    {
-        iENT_HandleEndCall(handleCtx);
-        return ENT_SYS_STOPPED;
     }
 
     prevCtx = iENT_RuntimeSetActiveCtx(&handleCtx->ctx);
@@ -395,7 +398,7 @@ static MSG_ID_T iENT_HandleBeginCall(ENT_HANDLE_CTX_T* handleCtx,
     }
     else if(checkRunning && handleCtx->ctx.running)
     {
-        sts = busySts;
+        sts = ENT_SYS_ALREADY_INITIALIZED;
     }
     else
     {

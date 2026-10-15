@@ -64,6 +64,7 @@ ENT_PUBLIC MSG_ID_T  ENT_LogInit(void);
 
 ENT_PUBLIC MSG_ID_T  ENT_LogClose(void);
 
+/* Output-only slot: cleared on failure; close any live handle before reusing it. */
 ENT_PUBLIC MSG_ID_T  ENT_LogInitHandle(ENT_LOG* pLogHandle,const char* moduleName,const char* logPath);
 
 /*
@@ -76,9 +77,12 @@ ENT_PUBLIC MSG_ID_T  ENT_LogInitHandle(ENT_LOG* pLogHandle,const char* moduleNam
  */
 ENT_PUBLIC MSG_ID_T  ENT_LogCtxInit(ENT_LOG_CTX* pCtx);
 
-/* Close drains entered ctx calls; callers must prevent new calls once close begins. */
+/* Close drains entered ctx calls; callers must prevent new calls once close begins.
+ * I/O errors may be returned after the context has been released; do not retry
+ * ENT_LOG_IO_FAILED. Other teardown failures preserve the context for retry. */
 ENT_PUBLIC MSG_ID_T  ENT_LogCtxClose(ENT_LOG_CTX ctx);
 
+/* Output-only slot, cleared on failure. One initializer may own a context. */
 ENT_PUBLIC MSG_ID_T  ENT_LogCtxInitHandle(ENT_LOG_CTX ctx,ENT_LOG* pLogHandle,const char* moduleName,const char* logPath);
 
 ENT_PUBLIC MSG_ID_T  ENT_LogCtxSetOption(ENT_LOG_CTX ctx,ENT_LOG logHandle,ENT_LOG_OPTIONS_E option,const void* arg);

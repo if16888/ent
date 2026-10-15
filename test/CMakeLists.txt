@@ -499,6 +499,7 @@ if(APPLE OR UNIX)
   target_link_libraries(test_ent_log PRIVATE pthread)
 endif()
 
+target_compile_definitions(test_ent_log PRIVATE ENT_LOG_TEST_HOOKS=1)
 add_test(NAME test_ent_log COMMAND test_ent_log)
 
 add_executable(
@@ -814,4 +815,12 @@ if(TARGET ent_s AND ENT_MYSQL_FOUND AND ENT_PGSQL_FOUND)
   target_link_libraries(test_ent_db_limits_live PRIVATE ent_s)
   add_test(NAME test_ent_db_limits_live COMMAND test_ent_db_limits_live)
   set_tests_properties(test_ent_db_limits_live PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)
+endif()
+
+if(TARGET ent_s AND ENT_ENABLE_MYSQL AND ENT_MYSQL_FOUND)
+  add_executable(test_ent_db_mysql_results test_ent_db_mysql_results.c)
+  target_include_directories(test_ent_db_mysql_results PRIVATE ../inc ../comm ${ENT_MYSQL_INCLUDE_DIR})
+  target_link_libraries(test_ent_db_mysql_results PRIVATE ent_s)
+  ent_test_link_db_deps(test_ent_db_mysql_results)
+  add_test(NAME test_ent_db_mysql_results COMMAND test_ent_db_mysql_results)
 endif()

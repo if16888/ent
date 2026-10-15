@@ -2679,10 +2679,34 @@ CLEANUP:
     return failed;
 }
 
+void iENT_InitTestFailHandleAllocation(void);
+static int test_handle_allocation_failure_status(void)
+{
+    ENT_HANDLE handle = NULL;
+    iENT_InitTestFailHandleAllocation();
+    return expect_true(ENT_Init(&handle, "allocation", "/tmp/allocation", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) == ENT_INIT_HANDLE_ALLOCFAIL && handle == NULL,
+                       "runtime handle allocation failure must return its own status and no handle");
+}
+
+static int test_duplicate_run_reports_already_running(void)
+{
+    ENT_HANDLE handle = NULL;
+    int failed = 0;
+    if(ENT_Init(&handle, "duplicate_run", "/tmp/duplicate_run", LOG_LEV_WARN_E, ENT_MODE_NORMAL_E) != ENT_SYS_NORMAL) return 1;
+    ((ENT_HANDLE_CTX_T*)handle)->ctx.running = true;
+    failed = expect_true(ENT_Run(handle) == ENT_SYS_ALREADY_INITIALIZED,
+                         "a running runtime remains a valid handle");
+    ((ENT_HANDLE_CTX_T*)handle)->ctx.running = false;
+    ENT_Close(&handle);
+    return failed;
+}
+
 int main(void)
 {
     int failures = 0;
 
+    failures += test_handle_allocation_failure_status();
+    failures += test_duplicate_run_reports_already_running();
     failures += test_ent_run_rejects_uninitialized_context();
     failures += test_ent_run_waits_on_cv_with_lock();
     failures += test_ent_close_frees_handle_context();

@@ -333,7 +333,11 @@ def _write_source(
     type_prefix: str,
     table_prefix: str,
     emit_symbol_name: bool,
+    extension_symbols: Sequence[str] = (),
+    extension_lookup: Optional[str] = None,
 ) -> None:
+    extension_rows = [row for row in rows if row["symbol"] in extension_symbols]
+    rows = [row for row in rows if row["symbol"] not in extension_symbols]
     item_type = f"{type_prefix}_MSG_ITEM_T"
     module_type = f"{type_prefix}_MSG_MODULE_ITEM_T"
     submodule_type = f"{type_prefix}_MSG_SUBMODULE_ITEM_T"
@@ -401,6 +405,24 @@ def _write_source(
             "",
         ]
     )
+    if extension_lookup:
+        # Keep previously exported data arrays stable. Additional codes remain
+        # generated from the same specification but are queried internally.
+        lines.extend([
+            "#if defined(__GNUC__) && !defined(_WIN32)",
+            '__attribute__((visibility("hidden")))',
+            "#endif",
+            f"const char* {extension_lookup}(MSG_ID_T code)",
+            "{",
+            "    switch(code)",
+            "    {",
+        ])
+        for row in extension_rows:
+            lines.extend([
+                f"        case {row['symbol']}:",
+                f"            return {_as_c_string(row['message'])};",
+            ])
+        lines.extend(["        default:", "            return NULL;", "    }", "}", ""])
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -432,6 +454,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         action="store_true",
         help="Include the symbolic status name in each generated catalog item.",
     )
+    parser.add_argument(
+        "--extension-symbol", action="append", default=[],
+        help="Generate this message in an internal lookup instead of resizing the exported item array.",
+    )
+    parser.add_argument(
+        "--extension-lookup", default=None,
+        help="Internal C function name for extension-message text lookup.",
+    )
     args = parser.parse_args(argv)
 
     symbol_prefix = _validate_prefix(args.symbol_prefix, "symbol prefix").upper()
@@ -451,6 +481,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     rows, module_names, submodule_names = _parse_specs(
         input_paths, symbol_prefix
     )
+    if bool(args.extension_symbol) != bool(args.extension_lookup):
+        raise ValueError("extension symbols and extension lookup must be supplied together")
+    if args.extension_lookup:
+        _validate_prefix(args.extension_lookup, "extension lookup")
+    unknown_extensions = set(args.extension_symbol) - {row["symbol"] for row in rows}
+    if unknown_extensions:
+        raise ValueError("unknown extension symbols: " + ", ".join(sorted(unknown_extensions)))
     _write_header(
         header_path,
         rows,
@@ -471,6 +508,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         type_prefix,
         table_prefix,
         args.emit_symbol_name,
+        args.extension_symbol,
+        args.extension_lookup,
     )
     return 0
 

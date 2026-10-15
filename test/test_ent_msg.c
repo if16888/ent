@@ -255,5 +255,27 @@ int main(void)
         return EXIT_FAILURE;
     }
 
+    {
+        size_t i;
+        for(i = 0; i < g_ent_msg_items_count; i++)
+        {
+            if(expect_true(strcmp(ENT_MsgText(g_ent_msg_items[i].code), g_ent_msg_items[i].message) == 0,
+                           "legacy catalog entries must keep resolving unchanged") != 0)
+            {
+                return EXIT_FAILURE;
+            }
+        }
+    }
+
+    if(expect_true(g_ent_msg_items_count == 131,
+                   "legacy exported catalog size must remain ABI compatible") != 0 ||
+       expect_true(strcmp(ENT_MsgText(ENT_INIT_HANDLE_ALLOCFAIL), "allocate runtime handle failed") == 0,
+                   "new runtime allocation status must resolve through the generated extension") != 0 ||
+       expect_true(strcmp(ENT_MsgText(ENT_TMR_IN_USE), "timer close is already in progress") == 0,
+                   "new timer busy status must resolve through the generated extension") != 0)
+    {
+        return EXIT_FAILURE;
+    }
+
     return EXIT_SUCCESS;
 }

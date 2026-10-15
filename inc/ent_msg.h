@@ -87,6 +87,8 @@ ENT_PUBLIC MSG_ID_T ENT_MsgTryBuild(MSG_ID_T* outCode,
                                     unsigned int submoduleId,
                                     unsigned int innerCode);
 
+/* Resolves every message, including extensions absent from the frozen generated
+ * compatibility item array. Prefer this API over enumerating g_ent_msg_items. */
 ENT_PUBLIC const char* ENT_MsgText(MSG_ID_T code);
 ENT_PUBLIC const char* ENT_MsgModuleName(MSG_ID_T code);
 ENT_PUBLIC const char* ENT_MsgSubmoduleName(MSG_ID_T code);
