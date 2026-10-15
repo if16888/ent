@@ -110,7 +110,8 @@ ENT_PUBLIC MSG_ID_T ENT_DbWrite(DB_HANDLE dbHandle,const char* sql,SqlResultCB s
  * Text/blob fields are limited to ENT_DB_MAX_FIELD_BYTES. Materialized results
  * are limited to 1,048,576 cells / 64 MiB field payload including terminators;
  * excess results return ENT_DBS_ALLOC_FAILED without invoking the callback.
- * Truncated MySQL results return ENT_DBS_RESULT_FAILED without a callback.
+ * Truncated MySQL results or a mismatch between advertised/fetched row counts
+ * return ENT_DBS_RESULT_FAILED without a callback.
  * Callbacks borrow storage only for their duration; do not retain pointers or
  * reenter the same handle. Owner synchronization must fence new calls from
  * close; close waits for already admitted operations and nulls the handle. */

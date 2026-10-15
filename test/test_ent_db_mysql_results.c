@@ -7,6 +7,8 @@ static MYSQL_BIND* sBindings;
 static MYSQL_FIELD sField;
 static int sMode;
 static int sFetched;
+static my_ulonglong sReportedRows;
+static int sActualRows;
 static unsigned int test_field_count(MYSQL_RES* meta)
 {
     (void)meta;
@@ -15,7 +17,7 @@ static unsigned int test_field_count(MYSQL_RES* meta)
 static my_ulonglong test_row_count(MYSQL_STMT* stmt)
 {
     (void)stmt;
-    return sMode == 3 ? 2 : 1;
+    return sReportedRows;
 }
 static MYSQL_FIELD* test_fields(MYSQL_RES* meta)
 {
@@ -32,7 +34,7 @@ static int test_fetch(MYSQL_STMT* stmt)
 {
     int row = sFetched++;
     (void)stmt;
-    if(row >= (sMode == 3 ? 2 : 1))
+    if(row >= sActualRows)
     {
         return MYSQL_NO_DATA;
     }
@@ -56,34 +58,61 @@ static const char* test_error(MYSQL_STMT* stmt)
 static void result(char** fields, char** rows, long long count, int columns, void* data)
 {
     int* calls = (int*)data;
-    if(count == 1 && columns == 1 && fields != NULL && rows != NULL &&
-       rows[0] != NULL && strcmp(rows[0], "abc") == 0)
-    {
-        (*calls)++;
-    }
-    else
+    long long i;
+    if(count != (long long)sReportedRows || columns != 1 || fields == NULL || rows == NULL)
     {
         *calls = -100;
+        return;
     }
+    for(i = 0; i < count; i++)
+    {
+        if(rows[i] == NULL || strcmp(rows[i], "abc") != 0)
+        {
+            *calls = -100;
+            return;
+        }
+    }
+    (*calls)++;
 }
 
 int main(void)
 {
-    int mode;
+    static const struct
+    {
+        const char* name;
+        my_ulonglong reported;
+        int actual;
+        int mode;
+        MSG_ID_T expected;
+    } cases[] = {
+        {"one row", 1, 1, 0, ENT_SYS_NORMAL},
+        {"multiple rows", 2, 2, 0, ENT_SYS_NORMAL},
+        {"empty result", 0, 0, 0, ENT_SYS_NORMAL},
+        {"excess rows", 1, 2, 0, ENT_DBS_RESULT_FAILED},
+        {"missing row", 2, 1, 0, ENT_DBS_RESULT_FAILED},
+        {"unexpected nonempty result", 0, 1, 0, ENT_DBS_RESULT_FAILED},
+        {"unexpected empty result", 2, 0, 0, ENT_DBS_RESULT_FAILED},
+        {"truncated first row", 1, 1, 1, ENT_DBS_RESULT_FAILED},
+        {"invalid field length", 1, 1, 2, ENT_DBS_RESULT_FAILED},
+        {"truncated after allocation", 2, 2, 3, ENT_DBS_RESULT_FAILED},
+        {"valid result after errors", 1, 1, 0, ENT_SYS_NORMAL},
+    };
+    size_t i;
     memset(&sField, 0, sizeof(sField));
     sField.name = "value";
     sField.max_length = 3;
-    for(mode = 0; mode < 4; mode++)
+    for(i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
     {
         int calls = 0;
         MSG_ID_T status;
-        sMode = mode;
+        sMode = cases[i].mode;
+        sReportedRows = cases[i].reported;
+        sActualRows = cases[i].actual;
         sFetched = 0;
         status = iENT_DbMySQLCollectRows((MYSQL_STMT*)1, (MYSQL_RES*)1, result, &calls);
-        if((mode == 0 && (status != ENT_SYS_NORMAL || calls != 1)) ||
-           (mode != 0 && (status != ENT_DBS_RESULT_FAILED || calls != 0)))
+        if(status != cases[i].expected || calls != (status == ENT_SYS_NORMAL ? 1 : 0))
         {
-            fprintf(stderr, "mysql fetch mode %d: status=%d callback count=%d\n", mode, (int)status, calls);
+            fprintf(stderr, "mysql %s: status=%d callback count=%d\n", cases[i].name, (int)status, calls);
             return 1;
         }
     }

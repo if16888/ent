@@ -1371,6 +1371,16 @@ MSG_ID_T iENT_LogCloseHandleEx(ENT_LOG logHandle, bool* closed)
     pthread_mutex_unlock(&log->cs);
 #endif
 
+#ifdef ENT_LOG_TEST_HOOKS
+    {
+        extern bool iENT_LogTestFailBufferStop(void);
+        if(iENT_LogTestFailBufferStop())
+        {
+            sts = ENT_LOG_THREAD_FAILED;
+            goto END_OF_ROUTINE;
+        }
+    }
+#endif
     sts = iENT_LogStopBufferThread(log);
     if(sts < 0)
     {

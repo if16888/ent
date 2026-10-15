@@ -28,3 +28,9 @@ target_link_libraries(example01 ${ENT_EXAMPLE_TARGET})
 
 add_executable(example02_multi_runtime example02_multi_runtime.c)
 target_link_libraries(example02_multi_runtime ${ENT_EXAMPLE_TARGET})
+
+add_executable(example03_log_ctx_close example03_log_ctx_close.c)
+target_link_libraries(example03_log_ctx_close ${ENT_EXAMPLE_TARGET})
+if(BUILD_TESTING)
+  add_test(NAME example_log_ctx_close COMMAND example03_log_ctx_close)
+endif()

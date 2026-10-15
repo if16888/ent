@@ -57,6 +57,11 @@ ENT_PUBLIC MSG_ID_T  ENT_Init(ENT_HANDLE* handle,
  */
 ENT_PUBLIC MSG_ID_T  ENT_Close(ENT_HANDLE* handle);
 
+/* On Linux, affinity/scheduling apply to the CALLING thread, not another runtime
+ * worker. rtCpu < 0 leaves affinity unchanged; OTHER uses priority zero.
+ * Calls on one runtime serialize native operations and its last-attempt snapshot.
+ * Failures may leave partial native changes; no transaction/rollback is promised.
+ * Settings are not propagated automatically to other existing or future threads. */
 ENT_PUBLIC MSG_ID_T  ENT_SetRtAttributes(ENT_HANDLE handle,
                                           int rtCpu,
                                           ENT_RT_POLICY_E rtPolicy,

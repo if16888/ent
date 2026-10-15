@@ -34,3 +34,16 @@ slot with `ENT_DBS_IN_USE` without dereferencing, replacing or closing it. Code
 that relied on initialization implicitly replacing a live handle must first call
 `ENT_DbCloseHandle`, verify successful closure, then initialize a new handle.
 Do not pass an uninitialized local handle as the output slot.
+
+## Follow-up result and concurrency checks
+
+- MySQL prepared-result collection rejects both extra and missing fetched rows
+  relative to the driver's buffered count with `ENT_DBS_RESULT_FAILED`; no partial
+  result callback is invoked. Empty-result mismatches follow the same rule.
+- Concurrent `ENT_SetRtAttributes` calls on one runtime serialize the native
+  updates and last-attempt snapshot. On Linux, scheduling/affinity still target
+  the calling thread. They do not configure all workers in the runtime.
+- Logger-close migration now has a compiled owner helper and an executable
+  example: clear the context slot after success or completed I/O error; preserve
+  it after incomplete worker-stop failure. No public API/ABI or message code is
+  added by this follow-up.

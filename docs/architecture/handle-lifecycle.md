@@ -60,6 +60,10 @@
 
 - `ENT_SetRtAttributes()` 只作用于有效句柄。
 - 它属于实例级配置入口，不应该绕过句柄生命周期检查。
+- Linux 上的 affinity / 调度策略作用于发起 `ENT_SetRtAttributes()` 的调用线程（`pthread_self()`），不会自动修改 `ENT_Run()` 所在线程或其他既有/未来线程。
+- 同一实例的设置调用使用 `entLock` 串行化整个原生调用和状态快照更新。实例中的 `rtCpu`、`rtPolicy`、`rtPriority`、`rtLastError` 记录最近一次通过策略枚举校验的设置尝试；非法策略不覆盖快照。它们不代表实例所有线程的统一实际配置。
+- `rtCpu < 0` 保持当前线程 affinity；`OTHER` 将调度优先级设为 0。失败可以留下已生效的部分原生变化，接口不承诺事务回滚。
+- 需要配置某个 worker 时，应让该 worker 自己发起调用；依旧由 owner 保证新入口不与 close 竞争。
 
 ## 并发与收口原则
 
