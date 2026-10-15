@@ -54,3 +54,40 @@ builds are /tmp/ent-review-fixes-asan and /tmp/ent-review-fixes-tsan. Logs use
 Delivery follows the user's standing push / merge-after-green workflow, with
 PR CI and then the merged master CI checked independently. Do not merge a failing
 or pending revision; do not modify CI gates to make the change pass.
+
+
+## Subsequent review: interpretation and evidence limits
+
+Review baseline: PR #40 merged as 8b5f8b8. This follow-up changes documentation
+and an example comment only (low risk, public core scope). It does not change
+runtime behaviour, signatures, ABI, error codes or CI. Acceptance: diff whitespace
+check, local Markdown link targets, and confirmation that no executable source
+statements changed. Business builds/sanitizers need not be repeated for prose.
+Rollback: revert this documentation-only change.
+
+The count guards, per-instance RT serialization and owner-side close pattern are
+supported by the implementation and focused tests. Interpret them narrowly:
+
+- The MySQL prepared-result path calls mysql_stmt_store_result before collecting
+  rows. Count mismatch injection validates bounds and rejection/cleanup for this
+  buffered path; it does not demonstrate a malicious-server or MITM exploit,
+  streaming/cursor compatibility, or the absence of all backend memory bugs.
+- Linux uses pthread_setaffinity_np and pthread_setschedparam on pthread_self.
+  The private fields are a serialized last-attempt snapshot, not a public read-only
+  query API or proof of every worker's current OS configuration. OTHER-policy
+  concurrency tests do not establish FIFO/RR privileges, hard-real-time jitter,
+  or optimal CPU selection on heterogeneous ARM systems.
+- Runtime RT-setting failure paths can log while holding entLock. Therefore,
+  holding only one runtime instance lock does not prove an absence of nested
+  locks or ABBA deadlocks; logging locks must be included in any lock-order audit.
+  No new deadlock is demonstrated by this observation.
+- ASan/TSan and green CI are evidence for the executed configurations and paths,
+  not a proof that all overflows, races or stale-alias accesses are impossible.
+- Completed logger I/O failure means reclamation has finished, but data loss is
+  possible rather than established for every such error. Retryable teardown and
+  terminal I/O errors require different owner actions. Generalize the ownership
+  procedure as documentation, not a shared status-code rule or new public API.
+
+Preserve existing CI gates. Future executable lifecycle changes still require
+failure-path regression coverage and the applicable platform/sanitizer checks;
+this review provides no reason to weaken them or add duplicate CI jobs.

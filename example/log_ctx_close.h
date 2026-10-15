@@ -19,7 +19,7 @@ static inline MSG_ID_T iExample_LogCtxClose(ENT_LOG_CTX* ctx)
     status = ENT_LogCtxClose(*ctx);
     if(status == ENT_SYS_NORMAL || status == ENT_LOG_IO_FAILED)
     {
-        /* I/O failure reports lost data, but teardown is already complete. */
+        /* I/O failure may mean lost data; teardown is already complete. */
         *ctx = NULL;
     }
     /* THREAD_FAILED keeps the context for a later retry. BAD_HANDLE and
