@@ -15,7 +15,7 @@ import sys
 from compare_timer_backends import check_cpu_quota_capacity
 from timer_baseline import DEFAULT_SCENARIOS
 
-SCENARIOS = [":".join(map(str, case)) for case in DEFAULT_SCENARIOS]
+SCENARIOS = list(DEFAULT_SCENARIOS)
 BACKENDS = ("legacy", "timerfd")
 TRIALS = 20
 DURATION_MS = 1500
