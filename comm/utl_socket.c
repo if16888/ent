@@ -59,6 +59,38 @@ static void iUTL_SocketMarkInitialized(void)
 static const bool sUtlRetryFlag = true;
 
 #if !defined(_WIN32) && defined(ENT_SOCKET_TEST_HOOKS)
+static int sSocketAcceptEintrInject;
+static socklen_t sSocketAcceptExpectedCapacity;
+static int sSocketAcceptRetriedCapacity;
+
+void iENT_SocketTestInjectAcceptEintr(void)
+{
+    sSocketAcceptEintrInject = 1;
+    sSocketAcceptRetriedCapacity = 0;
+}
+
+int iENT_SocketTestAcceptCapacityRestored(void)
+{
+    return sSocketAcceptRetriedCapacity;
+}
+
+static int iENT_SocketTestAccept(int fd, struct sockaddr* addr, socklen_t* length)
+{
+    if(sSocketAcceptEintrInject && length != NULL)
+    {
+        sSocketAcceptEintrInject = 0;
+        sSocketAcceptExpectedCapacity = *length;
+        *length = 1;
+        errno = EINTR;
+        return -1;
+    }
+    if(length != NULL)
+    {
+        sSocketAcceptRetriedCapacity = (*length == sSocketAcceptExpectedCapacity);
+    }
+    return accept(fd, addr, length);
+}
+
 static unsigned int sSocketCloseEintrInject = 0;
 static unsigned int sSocketCloseCallCount = 0;
 static unsigned int sSocketGetSockOptEintrInject = 0;
@@ -274,7 +306,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Socket(
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T	UTL_Bind(
+ENT_PUBLIC MSG_ID_T	UTL_Bind(
  UTL_D_SOCKET  SockDesc, 
  struct sockaddr* addr,
  int              addr_size)
@@ -860,7 +892,7 @@ ENT_PUBLIC MSG_ID_T  UTL_Socket(
  *
  *-----------------------------------------------------------------------------
  */
-MSG_ID_T	UTL_Bind(
+ENT_PUBLIC MSG_ID_T	UTL_Bind(
  UTL_D_SOCKET  SockDesc, 
  struct sockaddr* addr,
  int              addr_size)
@@ -1067,11 +1099,18 @@ ENT_PUBLIC MSG_ID_T  UTL_Accept(
         SockaddrLen = (socklen_t)*addr_size;
         pSockaddrLen = &SockaddrLen;
     }
-    while ( ( ( ret = accept (
-		SocketListen,
-		addr,
-		pSockaddrLen) ) < 0 )
-		&& ( (errno == EINTR) && sUtlRetryFlag )  );
+    do
+    {
+        if(pSockaddrLen != NULL)
+        {
+            SockaddrLen = (socklen_t)*addr_size;
+        }
+#ifdef ENT_SOCKET_TEST_HOOKS
+        ret = iENT_SocketTestAccept(SocketListen, addr, pSockaddrLen);
+#else
+        ret = accept(SocketListen, addr, pSockaddrLen);
+#endif
+    } while(ret < 0 && errno == EINTR && sUtlRetryFlag);
 
     if ( ret < 0 )
     {

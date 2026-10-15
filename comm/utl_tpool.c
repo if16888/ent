@@ -851,7 +851,7 @@ ENT_PUBLIC MSG_ID_T  UTL_TPoolClose(UTL_TPOOL* pool)
         if(thDb->thId)
         {
             sts = ENT_ThreadWaitById(&thDb->thId,poolCtx->thHandle,0);
-            IENT_LOG_WARN("pool remove thread sts [%d]\n",sts);
+            IENT_LOG_DEBUG("pool remove thread sts [%d]\n",sts);
             if(sts < 0)
             {
                 iUTL_TPoolEndCloseAttempt(poolCtx);

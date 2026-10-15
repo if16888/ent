@@ -127,6 +127,7 @@ Windows native build 必须保持 toolchain 环境 shell-local：
 - 参数化 DB API 也使用 `DBS` submodule；扩展 DB surface 时保持 `BAD_PARAMS`、`PARAM_COUNT`、`PREPARE_FAILED`、`BIND_FAILED`、`EXEC_FAILED` 与 `msg/ent.msg` 对齐。
 - `LOG` 预留给 log service 与 handle 生命周期错误。
 - `ENT_LOG_QUEUE_FULL` 表示有界异步日志队列拒绝了新记录；`ENT_TPL_QUEUE_FULL` 表示线程池的待执行队列已满；`ENT_TPL_WORKER_FAILED` 表示线程池 worker 运行失败。新增或调整这些错误码时，同步维护 `msg/ent.msg`、各自对应的 API 文档和测试。
+- `ENT_INIT_HANDLE_ALLOCFAIL` 表示 runtime handle 分配失败；`ENT_TMR_IN_USE` 表示另一个 timer close 正在执行，调用方应等待该调用完成后再重试。
 - `SHM` 只用于公开基础 shared-memory service、file mapping 与 flush / close 生命周期错误，不作为高级同步或复制协议命名空间。
 - 任何 message-code 变更，包括新增、删除、重命名 submodule、code 或 text，都必须在同一变更集中同步本文档。
 

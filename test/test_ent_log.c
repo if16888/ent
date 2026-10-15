@@ -412,10 +412,10 @@ static void* controlled_log_writer(void* data)
 
 static int test_log_rejects_uninitialized_calls(void)
 {
-    ENT_LOG logHandle = NULL;
+    ENT_LOG logHandle = (ENT_LOG)(uintptr_t)1;
     ENT_LOG_LEV_E level = LOG_LEV_DEBUG_E;
 
-    if(expect_true(ENT_LogInitHandle(&logHandle, "NoInit", ".") == ENT_LOG_NOT_INITIALIZED,
+    if(expect_true(ENT_LogInitHandle(&logHandle, "NoInit", ".") == ENT_LOG_NOT_INITIALIZED && logHandle == NULL,
                    "ENT_LogInitHandle should reject use before ENT_LogInit") != 0)
     {
         return 1;
@@ -3267,11 +3267,119 @@ static int test_failed_force_flush_preserves_pending_count(void)
 }
 #endif
 
+#ifndef _WIN32
+static pthread_mutex_t sInitGateLock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t sInitGateCv = PTHREAD_COND_INITIALIZER;
+static int sInitGateEnabled;
+static int sInitGateEntered;
+static int sInitGateRelease;
+#endif
+
+void iENT_LogTestCtxInitReserved(void)
+{
+#ifndef _WIN32
+    pthread_mutex_lock(&sInitGateLock);
+    if(sInitGateEnabled)
+    {
+        sInitGateEntered = 1;
+        pthread_cond_broadcast(&sInitGateCv);
+        while(!sInitGateRelease)
+        {
+            pthread_cond_wait(&sInitGateCv, &sInitGateLock);
+        }
+    }
+    pthread_mutex_unlock(&sInitGateLock);
+#endif
+}
+
+#ifndef _WIN32
+typedef struct CTX_INIT_PROBE
+{
+    ENT_LOG_CTX ctx;
+    ENT_LOG handle;
+    MSG_ID_T status;
+    const char* path;
+} CTX_INIT_PROBE;
+
+static void* ctx_init_thread(void* data)
+{
+    CTX_INIT_PROBE* probe = (CTX_INIT_PROBE*)data;
+    probe->status = ENT_LogCtxInitHandle(probe->ctx, &probe->handle, "InitWinner", probe->path);
+    return NULL;
+}
+
+static int test_ctx_init_reserves_ownership(void)
+{
+    CTX_INIT_PROBE probe = {0};
+    ENT_LOG loser = NULL;
+    pthread_t worker;
+    char dirPath[512];
+    int failed = 0;
+    if(make_temp_dir(dirPath, sizeof(dirPath)) != 0) return 1;
+    probe.path = dirPath;
+    if(ENT_LogInit() != ENT_SYS_NORMAL || ENT_LogCtxInit(&probe.ctx) != ENT_SYS_NORMAL) return 1;
+    pthread_mutex_lock(&sInitGateLock);
+    sInitGateEnabled = 1;
+    sInitGateEntered = sInitGateRelease = 0;
+    pthread_mutex_unlock(&sInitGateLock);
+    if(pthread_create(&worker, NULL, ctx_init_thread, &probe) != 0) return 1;
+    pthread_mutex_lock(&sInitGateLock);
+    while(!sInitGateEntered) pthread_cond_wait(&sInitGateCv, &sInitGateLock);
+    pthread_mutex_unlock(&sInitGateLock);
+    failed += expect_true(ENT_LogCtxInitHandle(probe.ctx, &loser, "InitLoser", dirPath) == ENT_LOG_BAD_HANDLE && loser == NULL,
+                          "concurrent ctx initialization must reject the second owner");
+    pthread_mutex_lock(&sInitGateLock);
+    sInitGateRelease = 1;
+    pthread_cond_broadcast(&sInitGateCv);
+    pthread_mutex_unlock(&sInitGateLock);
+    pthread_join(worker, NULL);
+    sInitGateEnabled = 0;
+    failed += expect_true(probe.status == ENT_SYS_NORMAL && probe.handle != NULL,
+                          "reserved initializer must publish its owned handle");
+    failed += expect_true(ENT_LogCtxClose(probe.ctx) == ENT_SYS_NORMAL && ENT_LogClose() == ENT_SYS_NORMAL,
+                          "ctx close must reclaim the single handle without leaking service ownership");
+    remove_dir_contents(dirPath);
+    return failed;
+}
+#endif
+
+static int test_ctx_completed_io_error_releases_context(void)
+{
+    ENT_LOG_CTX ctx = NULL;
+    ENT_LOG handle = NULL;
+    char dirPath[512];
+    int failed = 0;
+    if(make_temp_dir(dirPath, sizeof(dirPath)) != 0) return 1;
+    if(ENT_LogInit() != ENT_SYS_NORMAL || ENT_LogCtxInit(&ctx) != ENT_SYS_NORMAL) return 1;
+    {
+        char badPath[600];
+        FILE* fp;
+        snprintf(badPath, sizeof(badPath), "%s/not-a-directory", dirPath);
+        fp = ENT_FOpen(badPath, "w");
+        if(fp == NULL) return 1;
+        fclose(fp);
+        failed += expect_true(ENT_LogCtxInitHandle(ctx, &handle, "FailedInit", badPath) == ENT_LOG_PATH_FAILED && handle == NULL,
+                              "failed ctx initialization must clear its output and release the reservation");
+    }
+    if(ENT_LogCtxInitHandle(ctx, &handle, "CtxIoFailure", dirPath) != ENT_SYS_NORMAL) return 1;
+    ((ENT_LOG_CTX_INTERNAL*)handle)->bufferIoStatus = ENT_LOG_IO_FAILED;
+    failed += expect_true(ENT_LogCtxClose(ctx) == ENT_LOG_IO_FAILED,
+                          "ctx close must report completed logger I/O failure");
+    failed += expect_true(ENT_LogClose() == ENT_SYS_NORMAL,
+                          "completed I/O failure must not leave an orphaned active context");
+    remove_dir_contents(dirPath);
+    return failed;
+}
+
 int main(void)
 {
     int failures = 0;
 
     failures += test_log_rejects_uninitialized_calls();
+    failures += test_ctx_completed_io_error_releases_context();
+#ifndef _WIN32
+    failures += test_ctx_init_reserves_ownership();
+#endif
     failures += test_log_close_service_boundaries();
     failures += test_log_close_error_reports_completed_disposition();
     failures += test_explicit_context_isolated_from_default();

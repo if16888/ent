@@ -21,6 +21,8 @@
 ENT_CTX gEntCtx;
 
 #ifndef _WIN32
+void iENT_SocketTestInjectAcceptEintr(void);
+int iENT_SocketTestAcceptCapacityRestored(void);
 void iENT_SocketTestInjectCloseEintr(void);
 unsigned int iENT_SocketTestCloseCallCount(void);
 void iENT_SocketTestInjectGetSockOptEintr(void);
@@ -357,6 +359,9 @@ static int test_socket_local_roundtrip_send_and_recv(void)
     }
 #endif
 
+#ifndef _WIN32
+    iENT_SocketTestInjectAcceptEintr();
+#endif
     if(expect_true(UTL_Accept(server,
                               (struct sockaddr*)&acceptedAddr,
                               &acceptedLen,
@@ -367,6 +372,16 @@ static int test_socket_local_roundtrip_send_and_recv(void)
         UTL_CloseSocket(server);
         return 1;
     }
+#ifndef _WIN32
+    if(expect_true(iENT_SocketTestAcceptCapacityRestored(),
+                   "accept must restore address capacity after EINTR") != 0)
+    {
+        UTL_CloseSocket(accepted);
+        UTL_CloseSocket(client);
+        UTL_CloseSocket(server);
+        return 1;
+    }
+#endif
 #ifdef _WIN32
     if(expect_true(accepted != INVALID_SOCKET, "The server should accept the localhost client connection") != 0)
 #else

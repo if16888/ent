@@ -53,14 +53,21 @@ context with `ENT_LOG_BAD_HANDLE`.
 
 `ENT_LOG_CTX` APIs enforce same-context handle ownership:
 
-- `ENT_LogCtxInitHandle(ctx, &handle, ...)` creates a handle owned by `ctx`.
+- `ENT_LogCtxInitHandle(ctx, &handle, ...)` reserves the empty context before
+  allocating a handle. Concurrent initializers are rejected with
+  `ENT_LOG_BAD_HANDLE`; a failed initializer releases its reservation for retry.
+- Explicit handle output slots are output-only and cleared on failure. Close an
+  existing handle before reusing its variable.
 - `ENT_LogCtxSetOption(ctx, handle, ...)`, `ENT_LogCtxCloseHandle(ctx, handle)`, and `ENT_LogCtxRaw()` / level-specific `ENT_LogCtx*()` only accept handles owned by the same `ctx`.
 - An empty context has no owned handle and cannot proxy the default handle or another context's handle.
 - Passing a foreign context-owned handle, a non-context explicit handle, or `NULL` default-handle proxy to a context API returns `ENT_LOG_BAD_HANDLE`.
 - Use the non-context `ENT_LogSetOption()`, `ENT_LogCloseHandle()`, and `ENT_LogRaw()` / level-specific `ENT_Log*()` APIs for the default handle and handles created by `ENT_LogInitHandle()`.
 - `ENT_LogCtxClose(ctx)` closes the context and automatically closes its live context-owned handle before releasing the context.
 - `ENT_LogCtxClose(ctx)` waits for context calls that already entered the lifecycle guard. The owner must prevent new context calls once close begins; stale raw context copies have no callable contract.
-- If handle close reports a buffer-thread or file-close failure, the handle remains in `CLOSING` and a later close call may retry cleanup. New writes remain rejected while cleanup is incomplete.
+- A buffer-thread teardown failure retains the handle in `CLOSING` for retry.
+  File I/O errors may be reported after the handle has already been released.
+  `ENT_LogCtxClose` also releases the context after such a completed I/O failure;
+  do not retry `ENT_LOG_IO_FAILED` on the old context pointer.
 
 ## Lifecycle Summary
 

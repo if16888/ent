@@ -128,6 +128,7 @@ typedef struct ENT_LOG_CTX_TAG
 #endif
     ENT_LOG_HANDLE_STATE_E state;
     unsigned int activeCalls;
+    bool initInProgress;
     struct ENT_LOG_CTX_TAG* registryNext;
 } ENT_LOG_CTX_TAG;
 

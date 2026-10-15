@@ -40,6 +40,8 @@ typedef enum
 
 typedef struct ENT_HANDLE_TAG* ENT_HANDLE;
 
+/* Initialization failures leave the caller-initialized NULL slot unchanged.
+ * ENT_INIT_HANDLE_ALLOCFAIL means runtime handle allocation failed. */
 ENT_PUBLIC MSG_ID_T  ENT_Init(ENT_HANDLE* handle,
                               const char* name,
                               const char* workPath,
@@ -47,6 +49,8 @@ ENT_PUBLIC MSG_ID_T  ENT_Init(ENT_HANDLE* handle,
                               ENT_MODE_E mode);
 
 /*
+ * The owner must fence new Run/Stop/SetRtAttributes entries against close.
+ * Old raw handle copies are invalid after close.
  * A retryable close failure leaves *handle valid. If logger I/O or service
  * shutdown fails after teardown completes, the error is returned and
  * *handle is cleared.
@@ -60,6 +64,7 @@ ENT_PUBLIC MSG_ID_T  ENT_SetRtAttributes(ENT_HANDLE handle,
 
 ENT_PUBLIC MSG_ID_T  ENT_Stop(ENT_HANDLE handle);
 
+/* Returns ENT_SYS_ALREADY_INITIALIZED if this instance is already running. */
 ENT_PUBLIC MSG_ID_T  ENT_Run(ENT_HANDLE handle);
 
 ENT_PUBLIC MSG_ID_T  ENT_Helpers(void);
