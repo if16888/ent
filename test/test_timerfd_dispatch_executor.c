@@ -427,7 +427,11 @@ GATES:
 int main(void)
 {
     int i;
-    const int fds = fd_count(), threads = thread_count();
+    int fds, threads;
+    /* TSan starts its own helper lazily on the first pthread activity. */
+    if(test_case() != 0) return EXIT_FAILURE;
+    fds = fd_count();
+    threads = thread_count();
     if(fds < 1 || threads < 1) return EXIT_FAILURE;
     for(i = 0; i < ITERATIONS; ++i)
     {
