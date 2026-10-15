@@ -695,6 +695,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_link_libraries(test_timerfd_executor_model PRIVATE pthread)
   add_test(NAME test_timerfd_executor_model COMMAND test_timerfd_executor_model)
   set_tests_properties(test_timerfd_executor_model PROPERTIES TIMEOUT 15)
+  # Experimental real timerfd/epoll expiry with bounded callback workers.
+  # Isolated fixture: not linked into ent and not a public Timer backend.
+  add_executable(test_timerfd_dispatch_executor test_timerfd_dispatch_executor.c)
+  target_link_libraries(test_timerfd_dispatch_executor PRIVATE pthread)
+  add_test(NAME test_timerfd_dispatch_executor COMMAND test_timerfd_dispatch_executor)
+  set_tests_properties(test_timerfd_dispatch_executor PROPERTIES TIMEOUT 15)
 endif()
 
 if(UNIX AND NOT APPLE)
