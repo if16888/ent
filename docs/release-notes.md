@@ -7,6 +7,10 @@
 - `ENT_LogCtxClose` completes context destruction after a completed logger I/O
   failure and still returns `ENT_LOG_IO_FAILED`. Do not retry that old context
   pointer. Incomplete background-worker teardown retains a retryable context.
+- Existing exported message arrays retain their original 131 entries, count and
+  order for binary compatibility. New message codes are resolved through a
+  generated library-internal lookup used by `ENT_MsgText`; use that API rather
+  than treating the compatibility array as a complete catalog of newer codes.
 - A concurrent `UTL_TimerClose` returns the new `ENT_TMR_IN_USE` error while
   another close is active. Wait for that close to finish before retrying.
 - A duplicate `ENT_Run` on a running instance returns

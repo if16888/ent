@@ -24,11 +24,13 @@
 #include "ient_comm.h"
 #include "ent_msg.h"
 
+#if !ENT_ENABLE_SQLITE || !ENT_SQLITE_FOUND
 static MSG_ID_T iENT_DbBackendUnsupported(DB_TYPE dbType)
 {
     IENT_LOG_ERROR("Database backend [%d] is not enabled in this build.\n",dbType);
     return ENT_DBS_UNSUPPORTED;
 }
+#endif
 
 MSG_ID_T ENT_DbSqliteInit(DB_HANDLE dbHandle)
 {

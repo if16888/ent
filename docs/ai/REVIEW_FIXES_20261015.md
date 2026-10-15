@@ -70,3 +70,22 @@ ent_utility.h; msg/ent.msg and AGENTS.md; test/CMakeLists.txt, test_ent_init.c,
 test_ent_log.c, test_utl_socket.c, test_utl_timer_thread_safety.c and the new
 test_ent_db_mysql_results.c; docs/log-return-codes.md, docs/release-notes.md and
 this task record.
+
+
+## PR #39 CI follow-up
+
+The first run passed 20/22 checks, including Windows x86/x64, ARM64,
+sanitisers and live DB resource boundaries. Two quality failures were diagnosed:
+
+- ABI: the generated public data array grew from 131 to 133 entries. Preserve
+  its size, order and count; emit only the two new messages in a generated hidden
+  lookup used by ENT_MsgText. Existing constants and array entries stay unchanged.
+  This changes the generator, its root CMake invocation, message lookup and tests;
+  no ABI rule or workflow is relaxed. The local dynamic symbol retains size 4192
+  bytes and the internal helper is absent from dynamic exports.
+- Clang diagnostics: an existing unused SQLite fallback helper warning was partly
+  garbled in parallel baseline output, producing a false increase. Compile that
+  helper only when the SQLite backend is disabled, matching its only call sites.
+
+Follow-up local generator tests and complete CTest passed (35/35). Remote CI
+must validate the follow-up commit before the user-authorized merge.

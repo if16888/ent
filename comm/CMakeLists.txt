@@ -63,6 +63,9 @@ add_custom_command(
     --input ${ENT_MSG_SPEC_FILE}
     --header ${ENT_MSG_GENERATED_HEADER}
     --source ${ENT_MSG_GENERATED_SOURCE}
+    --extension-symbol ENT_INIT_HANDLE_ALLOCFAIL
+    --extension-symbol ENT_TMR_IN_USE
+    --extension-lookup iENT_MsgExtensionText
   DEPENDS
     ${ENT_MSG_SPEC_FILE}
     ${ENT_MSG_GENERATOR}

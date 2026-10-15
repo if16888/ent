@@ -18,6 +18,9 @@
 #include "ent_msg.h"
 #include <stdio.h>
 
+/* Generated, library-internal lookup preserves the exported legacy table ABI. */
+extern const char* iENT_MsgExtensionText(MSG_ID_T code);
+
 static const char* const gEntMsgUnknownText = "unknown message id";
 static const char* const gEntMsgUnknownModule = "UNKNOWN_MODULE";
 static const char* const gEntMsgUnknownSubmodule = "UNKNOWN_SUBMODULE";
@@ -107,7 +110,10 @@ ENT_PUBLIC const char* ENT_MsgText(MSG_ID_T code)
         }
     }
 
-    return gEntMsgUnknownText;
+    {
+        const char* extension = iENT_MsgExtensionText(code);
+        return extension != NULL ? extension : gEntMsgUnknownText;
+    }
 }
 
 ENT_PUBLIC const char* ENT_MsgModuleName(MSG_ID_T code)
