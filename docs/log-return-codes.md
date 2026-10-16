@@ -96,7 +96,7 @@ The compiled [owner helper](../example/log_ctx_close.h) wraps the existing API:
 ```c
 status = iExample_LogCtxClose(&ctx);
 if(status == ENT_LOG_IO_FAILED) {
-    /* Report lost log data. ctx is NULL; never retry the old pointer. */
+    /* Report possible log data loss. ctx is NULL; never retry the old pointer. */
 } else if(status == ENT_LOG_THREAD_FAILED) {
     /* ctx is retained. Resolve the worker failure before a later retry. */
 }
@@ -109,3 +109,6 @@ the context-owned log handle and all context aliases after completed close.
 as a smoke test when examples/testing are enabled. The log regression suite uses
 the same helper for both terminal I/O failure and injected retryable worker-stop
 failure, and checks service ownership is fully released only after completion.
+
+For the reusable owner procedure and its module-specific limits, see
+[close ownership](architecture/handle-lifecycle.md#可复用的关闭所有权模式).

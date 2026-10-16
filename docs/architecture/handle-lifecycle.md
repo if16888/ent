@@ -97,3 +97,22 @@
 - `test/test_ent_init.c`
 - `test/test_ent_msg.c`
 - `test/downstream_consumer/main.c`
+
+## 可复用的关闭所有权模式
+
+可以复用的是 owner 的处理步骤，而不是各模块共用一张返回码表：
+
+1. 先阻止新调用进入，并协调已经持有别名的使用者。内部 active-call 计数不能保护尚未进入库的新调用。
+2. 由唯一 owner 发起关闭，同时记录返回码和该 API 规定的资源释放状态。
+3. 已完成释放时清空 owner 槽位、废弃所有 raw 别名，并独立报告数据完整性错误；未完成时保留所有权，排除失败原因后再决定是否重试。
+4. `IN_USE` 要先与另一个关闭者同步；`BAD_HANDLE` 要排查所有权，不能据此循环重试或解引用旧指针。
+
+| 接口 | 判断释放状态的方法 | owner 的处理 |
+| --- | --- | --- |
+| `ENT_Close(&handle)` | 调用后的 `handle` 是否为 `NULL`，不能只看返回码 | 为空时废弃别名；非空时按具体错误处理，不自动重试 |
+| `ENT_LogCtxClose(ctx)` | 按日志专属契约：`ENT_SYS_NORMAL` / `ENT_LOG_IO_FAILED` 已释放；`ENT_LOG_THREAD_FAILED` 保留上下文 | 完成态必须手动清空 owner；未完成态保留上下文；其他错误先诊断 |
+
+日志的 [owner helper](../../example/log_ctx_close.h) 仅封装第二行的契约。
+它对已清空槽位的重复调用安全，不使底层 raw close 幂等，也不使其他线程保存的别名安全。
+不要将它的返回码判断直接套用到 DB、timer、thread pool 等资源；新增适配必须先核对该模块的关闭契约与失败路径。
+当前不引入通用公共关闭函数，也不改变 API / ABI。
