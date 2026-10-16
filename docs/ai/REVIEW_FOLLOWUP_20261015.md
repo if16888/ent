@@ -91,3 +91,22 @@ supported by the implementation and focused tests. Interpret them narrowly:
 Preserve existing CI gates. Future executable lifecycle changes still require
 failure-path regression coverage and the applicable platform/sanitizer checks;
 this review provides no reason to weaken them or add duplicate CI jobs.
+
+## RT failure logging lock follow-up (2026-10-16)
+
+A lock-order walk found no logger-to-runtime `entLock` acquisition path, so the
+previous observation did not establish an ABBA deadlock. The RT attribute error
+path nevertheless performed logger I/O while holding the per-instance `entLock`,
+which extended lock hold time and serialized unrelated state access behind I/O.
+
+The RT attempt still updates native state and its snapshot under `entLock`, but
+now copies the native error to a local value and emits diagnostics after releasing
+the lock. The active-call pin remains held through logging, so `ENT_Close` still
+waits for this admitted call before reclaiming the runtime context. A Linux test
+injects `EPERM` from the scheduler call and checks the warning occurs with the
+runtime lock available, while preserving the return status and error snapshot.
+
+Validation: Release build and CTest passed 36/36; focused `test_ent_init` passed
+under ASan; `test_ent_init_concurrency` passed under TSan. The lock probe verifies
+the exercised scheduler-failure logging path only and is not a proof of global
+lock-order safety.

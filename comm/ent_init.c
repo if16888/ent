@@ -129,7 +129,12 @@ static ENT_CTX* iENT_RuntimeSetActiveCtx(ENT_CTX* ctx)
 static MSG_ID_T iENT_CTXApplyRtAttributes(ENT_CTX* ctx,
                                           int rtCpu,
                                           ENT_RT_POLICY_E rtPolicy,
-                                          int rtPriority);
+                                          int rtPriority,
+                                          int* nativeError);
+static void iENT_CTXLogRtAttributesFailure(MSG_ID_T status,
+                                           int rtCpu,
+                                           ENT_RT_POLICY_E rtPolicy,
+                                           int nativeError);
 static MSG_ID_T iENT_CTXInit(ENT_CTX* ctx,
                              const char* name,
                              const char* workPath,
@@ -294,6 +299,8 @@ static MSG_ID_T iENT_HandleSetRtAttributes(ENT_HANDLE handle,
     ENT_HANDLE_CTX_T* handleCtx = (ENT_HANDLE_CTX_T*)handle;
     ENT_CTX* prevCtx = NULL;
     MSG_ID_T sts = ENT_SYS_NORMAL;
+    int nativeError = 0;
+    bool rtCtxActive = false;
 
     sts = iENT_HandleValidate(handleCtx, ENT_RT_NOT_INITIALIZED);
     if(sts != ENT_SYS_NORMAL)
@@ -317,10 +324,15 @@ static MSG_ID_T iENT_HandleSetRtAttributes(ENT_HANDLE handle,
     else
     {
         prevCtx = iENT_RuntimeSetActiveCtx(&handleCtx->ctx);
-        sts = iENT_CTXApplyRtAttributes(&handleCtx->ctx, rtCpu, rtPolicy, rtPriority);
-        iENT_RuntimeSetActiveCtx(prevCtx);
+        rtCtxActive = true;
+        sts = iENT_CTXApplyRtAttributes(&handleCtx->ctx, rtCpu, rtPolicy, rtPriority, &nativeError);
     }
     UTL_LockLeave(handleCtx->ctx.entLock);
+    if(rtCtxActive)
+    {
+        iENT_CTXLogRtAttributesFailure(sts, rtCpu, rtPolicy, nativeError);
+        iENT_RuntimeSetActiveCtx(prevCtx);
+    }
     iENT_HandleEndCall(handleCtx);
     return sts;
 }
@@ -707,8 +719,14 @@ static MSG_ID_T iENT_CTXApplyRtMode(ENT_CTX* ctx,
 static MSG_ID_T iENT_CTXApplyRtAttributes(ENT_CTX* ctx,
                                           int rtCpu,
                                           ENT_RT_POLICY_E rtPolicy,
-                                          int rtPriority)
+                                          int rtPriority,
+                                          int* nativeError)
 {
+    if(nativeError != NULL)
+    {
+        *nativeError = 0;
+    }
+
     if(ctx == NULL)
     {
         return ENT_RT_NOT_INITIALIZED;
@@ -718,7 +736,6 @@ static MSG_ID_T iENT_CTXApplyRtAttributes(ENT_CTX* ctx,
        rtPolicy != ENT_RT_POLICY_FIFO_E &&
        rtPolicy != ENT_RT_POLICY_RR_E)
     {
-        IENT_LOG_ERROR("invalid rt policy [%d]\n",(int)rtPolicy);
         return ENT_RT_BAD_POLICY;
     }
 
@@ -736,7 +753,10 @@ static MSG_ID_T iENT_CTXApplyRtAttributes(ENT_CTX* ctx,
         if(rtCpu >= CPU_SETSIZE)
         {
             ctx->rtLastError = EINVAL;
-            IENT_LOG_WARN("rt affinity cpu [%d] invalid\n",rtCpu);
+            if(nativeError != NULL)
+            {
+                *nativeError = EINVAL;
+            }
             return ENT_RT_BAD_CPU;
         }
         CPU_ZERO(&cpuSet);
@@ -745,7 +765,10 @@ static MSG_ID_T iENT_CTXApplyRtAttributes(ENT_CTX* ctx,
         if(ret != 0)
         {
             ctx->rtLastError = ret;
-            IENT_LOG_WARN("pthread_setaffinity_np failed,error [%d]->[%s]\n",ret,strerror(ret));
+            if(nativeError != NULL)
+            {
+                *nativeError = ret;
+            }
             return ENT_RT_AFFINITY_FAILED;
         }
     }
@@ -766,7 +789,10 @@ static MSG_ID_T iENT_CTXApplyRtAttributes(ENT_CTX* ctx,
             if(minPrio == -1 || maxPrio == -1)
             {
                 ctx->rtLastError = errno;
-                IENT_LOG_WARN("sched priority range query failed,error [%d]->[%s]\n",errno,strerror(errno));
+                if(nativeError != NULL)
+                {
+                    *nativeError = errno;
+                }
                 return ENT_RT_SCHED_QUERYFAIL;
             }
             if(targetPrio < minPrio)
@@ -789,7 +815,10 @@ static MSG_ID_T iENT_CTXApplyRtAttributes(ENT_CTX* ctx,
         if(ret != 0)
         {
             ctx->rtLastError = ret;
-            IENT_LOG_WARN("pthread_setschedparam failed,error [%d]->[%s]\n",ret,strerror(ret));
+            if(nativeError != NULL)
+            {
+                *nativeError = ret;
+            }
             return ENT_RT_SCHED_SETFAIL;
         }
         ctx->rtPriority = targetPrio;
@@ -798,11 +827,46 @@ static MSG_ID_T iENT_CTXApplyRtAttributes(ENT_CTX* ctx,
 #else
     if(rtCpu >= 0 || rtPolicy != ENT_RT_POLICY_OTHER_E)
     {
-        IENT_LOG_WARN("rt cpu/policy attributes are unsupported on this platform\n");
         return ENT_RT_UNSUPPORTED_PLATFORM;
     }
     return ENT_SYS_NORMAL;
 #endif
+}
+
+static void iENT_CTXLogRtAttributesFailure(MSG_ID_T status,
+                                           int rtCpu,
+                                           ENT_RT_POLICY_E rtPolicy,
+                                           int nativeError)
+{
+    switch(status)
+    {
+        case ENT_RT_BAD_POLICY:
+            IENT_LOG_ERROR("invalid rt policy [%d]\n",(int)rtPolicy);
+            break;
+        case ENT_RT_BAD_CPU:
+            IENT_LOG_WARN("rt affinity cpu [%d] invalid\n",rtCpu);
+            break;
+        case ENT_RT_AFFINITY_FAILED:
+            IENT_LOG_WARN("pthread_setaffinity_np failed,error [%d]->[%s]\n",
+                          nativeError,
+                          strerror(nativeError));
+            break;
+        case ENT_RT_SCHED_QUERYFAIL:
+            IENT_LOG_WARN("sched priority range query failed,error [%d]->[%s]\n",
+                          nativeError,
+                          strerror(nativeError));
+            break;
+        case ENT_RT_SCHED_SETFAIL:
+            IENT_LOG_WARN("pthread_setschedparam failed,error [%d]->[%s]\n",
+                          nativeError,
+                          strerror(nativeError));
+            break;
+        case ENT_RT_UNSUPPORTED_PLATFORM:
+            IENT_LOG_WARN("rt cpu/policy attributes are unsupported on this platform\n");
+            break;
+        default:
+            break;
+    }
 }
 
 static MSG_ID_T iENT_CTXInit(ENT_CTX* ctx,

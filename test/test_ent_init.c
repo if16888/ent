@@ -80,6 +80,7 @@ static int s_fail_log_set_option_call = 0;
 static int s_log_set_option_calls = 0;
 static int s_fail_lock_init = 0;
 static int s_log_error_calls = 0;
+static int s_log_warn_calls = 0;
 static int s_event_counter = 0;
 static int s_log_error_order = 0;
 static int s_log_close_order = 0;
@@ -103,6 +104,9 @@ static volatile int s_suppress_handle_call_ended = 0;
 static int s_sched_param_call_count = 0;
 static int s_sched_param_policy = -1;
 static int s_sched_param_priority = -1;
+static int s_sched_param_result = 0;
+static int s_rt_log_lock_probe = 0;
+static int s_rt_log_observed_locked = 0;
 
 int ENT_InitTestSetSchedParam(pthread_t thread,
                               int policy,
@@ -111,6 +115,10 @@ int ENT_InitTestSetSchedParam(pthread_t thread,
     s_sched_param_call_count++;
     s_sched_param_policy = policy;
     s_sched_param_priority = schedParam->sched_priority;
+    if(s_sched_param_result != 0)
+    {
+        return s_sched_param_result;
+    }
     return pthread_setschedparam(thread, policy, schedParam);
 }
 #endif
@@ -259,6 +267,12 @@ static void reset_log_failures(void)
     s_log_set_option_calls = 0;
     s_fail_lock_init = 0;
     s_log_error_calls = 0;
+    s_log_warn_calls = 0;
+#if defined(ENT_INIT_TEST_HOOKS) && defined(__linux__)
+    s_sched_param_result = 0;
+    s_rt_log_lock_probe = 0;
+    s_rt_log_observed_locked = 0;
+#endif
     s_event_counter = 0;
     s_log_error_order = 0;
     s_log_close_order = 0;
@@ -701,6 +715,20 @@ MSG_ID_T ENT_LogWarn(ENT_LOG logHandle, const char* format, ...)
 {
     (void)logHandle;
     (void)format;
+    s_log_warn_calls++;
+#if defined(ENT_INIT_TEST_HOOKS) && defined(__linux__)
+    if(s_rt_log_lock_probe)
+    {
+        if(pthread_mutex_trylock(&s_test_lock) != 0)
+        {
+            s_rt_log_observed_locked = 1;
+        }
+        else
+        {
+            pthread_mutex_unlock(&s_test_lock);
+        }
+    }
+#endif
     return 0;
 }
 
@@ -2116,6 +2144,44 @@ static int test_ent_set_rt_attributes_allows_noop_after_init(void)
                        "ENT_Close should succeed after ENT_SetRtAttributes noop");
 }
 
+#if defined(ENT_INIT_TEST_HOOKS) && defined(__linux__)
+static int test_ent_set_rt_attributes_logs_after_unlock(void)
+{
+    ENT_HANDLE handle = NULL;
+    MSG_ID_T sts = ENT_SYS_NORMAL;
+    int warningCount = 0;
+    int failed = 0;
+
+    reset_close_counters();
+    reset_log_failures();
+    if(ENT_Init(&handle, "rt_log_lock", "/tmp/rt_log_lock", LOG_LEV_WARN_E,
+                ENT_MODE_REALTIME_E) != ENT_SYS_NORMAL)
+    {
+        return 1;
+    }
+
+    warningCount = s_log_warn_calls;
+    s_sched_param_result = EPERM;
+    s_rt_log_observed_locked = 0;
+    s_rt_log_lock_probe = 1;
+    sts = ENT_SetRtAttributes(handle, -1, ENT_RT_POLICY_FIFO_E, 1);
+    s_rt_log_lock_probe = 0;
+    s_sched_param_result = 0;
+
+    failed |= expect_true(sts == ENT_RT_SCHED_SETFAIL,
+                          "scheduler failure should keep its public status");
+    failed |= expect_true(s_log_warn_calls == warningCount + 1,
+                          "scheduler failure should still emit one warning");
+    failed |= expect_true(s_rt_log_observed_locked == 0,
+                          "RT failure logging must run after releasing the runtime lock");
+    failed |= expect_true(handle->ctx.rtLastError == EPERM,
+                          "scheduler failure should preserve the native error snapshot");
+    failed |= expect_true(ENT_Close(&handle) == ENT_SYS_NORMAL && handle == NULL,
+                          "RT handle should close after the logging failure path");
+    return failed;
+}
+#endif
+
 static int test_ent_set_rt_attributes_rejects_normal_mode(void)
 {
     ENT_HANDLE handle = NULL;
@@ -2725,6 +2791,9 @@ int main(void)
     failures += test_ent_set_rt_attributes_rejects_uninitialized_context();
     failures += test_ent_rt_memory_lock_is_process_owned();
     failures += test_ent_set_rt_attributes_allows_noop_after_init();
+#if defined(ENT_INIT_TEST_HOOKS) && defined(__linux__)
+    failures += test_ent_set_rt_attributes_logs_after_unlock();
+#endif
     failures += test_ent_set_rt_attributes_rejects_normal_mode();
     failures += test_ent_stop_rejects_bad_magic_handle();
     failures += test_ent_run_rejects_bad_magic_handle();
