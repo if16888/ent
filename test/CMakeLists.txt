@@ -847,3 +847,13 @@ if(ENT_ENABLE_PGSQL AND ENT_PGSQL_FOUND)
   target_link_libraries(test_ent_pgsql_rewrite PRIVATE ent_s)
   add_test(NAME test_ent_pgsql_rewrite COMMAND test_ent_pgsql_rewrite)
 endif()
+
+if(ENT_ENABLE_SQLITE AND ENT_SQLITE_FOUND)
+  add_executable(test_sqlite_write_callback test_sqlite_write_callback.c)
+  target_include_directories(test_sqlite_write_callback PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../comm)
+  ent_test_link_db_deps(test_sqlite_write_callback)
+  target_link_libraries(test_sqlite_write_callback PRIVATE ent_s)
+  add_test(NAME test_sqlite_write_callback COMMAND test_sqlite_write_callback)
+endif()
