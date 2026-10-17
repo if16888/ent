@@ -43,6 +43,7 @@ int main(void)
     if(ENT_DbSqliteWrite(db, "CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)", NULL, NULL) != ENT_SYS_NORMAL)
         fail = 1;
     if(!fail && write_and_expect(db, "INSERT INTO t(v) VALUES ('a')", &c, 1)) fail = 1;
+    if(!fail && write_and_expect(db, "CREATE INDEX idx_t_v ON t(v)", &c, 0)) fail = 1;
     if(!fail && write_and_expect(db, "UPDATE t SET v='b' WHERE id=1", &c, 1)) fail = 1;
     if(!fail && write_and_expect(db, "UPDATE t SET v='b' WHERE id=404", &c, 0)) fail = 1;
     if(!fail && write_and_expect(db, "DELETE FROM t WHERE id=1", &c, 1)) fail = 1;
