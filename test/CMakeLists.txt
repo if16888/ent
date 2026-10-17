@@ -790,6 +790,10 @@ if(APPLE OR UNIX)
   target_link_libraries(perf_ent_log PRIVATE pthread)
 endif()
 
+# A failed partial worker launch must never free contexts while writers still run.
+add_test(NAME test_perf_ent_log_partial_start COMMAND perf_ent_log --test-partial-start)
+set_tests_properties(test_perf_ent_log_partial_start PROPERTIES TIMEOUT 20)
+
 if(TARGET ent_msg_codegen)
   get_property(_ent_test_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
   foreach(_ent_target IN LISTS _ent_test_targets)
