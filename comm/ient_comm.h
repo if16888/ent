@@ -18,6 +18,7 @@
 #ifndef _I_ENT_COMM_H_
 #define _I_ENT_COMM_H_
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #ifdef _WIN32
@@ -160,24 +161,33 @@ static inline void* UTL_Malloc(void* oldMem,size_t* num,int size,size_t reqNum)
         IENT_LOG_ERROR("arguments is invalid.\n");
         return NULL;
     }
-    size_t newNum = reqNum;
+    size_t newNum;
     size_t oldNum = *num;
-    if(*num<reqNum)
-    {
-        newNum = (reqNum*2+7)&0xFFFFFFF8;
-    }
-    else
+    size_t elemSize = (size_t)size;
+    if(oldNum >= reqNum)
     {
         return oldMem;
     }
-    
-    newMem = (char*)realloc(oldMem,newNum*size);
-    if(newMem!=NULL)
+    /* Check 64-bit growth, eight-element rounding and byte allocation.
+     * Never mutate the caller's capacity on failure. */
+    if((oldNum != 0 && oldMem == NULL) ||
+       reqNum > (SIZE_MAX - (size_t)7) / (size_t)2)
     {
-        memset(newMem+oldNum*size,0,(newNum-oldNum)*size);
+        return NULL;
     }
+    newNum = (reqNum * (size_t)2 + (size_t)7) & ~((size_t)7);
+    if(newNum < reqNum || newNum > SIZE_MAX / elemSize)
+    {
+        return NULL;
+    }
+    newMem = (char*)realloc(oldMem, newNum * elemSize);
+    if(newMem == NULL)
+    {
+        return NULL; /* realloc leaves the original allocation valid. */
+    }
+    memset(newMem + oldNum * elemSize, 0, (newNum - oldNum) * elemSize);
     *num = newNum;
-    return newMem;    
+    return newMem;
 }
 
 #endif
