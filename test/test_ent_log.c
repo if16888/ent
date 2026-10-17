@@ -26,6 +26,9 @@
 #include "ient_runtime.h"
 #include "../example/log_ctx_close.h"
 
+/* Private test hook: not part of the installed public API. */
+extern MSG_ID_T ENT_LogTestBuildFileName(char*, size_t, const char*, const char*, const char*);
+
 /* The log implementation is now split across core/writer/options/compat sources. */
 
 ENT_CTX gEntCtx;
@@ -3481,6 +3484,37 @@ static int test_calendar_midnight_handles_dst(void)
 }
 #endif
 
+static int test_log_file_name_rejects_truncation(void)
+{
+    char buffer[64];
+    const char* expected = "audit/log_20261017.log";
+    size_t required = strlen(expected) + 1;
+    int failed = 0;
+
+    failed += expect_true(ENT_LogTestBuildFileName(buffer, sizeof(buffer),
+                         "audit", "log", "20261017") == ENT_SYS_NORMAL &&
+                         strcmp(buffer, expected) == 0,
+                         "Log filename builder should preserve the complete path");
+    failed += expect_true(ENT_LogTestBuildFileName(buffer, required,
+                         "audit", "log", "20261017") == ENT_SYS_NORMAL &&
+                         strcmp(buffer, expected) == 0,
+                         "Exactly fitting log filename should be accepted");
+
+    memset(buffer, 'X', sizeof(buffer));
+    failed += expect_true(ENT_LogTestBuildFileName(buffer, required - 1,
+                         "audit", "log", "20261017") == ENT_LOG_PATH_FAILED &&
+                         buffer[0] == '\0',
+                         "Truncated log filename must fail without returning a usable partial path");
+    failed += expect_true(ENT_LogTestBuildFileName(buffer, sizeof(buffer),
+                         NULL, "log", "20261017") == ENT_SYS_NORMAL &&
+                         strcmp(buffer, "log_20261017.log") == 0,
+                         "The current-directory log filename must not acquire a separator");
+    failed += expect_true(ENT_LogTestBuildFileName(buffer, 0,
+                         NULL, "log", "20261017") == ENT_LOG_BAD_ARGUMENT,
+                         "Zero-capacity filename buffers must be rejected");
+    return failed;
+}
+
 static int test_log_path_change_after_open_switches_files(void)
 {
     char first[256], second[256], firstFile[512], secondFile[512];
@@ -3547,6 +3581,7 @@ int main(void)
     failures += test_concurrent_buffer_enable_starts_one_worker();
     failures += test_log_level_updates_are_safe_during_writes();
     failures += test_log_path_option_trims_trailing_separator_and_writes_file();
+    failures += test_log_file_name_rejects_truncation();
     failures += test_log_path_change_after_open_switches_files();
 #if defined(__linux__)
     failures += test_calendar_midnight_handles_dst();
