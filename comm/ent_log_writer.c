@@ -360,7 +360,7 @@ int iENT_LogFastFlagGet(
 #ifdef _WIN32
     return InterlockedCompareExchange((volatile LONG*)flag, 0, 0) != 0;
 #else
-    return __sync_val_compare_and_swap((volatile int*)flag, 0, 0) != 0;
+    return __atomic_load_n(flag, __ATOMIC_ACQUIRE) != 0;
 #endif
 }
 
@@ -384,7 +384,7 @@ ENT_LOG_LEV_E iENT_LogLevelGet(const ENT_LOG_CTX_INTERNAL* log)
 #ifdef _WIN32
     return (ENT_LOG_LEV_E)InterlockedCompareExchange((volatile LONG*)&log->logLevelFast, 0, 0);
 #else
-    return (ENT_LOG_LEV_E)__sync_val_compare_and_swap((volatile int*)&log->logLevelFast, 0, 0);
+    return (ENT_LOG_LEV_E)__atomic_load_n(&log->logLevelFast, __ATOMIC_ACQUIRE);
 #endif
 }
 
