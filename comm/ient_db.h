@@ -117,6 +117,8 @@ typedef struct USER_SQLITE_DATA
 {
     SqlResultCB userCb;
     void* userData;
+    /* Legacy sqlite3_exec callback count. Only the write path reads it. */
+    int rowCallbacks;
 } USER_SQLITE_READ, USER_SQLITE_WRITE;
 
 static inline int iENT_DbCheckedSizeMultiply(size_t left, size_t right, size_t* result)
