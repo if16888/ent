@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <sqlite3.h>
 #include "ient_db.h"
+#include "ent_msg.h"
 
 typedef struct {
     int calls;
