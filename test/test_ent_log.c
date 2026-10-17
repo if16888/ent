@@ -3497,9 +3497,9 @@ static int test_log_path_change_after_open_switches_files(void)
     if(ENT_LogInit() != ENT_SYS_NORMAL) { failed = 1; goto DONE; }
     service = 1;
     if(ENT_LogInitHandle(&handle, "PathSwitch", first) != ENT_SYS_NORMAL ||
-       ENT_LogPrint(handle, "before switch\n") != ENT_SYS_NORMAL ||
+       ENT_LogWarn(handle, "before switch\n") != ENT_SYS_NORMAL ||
        ENT_LogSetOption(handle, ENT_LOG_PATH_E, second) != ENT_SYS_NORMAL ||
-       ENT_LogPrint(handle, "after switch\n") != ENT_SYS_NORMAL)
+       ENT_LogWarn(handle, "after switch\n") != ENT_SYS_NORMAL)
         failed = 1;
 DONE:
     if(handle != NULL && ENT_LogCloseHandle(handle) != ENT_SYS_NORMAL) failed = 1;
