@@ -824,3 +824,14 @@ if(TARGET ent_s AND ENT_ENABLE_MYSQL AND ENT_MYSQL_FOUND)
   ent_test_link_db_deps(test_ent_db_mysql_results)
   add_test(NAME test_ent_db_mysql_results COMMAND test_ent_db_mysql_results)
 endif()
+
+# Regression for the legacy sqlite3_exec write callback contract.
+if(ENT_ENABLE_SQLITE AND ENT_SQLITE_FOUND)
+  add_executable(test_sqlite_write_callback test_sqlite_write_callback.c)
+  target_include_directories(test_sqlite_write_callback PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../comm)
+  ent_test_link_db_deps(test_sqlite_write_callback)
+  target_link_libraries(test_sqlite_write_callback PRIVATE ent_s)
+  add_test(NAME test_sqlite_write_callback COMMAND test_sqlite_write_callback)
+endif()
