@@ -68,11 +68,48 @@ time_t ENT_LogTestNextMidnight(time_t nowTime)
 }
 #endif
 
+/* Never open/delete a silently truncated filename: a clipped suffix could
+ * refer to a different file than the caller requested. */
+static MSG_ID_T iENT_LogBuildFileName(char* output,
+                                      size_t outputSize,
+                                      const char* logPath,
+                                      const char* moduleName,
+                                      const char* dayStr)
+{
+    int length;
+    if(output == NULL || outputSize == 0 || moduleName == NULL || dayStr == NULL)
+        return ENT_LOG_BAD_ARGUMENT;
+
+    if(logPath == NULL)
+        length = snprintf(output, outputSize, "%s_%s.log", moduleName, dayStr);
+    else
+        length = snprintf(output, outputSize, "%s%s%s_%s.log", logPath, ENT_FILE_SEP, moduleName, dayStr);
+
+    if(length < 0 || (size_t)length >= outputSize)
+    {
+        output[0] = '\0';
+        return ENT_LOG_PATH_FAILED;
+    }
+    return ENT_SYS_NORMAL;
+}
+
+#ifdef ENT_LOG_TEST_HOOKS
+MSG_ID_T ENT_LogTestBuildFileName(char* output,
+                                  size_t outputSize,
+                                  const char* logPath,
+                                  const char* moduleName,
+                                  const char* dayStr)
+{
+    return iENT_LogBuildFileName(output, outputSize, logPath, moduleName, dayStr);
+}
+#endif
+
 static MSG_ID_T iENT_LogRollCheck(ENT_LOG logHandle, time_t nowTime)
 {
     ENT_LOG_CTX_INTERNAL* log = (ENT_LOG_CTX_INTERNAL*)logHandle;
     const static char* tmFormat = "%Y%m%d";
     char dayStr[9];
+    char fileName[PATH_MAX];
     struct tm nowTm;
     time_t nextMidnight;
 
@@ -91,12 +128,18 @@ static MSG_ID_T iENT_LogRollCheck(ENT_LOG logHandle, time_t nowTime)
 #else
     if(localtime_r(&nowTime, &nowTm) == NULL) return ENT_LOG_IO_FAILED;
 #endif
-    strftime(dayStr, sizeof(dayStr), tmFormat, &nowTm);
+    if(strftime(dayStr, sizeof(dayStr), tmFormat, &nowTm) == 0)
+        return ENT_LOG_IO_FAILED;
     nextMidnight = iENT_LogNextMidnight(nowTime);
     if(nextMidnight == (time_t)-1 || nextMidnight <= nowTime)
     {
         return ENT_LOG_IO_FAILED;
     }
+
+    /* Validate before closing the active stream; failed rollover is retryable. */
+    if(iENT_LogBuildFileName(fileName, sizeof(fileName),
+                             log->logPath, log->moduleName, dayStr) < 0)
+        return ENT_LOG_PATH_FAILED;
 
     if(log->logFp != NULL)
     {
@@ -109,18 +152,6 @@ static MSG_ID_T iENT_LogRollCheck(ENT_LOG logHandle, time_t nowTime)
     }
 
     {
-        char fileName[PATH_MAX];
-        memset(fileName, 0, sizeof(fileName));
-        if(log->logPath == NULL)
-        {
-            snprintf(fileName, sizeof(fileName) - 1, "%s_%s.log", log->moduleName, dayStr);
-        }
-        else
-        {
-            snprintf(fileName, sizeof(fileName) - 1, "%s%s%s_%s.log", log->logPath, ENT_FILE_SEP, log->moduleName, dayStr);
-        }
-        fileName[sizeof(fileName) - 1] = '\0';
-
         log->logFp = ENT_FOpen(fileName, "a");
         if(log->logFp == NULL)
         {
@@ -154,14 +185,11 @@ static MSG_ID_T iENT_LogRollCheck(ENT_LOG logHandle, time_t nowTime)
 #else
             localtime_r(&deleteTime, &nowTm);
 #endif
-            strftime(dayStr, 9, tmFormat, &nowTm);
-            memset(fileName, 0, sizeof(fileName));
-            if(log->logPath == NULL)
-                snprintf(fileName, sizeof(fileName) - 1, "%s_%s.log", log->moduleName, dayStr);
-            else
-                snprintf(fileName, sizeof(fileName) - 1, "%s%s%s_%s.log", log->logPath, ENT_FILE_SEP, log->moduleName, dayStr);
-
-            fileName[sizeof(fileName) - 1] = '\0';
+            if(strftime(dayStr, sizeof(dayStr), tmFormat, &nowTm) == 0)
+                return ENT_LOG_IO_FAILED;
+            if(iENT_LogBuildFileName(fileName, sizeof(fileName),
+                                     log->logPath, log->moduleName, dayStr) < 0)
+                return ENT_LOG_PATH_FAILED;
 #ifdef _WIN32
             DeleteFileA(fileName);
 #else
