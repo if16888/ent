@@ -92,6 +92,9 @@ MSG_ID_T ENT_LogSetOption(ENT_LOG logHandle, ENT_LOG_OPTIONS_E option, const voi
                 log->logPath = NULL;
             }
             log->logPath = newPath;
+            /* Reopen on the next write even if the calendar day is unchanged.
+             * iENT_LogRollCheck closes the old FILE under the I/O lock. */
+            log->nextCreate = 0;
             break;
         }
 
