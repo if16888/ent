@@ -696,13 +696,19 @@ MSG_ID_T ENT_DbMySQLInit(DB_HANDLE dbHandle)
         return ENT_DBS_BAD_HANDLE;
     }
 
+    /* Zero keeps the connector default; configured ports must be honored. */
+    if(dbCfg->portNo < 0 || dbCfg->portNo > 65535)
+    {
+        return ENT_DBS_BAD_ARGUMENT;
+    }
+
     db = mysql_init(NULL);
     if(db==NULL)
     {
         IENT_LOG_ERROR("mysql_init failed.\n");
         return ENT_DBS_OPEN_FAILED;
     }
-    if (mysql_options(db, MYSQL_SET_CHARSET_NAME, "utf8"))
+    if (mysql_options(db, MYSQL_SET_CHARSET_NAME, "utf8mb4"))
     {
         IENT_LOG_WARN("mysql_options failed,message:[%s]\n",mysql_error(db));
     }
@@ -718,7 +724,7 @@ MSG_ID_T ENT_DbMySQLInit(DB_HANDLE dbHandle)
                    dbCfg->host,
                    dbCfg->userName,
                    dbCfg->passwd,
-                   dbCfg->database, 0, NULL, CLIENT_REMEMBER_OPTIONS) == NULL)
+                   dbCfg->database, (unsigned int)dbCfg->portNo, NULL, CLIENT_REMEMBER_OPTIONS) == NULL)
     {
         IENT_LOG_ERROR("connect failed,message:[%s]\n",mysql_error(db));
         mysql_close(db);
