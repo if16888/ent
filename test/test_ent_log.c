@@ -3487,9 +3487,12 @@ static int test_calendar_midnight_handles_dst(void)
 static int test_log_file_name_rejects_truncation(void)
 {
     char buffer[64];
-    const char* expected = "audit/log_20261017.log";
-    size_t required = strlen(expected) + 1;
+    char expected[64];
+    size_t required;
     int failed = 0;
+
+    snprintf(expected, sizeof(expected), "audit%slog_20261017.log", ENT_FILE_SEP);
+    required = strlen(expected) + 1;
 
     failed += expect_true(ENT_LogTestBuildFileName(buffer, sizeof(buffer),
                          "audit", "log", "20261017") == ENT_SYS_NORMAL &&
