@@ -3421,6 +3421,103 @@ static int test_ctx_retryable_close_preserves_owner_slot(void)
     return failed;
 }
 
+
+#if defined(__linux__)
+extern time_t ENT_LogTestNextMidnight(time_t nowTime);
+
+static int test_calendar_midnight_handles_dst(void)
+{
+    char* previous = getenv("TZ");
+    char* saved = previous == NULL ? NULL : strdup(previous);
+    struct tm day;
+    struct tm nextTm;
+    time_t midday, midnight, next;
+    int failed = 0;
+    if(previous != NULL && saved == NULL) return 1;
+    if(setenv("TZ", "EST5EDT,M3.2.0/2,M11.1.0/2", 1) != 0)
+    {
+        free(saved);
+        return 1;
+    }
+    tzset();
+    memset(&day, 0, sizeof(day));
+    day.tm_year = 2025 - 1900;
+    day.tm_mon = 2;
+    day.tm_mday = 9;
+    day.tm_hour = 12;
+    day.tm_isdst = -1;
+    midday = mktime(&day);
+    day.tm_hour = 0;
+    day.tm_isdst = -1;
+    midnight = mktime(&day);
+    next = ENT_LogTestNextMidnight(midday);
+    localtime_r(&next, &nextTm);
+    failed += expect_true(nextTm.tm_mon == 2 && nextTm.tm_mday == 10 &&
+                          nextTm.tm_hour == 0 && next - midnight == 23 * 3600,
+                          "Spring DST rollover must use next local midnight (23h day)");
+    memset(&day, 0, sizeof(day));
+    day.tm_year = 2025 - 1900;
+    day.tm_mon = 10;
+    day.tm_mday = 2;
+    day.tm_hour = 12;
+    day.tm_isdst = -1;
+    midday = mktime(&day);
+    day.tm_hour = 0;
+    day.tm_isdst = -1;
+    midnight = mktime(&day);
+    next = ENT_LogTestNextMidnight(midday);
+    localtime_r(&next, &nextTm);
+    failed += expect_true(nextTm.tm_mon == 10 && nextTm.tm_mday == 3 &&
+                          nextTm.tm_hour == 0 && next - midnight == 25 * 3600,
+                          "Fall DST rollover must use next local midnight (25h day)");
+    if(saved != NULL)
+    {
+        setenv("TZ", saved, 1);
+        free(saved);
+    }
+    else unsetenv("TZ");
+    tzset();
+    return failed;
+}
+#endif
+
+static int test_log_path_change_after_open_switches_files(void)
+{
+    char first[256], second[256], firstFile[512], secondFile[512];
+    ENT_LOG handle = NULL;
+    int service = 0, failed = 0;
+    if(make_temp_dir(first, sizeof(first)) != 0) return 1;
+    if(make_temp_dir(second, sizeof(second)) != 0)
+    {
+        remove_dir_contents(first);
+        return 1;
+    }
+    format_log_file_path(firstFile, sizeof(firstFile), first, "PathSwitch");
+    format_log_file_path(secondFile, sizeof(secondFile), second, "PathSwitch");
+    if(ENT_LogInit() != ENT_SYS_NORMAL) { failed = 1; goto DONE; }
+    service = 1;
+    if(ENT_LogInitHandle(&handle, "PathSwitch", first) != ENT_SYS_NORMAL ||
+       ENT_LogPrint(handle, "before switch\n") != ENT_SYS_NORMAL ||
+       ENT_LogSetOption(handle, ENT_LOG_PATH_E, second) != ENT_SYS_NORMAL ||
+       ENT_LogPrint(handle, "after switch\n") != ENT_SYS_NORMAL)
+        failed = 1;
+DONE:
+    if(handle != NULL && ENT_LogCloseHandle(handle) != ENT_SYS_NORMAL) failed = 1;
+    if(service && ENT_LogClose() != ENT_SYS_NORMAL) failed = 1;
+    if(!failed)
+    {
+        failed += expect_true(file_contains(firstFile, "before switch") &&
+                              !file_contains(firstFile, "after switch"),
+                              "Before-switch log must remain in the original directory");
+        failed += expect_true(file_contains(secondFile, "after switch") &&
+                              !file_contains(secondFile, "before switch"),
+                              "Updated log directory must receive new records immediately");
+    }
+    remove_dir_contents(first);
+    remove_dir_contents(second);
+    return failed;
+}
+
 int main(void)
 {
     int failures = 0;
@@ -3450,6 +3547,10 @@ int main(void)
     failures += test_concurrent_buffer_enable_starts_one_worker();
     failures += test_log_level_updates_are_safe_during_writes();
     failures += test_log_path_option_trims_trailing_separator_and_writes_file();
+    failures += test_log_path_change_after_open_switches_files();
+#if defined(__linux__)
+    failures += test_calendar_midnight_handles_dst();
+#endif
     failures += test_log_level_filters_debug_messages();
     failures += test_log_close_handle_waits_for_active_writers();
     failures += test_buffered_log_close_flushes_queued_messages();
