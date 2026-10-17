@@ -481,7 +481,7 @@ ENT_LOG_HANDLE_STATE_E iENT_LogStateGet(const ENT_LOG_CTX_INTERNAL* log)
 #ifdef _WIN32
     return (ENT_LOG_HANDLE_STATE_E)InterlockedCompareExchange((volatile LONG*)&log->handleState, 0, 0);
 #else
-    return (ENT_LOG_HANDLE_STATE_E)__sync_val_compare_and_swap((volatile int*)&log->handleState, 0, 0);
+    return (ENT_LOG_HANDLE_STATE_E)__atomic_load_n(&log->handleState, __ATOMIC_ACQUIRE);
 #endif
 }
 
@@ -499,7 +499,7 @@ int iENT_LogActiveGet(const ENT_LOG_CTX_INTERNAL* log)
 #ifdef _WIN32
     return (int)InterlockedCompareExchange((volatile LONG*)&log->activeWriters, 0, 0);
 #else
-    return __sync_val_compare_and_swap((volatile int*)&log->activeWriters, 0, 0);
+    return __atomic_load_n(&log->activeWriters, __ATOMIC_ACQUIRE);
 #endif
 }
 
