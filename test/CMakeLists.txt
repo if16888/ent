@@ -834,3 +834,16 @@ if(TARGET ent_s)
   target_link_libraries(test_utl_malloc PRIVATE ent_s)
   add_test(NAME test_utl_malloc COMMAND test_utl_malloc)
 endif()
+
+if(ENT_ENABLE_PGSQL AND ENT_PGSQL_FOUND)
+  add_executable(test_ent_pgsql_rewrite
+    test_ent_pgsql_rewrite.c
+    test_runtime_stub.c
+    ../comm/ent_db_pgsql.c)
+  target_compile_definitions(test_ent_pgsql_rewrite PRIVATE ENT_DB_PGSQL_LEX_TEST_HOOKS=1)
+  target_include_directories(test_ent_pgsql_rewrite PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../comm)
+  ent_test_link_db_deps(test_ent_pgsql_rewrite)
+  add_test(NAME test_ent_pgsql_rewrite COMMAND test_ent_pgsql_rewrite)
+endif()
