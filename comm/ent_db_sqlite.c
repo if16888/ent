@@ -533,25 +533,38 @@ MSG_ID_T ENT_DbSqliteWriteParams(sqlite3* dbHandle,
 static MSG_ID_T iENT_DbSqliteReadCb(void *data, int argc, char **argv, char **azColName)
 {
     USER_SQLITE_READ* userCtx = (USER_SQLITE_READ*)data;
-    if(data == NULL || userCtx->userCb == NULL || userCtx->userData == NULL)
+    if(data == NULL)
     {
-        IENT_LOG_ERROR("Arguments are invalid.\n");
         return ENT_DBS_BAD_ARGUMENT;
     }
-    userCtx->userCb(azColName, argv, 1, argc, userCtx->userData);
+    if(userCtx->userCb != NULL)
+    {
+        userCtx->userCb(azColName, argv, 1, argc, userCtx->userData);
+    }
+    else
+    {
+        iENT_DbSqliteDefaultCb(azColName, argv, 1, argc, userCtx->userData);
+    }
     return ENT_SYS_NORMAL;
 }
 
 static MSG_ID_T iENT_DbSqliteWriteCb(void *data, int argc, char **argv, char **azColName)
 {
     USER_SQLITE_WRITE* userCtx = (USER_SQLITE_WRITE*)data;
-    if(data == NULL || userCtx->userCb == NULL)
+    if(data == NULL)
     {
-        IENT_LOG_ERROR("Arguments are invalid.\n");
         return ENT_DBS_BAD_ARGUMENT;
     }
 
-    userCtx->userCb(azColName, argv, 1, argc, userCtx->userData);
+    userCtx->rowCallbacks++;
+    if(userCtx->userCb != NULL)
+    {
+        userCtx->userCb(azColName, argv, 1, argc, userCtx->userData);
+    }
+    else
+    {
+        iENT_DbSqliteDefaultCb(azColName, argv, 1, argc, userCtx->userData);
+    }
     return ENT_SYS_NORMAL;
 }
 
@@ -594,6 +607,7 @@ MSG_ID_T ENT_DbSqliteWrite(sqlite3* dbHandle,const char* query,SqlResultCB userC
 
     sqliteUser.userCb = userCb;
     sqliteUser.userData = userData;
+    sqliteUser.rowCallbacks = 0;
 
     rc = sqlite3_exec(dbHandle, query, iENT_DbSqliteWriteCb, &sqliteUser, &errMsg);
     if(rc != SQLITE_OK)
@@ -601,6 +615,13 @@ MSG_ID_T ENT_DbSqliteWrite(sqlite3* dbHandle,const char* query,SqlResultCB userC
         IENT_LOG_ERROR("Can't exec sql [%s] :[%d]->[%s]\n", query, rc, errMsg);
         sqlite3_free(errMsg);
         sts = ENT_DBS_QUERY_FAILED;
+    }
+    else if(userCb != NULL && sqliteUser.rowCallbacks == 0)
+    {
+        /* sqlite3_exec does not invoke row callbacks for ordinary DML.
+         * Match the parameterized write API's completion contract.
+         * Do not double-notify queries with a RETURNING result set. */
+        userCb(NULL, NULL, (long long)sqlite3_changes(dbHandle), 0, userData);
     }
     return sts;
 }
