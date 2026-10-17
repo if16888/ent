@@ -74,6 +74,7 @@ static MSG_ID_T iENT_LogRollCheck(ENT_LOG logHandle, time_t nowTime)
     const static char* tmFormat = "%Y%m%d";
     char dayStr[9];
     struct tm nowTm;
+    time_t nextMidnight;
 
     if(log == NULL)
     {
@@ -91,8 +92,8 @@ static MSG_ID_T iENT_LogRollCheck(ENT_LOG logHandle, time_t nowTime)
     if(localtime_r(&nowTime, &nowTm) == NULL) return ENT_LOG_IO_FAILED;
 #endif
     strftime(dayStr, sizeof(dayStr), tmFormat, &nowTm);
-    log->nextCreate = iENT_LogNextMidnight(nowTime);
-    if(log->nextCreate == (time_t)-1 || log->nextCreate <= nowTime)
+    nextMidnight = iENT_LogNextMidnight(nowTime);
+    if(nextMidnight == (time_t)-1 || nextMidnight <= nowTime)
     {
         return ENT_LOG_IO_FAILED;
     }
@@ -129,6 +130,9 @@ static MSG_ID_T iENT_LogRollCheck(ENT_LOG logHandle, time_t nowTime)
         else
         {
             setvbuf(log->logFp, NULL, _IOFBF, 64 * 1024);
+            /* Only commit the boundary after the new file is open.
+             * Failure must remain retryable on the next write. */
+            log->nextCreate = nextMidnight;
         }
 
         if(log->maxNum > 0)
