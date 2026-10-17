@@ -153,6 +153,10 @@ static inline char* ENT_GetEnvDup(const char* name)
 #endif
 }
 
+#ifndef IENT_UTL_REALLOC
+#define IENT_UTL_REALLOC realloc
+#endif
+
 static inline void* UTL_Malloc(void* oldMem,size_t* num,int size,size_t reqNum)
 {
     char* newMem;
@@ -180,7 +184,7 @@ static inline void* UTL_Malloc(void* oldMem,size_t* num,int size,size_t reqNum)
     {
         return NULL;
     }
-    newMem = (char*)realloc(oldMem, newNum * elemSize);
+    newMem = (char*)IENT_UTL_REALLOC(oldMem, newNum * elemSize);
     if(newMem == NULL)
     {
         return NULL; /* realloc leaves the original allocation valid. */
