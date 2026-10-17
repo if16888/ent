@@ -902,6 +902,12 @@ static MSG_ID_T iENT_CTXInit(ENT_CTX* ctx,
 
     ctx->workPath = ENT_StrDup(workPath);
     ctx->entName  = ENT_StrDup(name);
+    if(ctx->workPath == NULL || ctx->entName == NULL)
+    {
+        iENT_CTXFree(ctx);
+        iENT_CTXResetRuntime(ctx);
+        return ENT_INIT_LOGPATH_ALLOCFAIL;
+    }
     ctx->logLevel = logLevel;
 
     size_t len     = strlen(workPath);
