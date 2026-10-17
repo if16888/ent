@@ -97,294 +97,249 @@ static size_t iENT_DbPgSQLCountDigits(size_t value)
     return digits;
 }
 
-static MSG_ID_T iENT_DbPgSQLRewriteQuery(const char* query, size_t paramCount, char** rewrittenQuery)
+/* Mark only SQL-code characters. This scan is shared by parameter counting
+ * and rewriting so the two passes cannot disagree about quoted/comment text.
+ * PostgreSQL permits nested block comments and tagged dollar strings. */
+static int iENT_DbPgSQLIdentChar(char ch)
 {
-    size_t i;
-    size_t questionCount = 0;
-    size_t dollarCount = 0;
-    bool inSingleQuote = false;
-    bool inDoubleQuote = false;
+    return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+           (ch >= '0' && ch <= '9') || ch == '_';
+}
 
-    if(rewrittenQuery == NULL)
+static int iENT_DbPgSQLCodeMask(const char* sql, size_t len, unsigned char* code)
+{
+    size_t i = 0;
+    while(i < len)
     {
-        IENT_LOG_ERROR("PgSQL query output argument is invalid.\n");
-        return ENT_DBS_BAD_ARGUMENT;
+        size_t j;
+        char ch = sql[i];
+        if(ch == '-' && i + 1 < len && sql[i + 1] == '-')
+        {
+            i += 2;
+            while(i < len && sql[i] != '\n') i++;
+            continue;
+        }
+        if(ch == '/' && i + 1 < len && sql[i + 1] == '*')
+        {
+            size_t depth = 1;
+            i += 2;
+            while(i < len && depth != 0)
+            {
+                if(i + 1 < len && sql[i] == '/' && sql[i + 1] == '*')
+                {
+                    if(depth == SIZE_MAX) return 0;
+                    depth++;
+                    i += 2;
+                }
+                else if(i + 1 < len && sql[i] == '*' && sql[i + 1] == '/')
+                {
+                    depth--;
+                    i += 2;
+                }
+                else i++;
+            }
+            if(depth != 0) return 0;
+            continue;
+        }
+        if(ch == '\'' || ch == '"')
+        {
+            char quote = ch;
+            /* E'...' treats backslash-escaped quotes as literal. Standard
+             * strings use only doubled quotes; identifiers use "". */
+            int escaped = (quote == '\'' && i > 0 &&
+                          (sql[i - 1] == 'E' || sql[i - 1] == 'e') &&
+                          (i == 1 || !iENT_DbPgSQLIdentChar(sql[i - 2])));
+            int closed = 0;
+            i++;
+            while(i < len)
+            {
+                if(escaped && sql[i] == '\\' && i + 1 < len)
+                {
+                    i += 2;
+                }
+                else if(sql[i] == quote)
+                {
+                    if(i + 1 < len && sql[i + 1] == quote) i += 2;
+                    else { i++; closed = 1; break; }
+                }
+                else i++;
+            }
+            if(!closed) return 0;
+            continue;
+        }
+        if(ch == '$' && (i == 0 || !iENT_DbPgSQLIdentChar(sql[i - 1])))
+        {
+            size_t delimEnd = i + 1;
+            size_t delimLen;
+            if(delimEnd < len && sql[delimEnd] != '$' &&
+               !((sql[delimEnd] >= 'a' && sql[delimEnd] <= 'z') ||
+                 (sql[delimEnd] >= 'A' && sql[delimEnd] <= 'Z') ||
+                 sql[delimEnd] == '_'))
+                delimEnd = len;
+            else
+            {
+                while(delimEnd < len && iENT_DbPgSQLIdentChar(sql[delimEnd]))
+                    delimEnd++;
+            }
+            if(delimEnd < len && sql[delimEnd] == '$')
+            {
+                int closed = 0;
+                delimLen = delimEnd - i + 1;
+                j = delimEnd + 1;
+                while(j + delimLen <= len)
+                {
+                    if(memcmp(sql + j, sql + i, delimLen) == 0)
+                    {
+                        i = j + delimLen;
+                        closed = 1;
+                        break;
+                    }
+                    j++;
+                }
+                if(!closed) return 0;
+                continue;
+            }
+        }
+        code[i] = 1;
+        i++;
     }
+    return 1;
+}
 
+static MSG_ID_T iENT_DbPgSQLRewriteQuery(const char* query, size_t paramCount,
+                                          char** rewrittenQuery)
+{
+    size_t len, i, questionCount = 0, dollarCount = 0, outLen, outIdx;
+    size_t paramIndex = 1;
+    unsigned char* code = NULL;
+    MSG_ID_T result = ENT_SYS_NORMAL;
+
+    if(rewrittenQuery == NULL) return ENT_DBS_BAD_ARGUMENT;
     *rewrittenQuery = NULL;
-
-    if(query == NULL)
+    if(query == NULL) return ENT_DBS_BAD_ARGUMENT;
+    if(paramCount > ENT_DB_MAX_PARAMS) return ENT_DBS_BAD_PARAMS;
+    len = strlen(query);
+    if(len == SIZE_MAX) return ENT_DBS_BAD_PARAMS;
+    code = (unsigned char*)calloc(len + 1, 1);
+    if(code == NULL) return ENT_DBS_ALLOC_FAILED;
+    if(!iENT_DbPgSQLCodeMask(query, len, code))
     {
-        IENT_LOG_ERROR("PgSQL query is null.\n");
-        return ENT_DBS_BAD_ARGUMENT;
+        result = ENT_DBS_BAD_PARAMS; /* Unterminated SQL lexical construct. */
+        goto END_OF_ROUTINE;
     }
 
-    for(i = 0; query[i] != '\0'; i++)
+    for(i = 0; i < len; i++)
     {
-        char ch = query[i];
-
-        if(inSingleQuote)
+        if(!code[i]) continue;
+        if(query[i] == '?')
         {
-            if(ch == '\'')
+            if(++questionCount > ENT_DB_MAX_PARAMS)
             {
-                if(query[i + 1] == '\'')
-                {
-                    i++;
-                }
-                else
-                {
-                    inSingleQuote = false;
-                }
+                result = ENT_DBS_BAD_PARAMS;
+                goto END_OF_ROUTINE;
             }
-            continue;
         }
-
-        if(inDoubleQuote)
-        {
-            if(ch == '"')
-            {
-                if(query[i + 1] == '"')
-                {
-                    i++;
-                }
-                else
-                {
-                    inDoubleQuote = false;
-                }
-            }
-            continue;
-        }
-
-        if(ch == '\'')
-        {
-            inSingleQuote = true;
-            continue;
-        }
-
-        if(ch == '"')
-        {
-            inDoubleQuote = true;
-            continue;
-        }
-
-        if(ch == '?')
-        {
-            questionCount++;
-            continue;
-        }
-
-        if(ch == '$' && query[i + 1] >= '0' && query[i + 1] <= '9')
+        if(query[i] == '$' && i + 1 < len &&
+           query[i + 1] >= '0' && query[i + 1] <= '9')
         {
             size_t index = 0;
             size_t j = i + 1;
-
-            while(query[j] >= '0' && query[j] <= '9')
+            while(j < len && query[j] >= '0' && query[j] <= '9')
             {
-                index = index * 10 + (size_t)(query[j] - '0');
+                size_t digit = (size_t)(query[j] - '0');
+                if(index > (ENT_DB_MAX_PARAMS - digit) / 10)
+                {
+                    result = ENT_DBS_BAD_PARAMS;
+                    goto END_OF_ROUTINE;
+                }
+                index = index * 10 + digit;
                 j++;
             }
-
-            if(index > dollarCount)
+            if(index == 0)
             {
-                dollarCount = index;
+                result = ENT_DBS_BAD_PARAMS;
+                goto END_OF_ROUTINE;
             }
+            if(index > dollarCount) dollarCount = index;
             i = j - 1;
         }
     }
-
     if(questionCount > 0 && dollarCount > 0)
     {
-        IENT_LOG_ERROR("PgSQL query mixes '?' and '$N' parameters.\n");
-        return ENT_DBS_BAD_PARAMS;
+        result = ENT_DBS_BAD_PARAMS;
+        goto END_OF_ROUTINE;
     }
-
-    if(questionCount > 0)
+    if(questionCount != 0)
     {
-        size_t outLen = 1;
-        size_t paramIndex = 1;
-
         if(questionCount != paramCount)
         {
-            IENT_LOG_ERROR("PgSQL parameter count mismatch: expected[%zu] got[%zu]\n",
-                           questionCount,
-                           paramCount);
-            return ENT_DBS_PARAM_COUNT;
+            result = ENT_DBS_PARAM_COUNT;
+            goto END_OF_ROUTINE;
         }
-
-        for(i = 0; query[i] != '\0'; i++)
+        outLen = len + 1;
+        for(i = 0; i < len; i++)
         {
-            char ch = query[i];
-
-            if(ch == '\'')
+            if(code[i] && query[i] == '?')
             {
-                outLen++;
-                i++;
-                while(query[i] != '\0')
+                size_t digits = iENT_DbPgSQLCountDigits(paramIndex++);
+                if(outLen > SIZE_MAX - digits)
                 {
-                    outLen++;
-                    if(query[i] == '\'')
-                    {
-                        if(query[i + 1] == '\'')
-                        {
-                            outLen++;
-                            i++;
-                        }
-                        else
-                        {
-                            break;
-                        }
-                    }
-                    i++;
+                    result = ENT_DBS_BAD_PARAMS;
+                    goto END_OF_ROUTINE;
                 }
-                continue;
+                outLen += digits;
             }
-
-            if(ch == '"')
-            {
-                outLen++;
-                i++;
-                while(query[i] != '\0')
-                {
-                    outLen++;
-                    if(query[i] == '"')
-                    {
-                        if(query[i + 1] == '"')
-                        {
-                            outLen++;
-                            i++;
-                        }
-                        else
-                        {
-                            break;
-                        }
-                    }
-                    i++;
-                }
-                continue;
-            }
-
-            if(ch == '?')
-            {
-                outLen += 1 + iENT_DbPgSQLCountDigits(paramIndex);
-                paramIndex++;
-                continue;
-            }
-
-            outLen++;
         }
-
         *rewrittenQuery = (char*)malloc(outLen);
         if(*rewrittenQuery == NULL)
         {
-            IENT_LOG_ERROR("PgSQL query rewrite allocation failed.\n");
-            return ENT_DBS_ALLOC_FAILED;
+            result = ENT_DBS_ALLOC_FAILED;
+            goto END_OF_ROUTINE;
         }
-
+        outIdx = 0;
+        paramIndex = 1;
+        for(i = 0; i < len; i++)
         {
-            size_t outIdx = 0;
-            paramIndex = 1;
-
-            for(i = 0; query[i] != '\0'; i++)
+            if(code[i] && query[i] == '?')
             {
-                char ch = query[i];
-
-                if(ch == '\'')
+                int n = snprintf(*rewrittenQuery + outIdx, outLen - outIdx,
+                                 "$%zu", paramIndex++);
+                if(n < 0 || (size_t)n >= outLen - outIdx)
                 {
-                    (*rewrittenQuery)[outIdx++] = ch;
-                    i++;
-                    while(query[i] != '\0')
-                    {
-                        (*rewrittenQuery)[outIdx++] = query[i];
-                        if(query[i] == '\'')
-                        {
-                            if(query[i + 1] == '\'')
-                            {
-                                (*rewrittenQuery)[outIdx++] = query[i + 1];
-                                i++;
-                            }
-                            else
-                            {
-                                break;
-                            }
-                        }
-                        i++;
-                    }
-                    continue;
+                    free(*rewrittenQuery);
+                    *rewrittenQuery = NULL;
+                    result = ENT_DBS_PREPARE_FAILED;
+                    goto END_OF_ROUTINE;
                 }
-
-                if(ch == '"')
-                {
-                    (*rewrittenQuery)[outIdx++] = ch;
-                    i++;
-                    while(query[i] != '\0')
-                    {
-                        (*rewrittenQuery)[outIdx++] = query[i];
-                        if(query[i] == '"')
-                        {
-                            if(query[i + 1] == '"')
-                            {
-                                (*rewrittenQuery)[outIdx++] = query[i + 1];
-                                i++;
-                            }
-                            else
-                            {
-                                break;
-                            }
-                        }
-                        i++;
-                    }
-                    continue;
-                }
-
-                if(ch == '?')
-                {
-                    int written = snprintf(*rewrittenQuery + outIdx,
-                                           outLen - outIdx,
-                                           "$%zu",
-                                           paramIndex++);
-                    if(written < 0 || (size_t)written >= outLen - outIdx)
-                    {
-                        free(*rewrittenQuery);
-                        *rewrittenQuery = NULL;
-                        IENT_LOG_ERROR("PgSQL query rewrite failed.\n");
-                        return ENT_DBS_PREPARE_FAILED;
-                    }
-                    outIdx += (size_t)written;
-                    continue;
-                }
-
-                (*rewrittenQuery)[outIdx++] = ch;
+                outIdx += (size_t)n;
             }
-
-            (*rewrittenQuery)[outIdx] = '\0';
+            else (*rewrittenQuery)[outIdx++] = query[i];
         }
-
-        return ENT_SYS_NORMAL;
+        (*rewrittenQuery)[outIdx] = '\0';
     }
-
-    if(dollarCount > 0 && dollarCount != paramCount)
+    else
     {
-        IENT_LOG_ERROR("PgSQL parameter count mismatch: expected[%zu] got[%zu]\n",
-                       dollarCount,
-                       paramCount);
-        return ENT_DBS_PARAM_COUNT;
+        if((dollarCount > 0 && dollarCount != paramCount) ||
+           (paramCount > 0 && dollarCount == 0))
+        {
+            result = ENT_DBS_PARAM_COUNT;
+            goto END_OF_ROUTINE;
+        }
+        *rewrittenQuery = ENT_StrDup(query);
+        if(*rewrittenQuery == NULL) result = ENT_DBS_ALLOC_FAILED;
     }
 
-    if(paramCount > 0 && dollarCount == 0)
-    {
-        IENT_LOG_ERROR("PgSQL query does not contain parameters.\n");
-        return ENT_DBS_PARAM_COUNT;
-    }
-
-    *rewrittenQuery = ENT_StrDup(query);
-    if(*rewrittenQuery == NULL)
-    {
-        IENT_LOG_ERROR("PgSQL query allocation failed.\n");
-        return ENT_DBS_ALLOC_FAILED;
-    }
-
-    return ENT_SYS_NORMAL;
+END_OF_ROUTINE:
+    free(code);
+    return result;
 }
+
+#ifdef ENT_DB_PGSQL_LEX_TEST_HOOKS
+MSG_ID_T ENT_DbPgSQLRewriteForTest(const char* query, size_t count, char** out)
+{
+    return iENT_DbPgSQLRewriteQuery(query, count, out);
+}
+#endif
 
 static MSG_ID_T iENT_DbPgSQLBindParam(const ENT_DB_PARAM* param,
                                       char** paramValue,
