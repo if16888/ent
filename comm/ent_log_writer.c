@@ -43,6 +43,31 @@ static const char* sLogLevelStr[] = {
     "DEBUG"
 };
 
+/* Local calendar arithmetic, not a fixed 86400-second interval. DST
+ * transitions can make one calendar day 23 or 25 hours. */
+static time_t iENT_LogNextMidnight(time_t nowTime)
+{
+    struct tm tomorrow;
+#ifdef _WIN32
+    if(localtime_s(&tomorrow, &nowTime) != 0) return (time_t)-1;
+#else
+    if(localtime_r(&nowTime, &tomorrow) == NULL) return (time_t)-1;
+#endif
+    tomorrow.tm_hour = 0;
+    tomorrow.tm_min = 0;
+    tomorrow.tm_sec = 0;
+    tomorrow.tm_mday++;
+    tomorrow.tm_isdst = -1;
+    return mktime(&tomorrow);
+}
+
+#ifdef ENT_LOG_TEST_HOOKS
+time_t ENT_LogTestNextMidnight(time_t nowTime)
+{
+    return iENT_LogNextMidnight(nowTime);
+}
+#endif
+
 static MSG_ID_T iENT_LogRollCheck(ENT_LOG logHandle, time_t nowTime)
 {
     ENT_LOG_CTX_INTERNAL* log = (ENT_LOG_CTX_INTERNAL*)logHandle;
@@ -58,28 +83,18 @@ static MSG_ID_T iENT_LogRollCheck(ENT_LOG logHandle, time_t nowTime)
     if(log->nextCreate > nowTime)
         return ENT_LOG_NON_FATAL;
 
-    if(log->logFp == NULL || log->nextCreate + 86400 < nowTime)
-    {
+    /* Recompute from the message's current local date on *every* rollover.
+     * Missing multiple days and the exact midnight boundary are equivalent. */
 #ifdef _WIN32
-        localtime_s(&nowTm, &nowTime);
+    if(localtime_s(&nowTm, &nowTime) != 0) return ENT_LOG_IO_FAILED;
 #else
-        localtime_r(&nowTime, &nowTm);
+    if(localtime_r(&nowTime, &nowTm) == NULL) return ENT_LOG_IO_FAILED;
 #endif
-        strftime(dayStr, 9, tmFormat, &nowTm);
-        nowTm.tm_hour = 0;
-        nowTm.tm_min = 0;
-        nowTm.tm_sec = 0;
-        log->nextCreate = mktime(&nowTm) + 86400;
-    }
-    else
+    strftime(dayStr, sizeof(dayStr), tmFormat, &nowTm);
+    log->nextCreate = iENT_LogNextMidnight(nowTime);
+    if(log->nextCreate == (time_t)-1 || log->nextCreate <= nowTime)
     {
-#ifdef _WIN32
-        localtime_s(&nowTm, &log->nextCreate);
-#else
-        localtime_r(&log->nextCreate, &nowTm);
-#endif
-        strftime(dayStr, 9, tmFormat, &nowTm);
-        log->nextCreate += 86400;
+        return ENT_LOG_IO_FAILED;
     }
 
     if(log->logFp != NULL)
@@ -119,7 +134,17 @@ static MSG_ID_T iENT_LogRollCheck(ENT_LOG logHandle, time_t nowTime)
         if(log->maxNum > 0)
         {
             time_t deleteTime;
-            deleteTime = log->nextCreate - (log->maxNum + 1) * 86400;
+            /* Retain by local calendar dates rather than fixed seconds. */
+            nowTm.tm_hour = 0;
+            nowTm.tm_min = 0;
+            nowTm.tm_sec = 0;
+            nowTm.tm_mday -= log->maxNum;
+            nowTm.tm_isdst = -1;
+            deleteTime = mktime(&nowTm);
+            if(deleteTime == (time_t)-1)
+            {
+                return ENT_SYS_NORMAL; /* Could not derive an old date. */
+            }
 #ifdef _WIN32
             localtime_s(&nowTm, &deleteTime);
 #else
@@ -585,7 +610,11 @@ static void* iENT_LogBufferThreadMain(void* data)
                     {
                         waitMs = 1;
                     }
+#ifdef __linux__
+                    clock_gettime(CLOCK_MONOTONIC, &ts);
+#else
                     clock_gettime(CLOCK_REALTIME, &ts);
+#endif
                     ts.tv_sec += waitMs / 1000;
                     ts.tv_nsec += (long)(waitMs % 1000) * 1000000L;
                     if(ts.tv_nsec >= 1000000000L)
