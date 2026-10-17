@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -60,10 +61,10 @@ static double now_ms(void)
     QueryPerformanceCounter(&counter);
     return (double)counter.QuadPart * 1000.0 / (double)frequency.QuadPart;
 #else
-    struct timeval tv;
+    struct timespec ts;
 
-    gettimeofday(&tv, NULL);
-    return (double)tv.tv_sec * 1000.0 + (double)tv.tv_usec / 1000.0;
+    if(clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return -1.0;
+    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
 #endif
 }
 
@@ -95,59 +96,107 @@ static MSG_ID_T perf_task_end_cb(void* data, MSG_ID_T* retVal)
     return 0;
 }
 
-int main(void)
+int main(int argc, char** argv)
 {
-    enum { TASKS = 1000, WORKERS = 4 };
+    enum { TASKS = 1000, WORKERS = 4, WAIT_LIMIT_MS = 10000 };
     UTL_TPOOL pool = NULL;
     PERF_TPOOL_PROBE probe;
     MSG_ID_T retVals[TASKS];
     double startMs = 0.0;
     double elapsedMs = 0.0;
+    int submitted = 0;
+    int submitFailed = 0;
+    int closed = 0;
+    int completed = 0;
+    int selfTest = argc == 2 && strcmp(argv[1], "--test-submit-failure") == 0;
 
+    if(argc > 2 || (argc == 2 && !selfTest)) return EXIT_FAILURE;
     memset(&probe, 0, sizeof(probe));
     memset(retVals, 0, sizeof(retVals));
 
-    if(UTL_LockInit(&probe.done_lock, "perf_tpool_done") != 0) return EXIT_FAILURE;
-    if(UTL_CVInit(&probe.done_cv, "perf_tpool_done") != 0)
+    if(UTL_LockInit(&probe.done_lock, "perf_tpool_done") != ENT_SYS_NORMAL)
+        return EXIT_FAILURE;
+    if(UTL_CVInit(&probe.done_cv, "perf_tpool_done") != ENT_SYS_NORMAL)
     {
         UTL_LockClose(&probe.done_lock);
         return EXIT_FAILURE;
     }
 
-    if(UTL_TPoolInit(&pool, WORKERS) != 0) return EXIT_FAILURE;
-
-    startMs = now_ms();
-    for(int i = 0; i < TASKS; ++i)
-    {
-        if(UTL_TPoolAddTask(pool, perf_task_cb, perf_task_end_cb, &probe, &retVals[i]) != 0)
-        {
-            return EXIT_FAILURE;
-        }
-    }
-
-    UTL_LockEnter(probe.done_lock);
-    while(probe.finished < TASKS)
-    {
-        UTL_CVWait(probe.done_cv, probe.done_lock, 50, RW_WRITE_E);
-    }
-    UTL_LockLeave(probe.done_lock);
-
-    elapsedMs = now_ms() - startMs;
-
-    if(UTL_TPoolClose(&pool) != 0)
+    if(UTL_TPoolInit(&pool, WORKERS) != ENT_SYS_NORMAL)
     {
         UTL_CVClose(&probe.done_cv);
         UTL_LockClose(&probe.done_lock);
         return EXIT_FAILURE;
     }
+
+    startMs = now_ms();
+    if(startMs < 0.0)
+    {
+        UTL_TPoolClose(&pool);
+        UTL_CVClose(&probe.done_cv);
+        UTL_LockClose(&probe.done_lock);
+        return EXIT_FAILURE;
+    }
+
+    for(int i = 0; i < TASKS; ++i)
+    {
+        /* Deliberately stop after the first accepted task to exercise
+         * cleanup when the producer cannot submit its remaining work. */
+        if(selfTest && i == 1)
+        {
+            submitFailed = 1;
+            break;
+        }
+        if(UTL_TPoolAddTask(pool, perf_task_cb, perf_task_end_cb,
+                            &probe, &retVals[i]) != ENT_SYS_NORMAL)
+        {
+            submitFailed = 1;
+            break;
+        }
+        submitted++;
+    }
+
+    /* The callback owns references to probe and retVals. Always drain the
+     * tasks actually accepted before destroying their storage. */
+    UTL_LockEnter(probe.done_lock);
+    while(probe.finished < submitted)
+    {
+        MSG_ID_T waitStatus;
+        if(now_ms() - startMs >= WAIT_LIMIT_MS)
+        {
+            fprintf(stderr, "perf_utl_tpool: completion timed out (%d/%d)\n",
+                    probe.finished, submitted);
+            fflush(stderr);
+            _Exit(EXIT_FAILURE); /* Do not free storage still owned by workers. */
+        }
+        waitStatus = UTL_CVWaitFor(probe.done_cv, probe.done_lock, 50, RW_WRITE_E);
+        if(waitStatus != ENT_SYS_NORMAL && waitStatus != ENT_UTHD_WAIT_TIMEOUT)
+        {
+            fprintf(stderr, "perf_utl_tpool: completion wait failed (%d)\n", waitStatus);
+            fflush(stderr);
+            _Exit(EXIT_FAILURE);
+        }
+    }
+    completed = probe.finished;
+    UTL_LockLeave(probe.done_lock);
+
+    elapsedMs = now_ms() - startMs;
+    closed = UTL_TPoolClose(&pool) == ENT_SYS_NORMAL;
     UTL_CVClose(&probe.done_cv);
     UTL_LockClose(&probe.done_lock);
 
-    printf("tpool workers=%d tasks=%d elapsed_ms=%.3f tasks_per_sec=%.3f\n",
-           WORKERS,
-           TASKS,
-           elapsedMs,
-           TASKS / (elapsedMs / 1000.0));
+    if(selfTest)
+    {
+        /* The injected failure is expected, but all prior work must finish
+         * and the worker pool must close successfully. */
+        return submitFailed && submitted == 1 && completed == 1 && closed
+            ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+    if(submitFailed || !closed || completed != TASKS || elapsedMs < 0.0)
+        return EXIT_FAILURE;
 
+    printf("tpool workers=%d tasks=%d elapsed_ms=%.3f tasks_per_sec=%.3f\n",
+           WORKERS, TASKS, elapsedMs,
+           elapsedMs > 0.0 ? TASKS / (elapsedMs / 1000.0) : 0.0);
     return EXIT_SUCCESS;
 }
