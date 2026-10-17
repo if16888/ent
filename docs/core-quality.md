@@ -26,9 +26,11 @@ behavior or every possible concurrent interleaving.
   uses its own registry protection; that guarantee must not be generalized to
   every handle type.
 - Async logs default to an 8 MiB budget; `ENT_LOG_QUEUE_FULL` rejects overload.
-  Thread pools reject a full pending queue with `ENT_TPL_QUEUE_FULL`. Thread
-  pool close discards pending work; callers requiring completion for every
-  submission must drain before close.
+  Thread pools reject a full pending queue with `ENT_TPL_QUEUE_FULL`.
+  Normal pool close drains accepted work and joins its workers; when all
+  workers fail, remaining queued jobs are completed with a failure status
+  through their completion callbacks during cleanup. Close can block if
+  application tasks do not return.
 - Linux microsecond timers coalesce expired periodic callbacks. This prevents
   unbounded catch-up work; it does not guarantee execution deadlines. Jitter
   thresholds belong to a measured machine/load profile.
