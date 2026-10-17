@@ -139,68 +139,12 @@ static int run_single_thread_benchmark(ENT_LOG log_handle, int iterations)
     return EXIT_SUCCESS;
 }
 
+static int run_multi_thread_benchmark_named(ENT_LOG log_handle, int workers,
+                                            int iterations_per_worker, const char* label);
+
 static int run_multi_thread_benchmark(ENT_LOG log_handle, int workers, int iterations_per_worker)
 {
-    PERF_LOG_WORKER* worker_ctx = NULL;
-    double start_ms = 0.0;
-    double elapsed_ms = 0.0;
-    int total_lines = workers * iterations_per_worker;
-    int failures = 0;
-
-    worker_ctx = (PERF_LOG_WORKER*)calloc((size_t)workers, sizeof(PERF_LOG_WORKER));
-    if(worker_ctx == NULL)
-    {
-        return EXIT_FAILURE;
-    }
-
-    start_ms = now_ms();
-    for(int i = 0; i < workers; ++i)
-    {
-        worker_ctx[i].log_handle = log_handle;
-        worker_ctx[i].iterations = iterations_per_worker;
-        worker_ctx[i].worker_id = i;
-
-#ifdef _WIN32
-        {
-            worker_ctx[i].thread = CreateThread(NULL, 0, perf_log_worker_main, &worker_ctx[i], 0, NULL);
-            if(worker_ctx[i].thread == NULL)
-            {
-                free(worker_ctx);
-                return EXIT_FAILURE;
-            }
-        }
-#else
-        {
-            if(pthread_create(&worker_ctx[i].thread, NULL, perf_log_worker_main, &worker_ctx[i]) != 0)
-            {
-                free(worker_ctx);
-                return EXIT_FAILURE;
-            }
-        }
-#endif
-    }
-
-    for(int i = 0; i < workers; ++i)
-    {
-#ifdef _WIN32
-        WaitForSingleObject(worker_ctx[i].thread, INFINITE);
-        CloseHandle(worker_ctx[i].thread);
-#else
-        pthread_join(worker_ctx[i].thread, NULL);
-#endif
-        failures += worker_ctx[i].failures;
-    }
-
-    elapsed_ms = now_ms() - start_ms;
-    printf("log_multi workers=%d lines=%d elapsed_ms=%.3f lines_per_sec=%.3f failures=%d\n",
-           workers,
-           total_lines,
-           elapsed_ms,
-           total_lines / (elapsed_ms / 1000.0),
-           failures);
-
-    free(worker_ctx);
-    return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    return run_multi_thread_benchmark_named(log_handle, workers, iterations_per_worker, "log");
 }
 
 static int run_single_thread_benchmark_named(ENT_LOG log_handle, int iterations, const char* label)
@@ -225,6 +169,9 @@ static int run_single_thread_benchmark_named(ENT_LOG log_handle, int iterations,
     return EXIT_SUCCESS;
 }
 
+/* Benchmark-only failure injection to test partial worker creation cleanup. */
+static int sFailThreadCreateAt = -1;
+
 static int run_multi_thread_benchmark_named(ENT_LOG log_handle,
                                             int workers,
                                             int iterations_per_worker,
@@ -234,13 +181,12 @@ static int run_multi_thread_benchmark_named(ENT_LOG log_handle,
     double start_ms = 0.0;
     double elapsed_ms = 0.0;
     int total_lines = workers * iterations_per_worker;
+    int started = 0;
     int failures = 0;
+    int launch_failed = 0;
 
     worker_ctx = (PERF_LOG_WORKER*)calloc((size_t)workers, sizeof(PERF_LOG_WORKER));
-    if(worker_ctx == NULL)
-    {
-        return EXIT_FAILURE;
-    }
+    if(worker_ctx == NULL) return EXIT_FAILURE;
 
     start_ms = now_ms();
     for(int i = 0; i < workers; ++i)
@@ -248,48 +194,61 @@ static int run_multi_thread_benchmark_named(ENT_LOG log_handle,
         worker_ctx[i].log_handle = log_handle;
         worker_ctx[i].iterations = iterations_per_worker;
         worker_ctx[i].worker_id = i;
-
+        if(i == sFailThreadCreateAt)
+        {
+            launch_failed = 1;
+            break;
+        }
 #ifdef _WIN32
         worker_ctx[i].thread = CreateThread(NULL, 0, perf_log_worker_main, &worker_ctx[i], 0, NULL);
         if(worker_ctx[i].thread == NULL)
-        {
-            free(worker_ctx);
-            return EXIT_FAILURE;
-        }
 #else
         if(pthread_create(&worker_ctx[i].thread, NULL, perf_log_worker_main, &worker_ctx[i]) != 0)
-        {
-            free(worker_ctx);
-            return EXIT_FAILURE;
-        }
 #endif
+        {
+            launch_failed = 1;
+            break;
+        }
+        started++;
     }
 
-    for(int i = 0; i < workers; ++i)
+    /* Even if worker N failed, previously started workers still use worker_ctx.
+     * Join all those workers before freeing the array or closing the log. */
+    for(int i = 0; i < started; ++i)
     {
 #ifdef _WIN32
-        WaitForSingleObject(worker_ctx[i].thread, INFINITE);
+        if(WaitForSingleObject(worker_ctx[i].thread, INFINITE) != WAIT_OBJECT_0)
+        {
+            fprintf(stderr, "perf_ent_log: failed to join a started worker\n");
+            exit(EXIT_FAILURE); /* Do not release live worker context. */
+        }
         CloseHandle(worker_ctx[i].thread);
 #else
-        pthread_join(worker_ctx[i].thread, NULL);
+        if(pthread_join(worker_ctx[i].thread, NULL) != 0)
+        {
+            fprintf(stderr, "perf_ent_log: failed to join a started worker\n");
+            exit(EXIT_FAILURE); /* Do not release live worker context. */
+        }
 #endif
         failures += worker_ctx[i].failures;
     }
 
     elapsed_ms = now_ms() - start_ms;
+    if(launch_failed)
+    {
+        fprintf(stderr, "perf_ent_log: thread launch incomplete (%d/%d joined)\n", started, workers);
+        free(worker_ctx);
+        return EXIT_FAILURE;
+    }
     printf("%s_multi workers=%d lines=%d elapsed_ms=%.3f lines_per_sec=%.3f failures=%d\n",
-           label,
-           workers,
-           total_lines,
-           elapsed_ms,
-           total_lines / (elapsed_ms / 1000.0),
+           label, workers, total_lines, elapsed_ms,
+           elapsed_ms > 0.0 ? total_lines / (elapsed_ms / 1000.0) : 0.0,
            failures);
-
     free(worker_ctx);
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-int main(void)
+int main(int argc, char** argv)
 {
     enum { SINGLE_LINES = 5000, MULTI_WORKERS = 4, MULTI_LINES_PER_WORKER = 2000 };
     char log_dir[512];
@@ -334,6 +293,20 @@ int main(void)
         ENT_LogCloseHandle(log_handle);
         ENT_LogClose();
         return EXIT_FAILURE;
+    }
+
+    if(argc == 2 && strcmp(argv[1], "--test-partial-start") == 0)
+    {
+        int rejected;
+        int recovered;
+        int closed;
+        sFailThreadCreateAt = 1;
+        rejected = run_multi_thread_benchmark_named(log_handle, 3, 64, "partial_start") == EXIT_FAILURE;
+        sFailThreadCreateAt = -1;
+        recovered = run_multi_thread_benchmark_named(log_handle, 3, 64, "recovery") == EXIT_SUCCESS;
+        closed = ENT_LogCloseHandle(log_handle) == 0;
+        return rejected && recovered && closed && ENT_LogClose() == 0
+            ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
     if(run_single_thread_benchmark(log_handle, SINGLE_LINES) != EXIT_SUCCESS)
