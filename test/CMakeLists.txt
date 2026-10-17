@@ -834,3 +834,14 @@ if(TARGET ent_s)
   target_link_libraries(test_utl_malloc PRIVATE ent_s)
   add_test(NAME test_utl_malloc COMMAND test_utl_malloc)
 endif()
+
+# Regression for the legacy sqlite3_exec write callback contract.
+if(ENT_ENABLE_SQLITE AND ENT_SQLITE_FOUND)
+  add_executable(test_sqlite_write_callback test_sqlite_write_callback.c)
+  target_include_directories(test_sqlite_write_callback PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../comm)
+  ent_test_link_db_deps(test_sqlite_write_callback)
+  target_link_libraries(test_sqlite_write_callback PRIVATE ent_s)
+  add_test(NAME test_sqlite_write_callback COMMAND test_sqlite_write_callback)
+endif()
