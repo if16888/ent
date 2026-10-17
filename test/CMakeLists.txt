@@ -767,6 +767,10 @@ if(WIN32)
   target_link_libraries(perf_utl_tpool PRIVATE Winmm)
 endif()
 
+# Verify that an interrupted benchmark producer drains accepted tasks and closes
+add_test(NAME test_perf_utl_tpool_submit_failure COMMAND perf_utl_tpool --test-submit-failure)
+set_tests_properties(test_perf_utl_tpool_submit_failure PROPERTIES TIMEOUT 20)
+
 add_executable(
   perf_ent_log
   perf_ent_log.c
