@@ -18,6 +18,7 @@ static void* run_worker(void* data)
 
 #ifdef __linux__
 #include <sched.h>
+#include <errno.h>
 #include "ient_runtime.h"
 
 typedef struct RT_TEST_GATE
@@ -69,6 +70,35 @@ static void* rt_setter(void* data)
         }
     }
     return NULL;
+}
+
+/* Failed CPU validation must not alter calling-thread native affinity.
+ * RT attributes refer to pthread_self(), not an arbitrary runtime worker. */
+static int test_invalid_cpu_preserves_native_affinity(void)
+{
+    ENT_HANDLE handle = NULL;
+    cpu_set_t before, after;
+    MSG_ID_T status;
+    int failed = 0;
+    if(pthread_getaffinity_np(pthread_self(), sizeof(before), &before) != 0)
+        return 1;
+    if(ENT_Init(&handle, "rt_invalid_cpu", ".", LOG_LEV_ERROR_E,
+                ENT_MODE_REALTIME_E) != ENT_SYS_NORMAL)
+        return 1;
+
+    status = ENT_SetRtAttributes(handle, CPU_SETSIZE, ENT_RT_POLICY_OTHER_E, 0);
+    if(status != ENT_RT_BAD_CPU)
+        failed = 1;
+    if(pthread_getaffinity_np(pthread_self(), sizeof(after), &after) != 0 ||
+       !CPU_EQUAL(&before, &after))
+        failed = 1;
+    if(((ENT_HANDLE_CTX_T*)handle)->ctx.rtLastError != EINVAL)
+        failed = 1;
+    if(ENT_Close(&handle) != ENT_SYS_NORMAL || handle != NULL)
+        failed = 1;
+    if(failed)
+        fprintf(stderr, "invalid CPU must leave native affinity unchanged and save EINVAL\\n");
+    return failed;
 }
 
 static int test_concurrent_rt_setters(void)
@@ -198,7 +228,7 @@ int main(void)
         return 1;
     }
 #ifdef __linux__
-    return test_concurrent_rt_setters();
+    return test_invalid_cpu_preserves_native_affinity() | test_concurrent_rt_setters();
 #else
     return 0;
 #endif
