@@ -1,3 +1,6 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include "ent_init.h"
 #include <stdio.h>
 
