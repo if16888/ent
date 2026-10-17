@@ -112,3 +112,15 @@ failure, and checks service ownership is fully released only after completion.
 
 For the reusable owner procedure and its module-specific limits, see
 [close ownership](architecture/handle-lifecycle.md#可复用的关闭所有权模式).
+
+## Calendar and path semantics
+
+POSIX Linux buffered flush waits use a monotonic-clock condition variable,
+rather than a realtime-clock absolute deadline. Log filenames and rotation
+are based on local calendar dates; DST transitions are not assumed to be
+exactly 86,400 seconds. Updating `ENT_LOG_PATH_E` commits a new directory
+for **subsequent** writes: the next write rolls the previously open file
+and opens the current day's file under the new directory. Pending buffered
+records may still be processed according to the asynchronous queue's normal
+ordering. File open/close failures are returned through existing logging
+status codes; no new public API or ABI is introduced.
