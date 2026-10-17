@@ -34,6 +34,24 @@
 #include "ient_log.h"
 #include "ient_comm.h"
 
+#ifndef _WIN32
+static int iENT_LogBufferConditionInit(pthread_cond_t* cv)
+{
+#ifdef __linux__
+    pthread_condattr_t attr;
+    int status = pthread_condattr_init(&attr);
+    if(status != 0) return status;
+    status = pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+    if(status == 0) status = pthread_cond_init(cv, &attr);
+    pthread_condattr_destroy(&attr);
+    return status;
+#else
+    /* Match the CLOCK_REALTIME wait on systems without Linux cond clocks. */
+    return pthread_cond_init(cv, NULL);
+#endif
+}
+#endif
+
 #define DEF_MAX_NUM_LOG 15
 
 #ifdef _WIN32
@@ -414,7 +432,7 @@ static MSG_ID_T iENT_LogInitCtx(ENT_LOG_CTX_INTERNAL* log,
         log->logPath = NULL;
         return ENT_LOG_ALLOC_FAILED;
     }
-    if(pthread_cond_init(&log->bufferCv, NULL) != 0)
+    if(iENT_LogBufferConditionInit(&log->bufferCv) != 0)
     {
         pthread_cond_destroy(&log->closeCv);
         pthread_mutex_destroy(&log->ioCs);
