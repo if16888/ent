@@ -824,3 +824,13 @@ if(TARGET ent_s AND ENT_ENABLE_MYSQL AND ENT_MYSQL_FOUND)
   ent_test_link_db_deps(test_ent_db_mysql_results)
   add_test(NAME test_ent_db_mysql_results COMMAND test_ent_db_mysql_results)
 endif()
+
+# Private allocation helper contract: deterministic failure/overflow coverage.
+if(TARGET ent_s)
+  add_executable(test_utl_malloc test_utl_malloc.c)
+  target_include_directories(test_utl_malloc PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../comm)
+  target_link_libraries(test_utl_malloc PRIVATE ent_s)
+  add_test(NAME test_utl_malloc COMMAND test_utl_malloc)
+endif()
