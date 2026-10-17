@@ -596,6 +596,7 @@ MSG_ID_T ENT_DbSqliteWrite(sqlite3* dbHandle,const char* query,SqlResultCB userC
 {
     MSG_ID_T sts = ENT_SYS_NORMAL;
     int rc;
+    int totalBefore;
     char* errMsg = NULL;
     USER_SQLITE_WRITE sqliteUser;
 
@@ -609,6 +610,7 @@ MSG_ID_T ENT_DbSqliteWrite(sqlite3* dbHandle,const char* query,SqlResultCB userC
     sqliteUser.userData = userData;
     sqliteUser.rowCallbacks = 0;
 
+    totalBefore = sqlite3_total_changes(dbHandle);
     rc = sqlite3_exec(dbHandle, query, iENT_DbSqliteWriteCb, &sqliteUser, &errMsg);
     if(rc != SQLITE_OK)
     {
@@ -621,7 +623,11 @@ MSG_ID_T ENT_DbSqliteWrite(sqlite3* dbHandle,const char* query,SqlResultCB userC
         /* sqlite3_exec does not invoke row callbacks for ordinary DML.
          * Match the parameterized write API's completion contract.
          * Do not double-notify queries with a RETURNING result set. */
-        userCb(NULL, NULL, (long long)sqlite3_changes(dbHandle), 0, userData);
+        /* DDL does not change sqlite3_changes(): avoid reporting the row
+         * count left over from a previous unrelated DML statement. */
+        long long affected = (sqlite3_total_changes(dbHandle) == totalBefore)
+                           ? 0 : (long long)sqlite3_changes(dbHandle);
+        userCb(NULL, NULL, affected, 0, userData);
     }
     return sts;
 }
