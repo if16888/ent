@@ -377,6 +377,8 @@ void iENT_LogIoUnlock(ENT_LOG_CTX_INTERNAL* log)
 #endif
 }
 
+/* Same acquire-only read contract as iENT_LogStateGet (see ent_log_core.c):
+ * TSO targets are safe; review the pairing before a weakly ordered ISA. */
 int iENT_LogFastFlagGet(
 #ifdef _WIN32
     const volatile LONG* flag

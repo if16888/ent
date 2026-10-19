@@ -476,6 +476,13 @@ static MSG_ID_T iENT_LogInitCtx(ENT_LOG_CTX_INTERNAL* log,
     return ENT_SYS_NORMAL;
 }
 
+/* Fast-path state readers must stay lock-free, so they use acquire-only
+ * loads. The pairing contract: writes to handleState / activeWriters come
+ * from InterlockedExchange / __sync builtins, and every consequential state
+ * decision (close waits, teardown) re-checks under the global log mutex,
+ * which supplies the missing release ordering. TSO targets (x86, Windows)
+ * are safe by construction; revisit these pairings before enabling a
+ * weakly ordered ISA such as ARM. */
 ENT_LOG_HANDLE_STATE_E iENT_LogStateGet(const ENT_LOG_CTX_INTERNAL* log)
 {
 #ifdef _WIN32
