@@ -162,10 +162,13 @@ int main(int argc, char** argv)
     while(probe.finished < submitted)
     {
         MSG_ID_T waitStatus;
-        if(now_ms() - startMs >= WAIT_LIMIT_MS)
+        double nowMs = now_ms();
+        /* A failed clock read must not silently extend the drain deadline. */
+        if(nowMs < 0.0 || nowMs - startMs >= WAIT_LIMIT_MS)
         {
-            fprintf(stderr, "perf_utl_tpool: completion timed out (%d/%d)\n",
-                    probe.finished, submitted);
+            fprintf(stderr, "perf_utl_tpool: completion timed out (%d/%d)%s\n",
+                    probe.finished, submitted,
+                    nowMs < 0.0 ? " (clock read failed)" : "");
             fflush(stderr);
             _Exit(EXIT_FAILURE); /* Do not free storage still owned by workers. */
         }

@@ -172,6 +172,11 @@ static int run_single_thread_benchmark_named(ENT_LOG log_handle, int iterations,
 /* Benchmark-only failure injection to test partial worker creation cleanup. */
 static int sFailThreadCreateAt = -1;
 
+/* Counts workers that were actually joined. A partial launch must still join
+ * every started worker, so a self-test can detect a release-before-join bug
+ * that still reports the expected failure status. */
+static int sJoinedWorkers = 0;
+
 static int run_multi_thread_benchmark_named(ENT_LOG log_handle,
                                             int workers,
                                             int iterations_per_worker,
@@ -231,6 +236,7 @@ static int run_multi_thread_benchmark_named(ENT_LOG log_handle,
         }
 #endif
         failures += worker_ctx[i].failures;
+        sJoinedWorkers++;
     }
 
     elapsed_ms = now_ms() - start_ms;
@@ -300,12 +306,19 @@ int main(int argc, char** argv)
         int rejected;
         int recovered;
         int closed;
+        int joined;
         sFailThreadCreateAt = 1;
+        sJoinedWorkers = 0;
         rejected = run_multi_thread_benchmark_named(log_handle, 3, 64, "partial_start") == EXIT_FAILURE;
+        joined = sJoinedWorkers;
         sFailThreadCreateAt = -1;
+        sJoinedWorkers = 0;
         recovered = run_multi_thread_benchmark_named(log_handle, 3, 64, "recovery") == EXIT_SUCCESS;
         closed = ENT_LogCloseHandle(log_handle) == 0;
-        return rejected && recovered && closed && ENT_LogClose() == 0
+        /* Reporting the launch failure is not enough: the worker that was
+         * already started must have been joined before its context was
+         * released, otherwise the self-test stays blind to the UAF. */
+        return rejected && joined == 1 && recovered && closed && ENT_LogClose() == 0
             ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
