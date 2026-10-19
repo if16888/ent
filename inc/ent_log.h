@@ -115,6 +115,14 @@ ENT_PUBLIC MSG_ID_T  ENT_LogCtxGetBufferStats(ENT_LOG_CTX ctx,ENT_LOG logHandle,
 
 ENT_PUBLIC MSG_ID_T  ENT_LogCloseHandle(ENT_LOG logHandle);
 
+/*
+ * Write APIs (ENT_LogRaw and the level-based variants below) report I/O
+ * failures through the return value. A failed daily rollover does not drop
+ * the record: the message is still written to the current stream (the
+ * previous file, or stderr when no file is open) and the failure is
+ * reported, matching the buffered path. Callers must not treat a negative
+ * result as "nothing was written" and resend the same record.
+ */
 ENT_PUBLIC MSG_ID_T  ENT_LogRaw(ENT_LOG logHandle,const char* format,...);
 
 ENT_PUBLIC MSG_ID_T  ENT_LogFatal(ENT_LOG logHandle,const char* format,...);

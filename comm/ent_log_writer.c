@@ -121,6 +121,18 @@ static MSG_ID_T iENT_LogRollCheck(ENT_LOG logHandle, time_t nowTime)
     if(log->nextCreate > nowTime)
         return ENT_LOG_NON_FATAL;
 
+#ifdef ENT_LOG_TEST_HOOKS
+    {
+        extern bool iENT_LogTestFailRollCheck(void);
+        if(iENT_LogTestFailRollCheck())
+        {
+            /* Keep the current stream open: the caller must still receive the
+             * message through the fallback write path. */
+            return ENT_LOG_PATH_FAILED;
+        }
+    }
+#endif
+
     /* Recompute from the message's current local date on *every* rollover.
      * Missing multiple days and the exact midnight boundary are equivalent. */
 #ifdef _WIN32
@@ -1115,20 +1127,33 @@ MSG_ID_T iENT_LogVRaw(ENT_LOG_CTX_INTERNAL* log, const char* format, va_list va_
     iENT_LogIoLock(log);
 
     time_t nowTime = time(NULL);
-    sts = iENT_LogRollCheck(log, nowTime);
-    if(sts < 0)
     {
-        goto END_OF_ROUTINE;
+        /* A failed rollover must not drop the message: keep writing to the
+         * current stream and report the failure, matching the buffered path. */
+        MSG_ID_T rollSts = iENT_LogRollCheck(log, nowTime);
+        if(rollSts < 0)
+        {
+            sts = rollSts;
+        }
     }
 
     FILE* fp = log->logFp == NULL ? stderr : log->logFp;
 
     if(fwrite(msgBuf, 1, msgLen, fp) != msgLen)
     {
-        sts = ENT_LOG_IO_FAILED;
+        if(sts >= 0)
+        {
+            sts = ENT_LOG_IO_FAILED;
+        }
         goto END_OF_ROUTINE;
     }
-    sts = iENT_LogFlushMaybe(log, fp, fp == stderr);
+    {
+        MSG_ID_T flushSts = iENT_LogFlushMaybe(log, fp, fp == stderr);
+        if(flushSts < 0 && sts >= 0)
+        {
+            sts = flushSts;
+        }
+    }
     if(sts < 0)
     {
         goto END_OF_ROUTINE;
@@ -1234,19 +1259,32 @@ MSG_ID_T iENT_LogVPrint(ENT_LOG_CTX_INTERNAL* log, ENT_LOG_LEV_E logLevel, const
 
     iENT_LogIoLock(log);
 
-    sts = iENT_LogRollCheck(log, rollTime);
-    if(sts < 0)
     {
-        goto END_OF_ROUTINE;
+        /* Same fallback contract as iENT_LogVRaw: a failed rollover is
+         * reported, but the record still reaches the current stream. */
+        MSG_ID_T rollSts = iENT_LogRollCheck(log, rollTime);
+        if(rollSts < 0)
+        {
+            sts = rollSts;
+        }
     }
     FILE* fp = log->logFp == NULL ? stderr : log->logFp;
 
     if(fwrite(lineBuf, 1, lineLen, fp) != lineLen)
     {
-        sts = ENT_LOG_IO_FAILED;
+        if(sts >= 0)
+        {
+            sts = ENT_LOG_IO_FAILED;
+        }
         goto END_OF_ROUTINE;
     }
-    sts = iENT_LogFlushMaybe(log, fp, fp == stderr || logLevel <= LOG_LEV_ERROR_E);
+    {
+        MSG_ID_T flushSts = iENT_LogFlushMaybe(log, fp, fp == stderr || logLevel <= LOG_LEV_ERROR_E);
+        if(flushSts < 0 && sts >= 0)
+        {
+            sts = flushSts;
+        }
+    }
     if(sts < 0)
     {
         goto END_OF_ROUTINE;

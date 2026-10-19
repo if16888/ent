@@ -3291,6 +3291,14 @@ bool iENT_LogTestFailBufferStop(void)
     return fail;
 }
 
+/* Keeps the rollover failing while the flag is set, so the caller can check
+ * the fallback write path for every record it sends. */
+static bool sFailRollCheck;
+bool iENT_LogTestFailRollCheck(void)
+{
+    return sFailRollCheck;
+}
+
 void iENT_LogTestCtxInitReserved(void)
 {
 #ifndef _WIN32
@@ -3518,6 +3526,68 @@ static int test_log_file_name_rejects_truncation(void)
     return failed;
 }
 
+/* A failed daily rollover must be reported without dropping the record:
+ * the message still reaches the current stream, exactly like the buffered
+ * path does. */
+static int test_rollover_failure_keeps_record_in_current_stream(void)
+{
+    char first[256], second[256], firstFile[512], secondFile[512];
+    ENT_LOG handle = NULL;
+    int service = 0, failed = 0;
+    MSG_ID_T printSts = ENT_SYS_NORMAL;
+    MSG_ID_T rawSts = ENT_SYS_NORMAL;
+
+    if(make_temp_dir(first, sizeof(first)) != 0) return 1;
+    if(make_temp_dir(second, sizeof(second)) != 0)
+    {
+        remove_dir_contents(first);
+        return 1;
+    }
+    format_log_file_path(firstFile, sizeof(firstFile), first, "RollFail");
+    format_log_file_path(secondFile, sizeof(secondFile), second, "RollFail");
+    if(ENT_LogInit() != ENT_SYS_NORMAL) { failed = 1; goto DONE; }
+    service = 1;
+    if(ENT_LogInitHandle(&handle, "RollFail", first) != ENT_SYS_NORMAL ||
+       ENT_LogWarn(handle, "before rollover failure\n") != ENT_SYS_NORMAL)
+    {
+        failed = 1;
+        goto DONE;
+    }
+
+    /* Force a rollover attempt, then make every rollover fail. */
+    sFailRollCheck = true;
+    if(ENT_LogSetOption(handle, ENT_LOG_PATH_E, second) != ENT_SYS_NORMAL)
+    {
+        sFailRollCheck = false;
+        failed = 1;
+        goto DONE;
+    }
+    printSts = ENT_LogWarn(handle, "print during rollover failure\n");
+    rawSts = ENT_LogRaw(handle, "raw during rollover failure\n");
+    sFailRollCheck = false;
+
+DONE:
+    sFailRollCheck = false;
+    if(handle != NULL && ENT_LogCloseHandle(handle) != ENT_SYS_NORMAL) failed = 1;
+    if(service && ENT_LogClose() != ENT_SYS_NORMAL) failed = 1;
+    if(!failed)
+    {
+        failed += expect_true(printSts == ENT_LOG_PATH_FAILED,
+                              "A failed rollover must be reported to the caller");
+        failed += expect_true(rawSts == ENT_LOG_PATH_FAILED,
+                              "A failed rollover must be reported for raw writes too");
+        failed += expect_true(file_contains(firstFile, "before rollover failure") &&
+                              file_contains(firstFile, "print during rollover failure") &&
+                              file_contains(firstFile, "raw during rollover failure"),
+                              "Records must survive a failed rollover in the current stream");
+        failed += expect_true(!file_contains(secondFile, "during rollover failure"),
+                              "A failed rollover must not create the target file");
+    }
+    remove_dir_contents(first);
+    remove_dir_contents(second);
+    return failed;
+}
+
 static int test_log_path_change_after_open_switches_files(void)
 {
     char first[256], second[256], firstFile[512], secondFile[512];
@@ -3585,6 +3655,7 @@ int main(void)
     failures += test_log_level_updates_are_safe_during_writes();
     failures += test_log_path_option_trims_trailing_separator_and_writes_file();
     failures += test_log_file_name_rejects_truncation();
+    failures += test_rollover_failure_keeps_record_in_current_stream();
     failures += test_log_path_change_after_open_switches_files();
 #if defined(__linux__)
     failures += test_calendar_midnight_handles_dst();
