@@ -19,19 +19,33 @@ baseline() {
 }
 
 build_library() {
-  local source="$1" build="$2" flags="$3"
+  local source="$1" build="$2" flags="$3" testing="${4:-OFF}"
   cmake -S "$source" -B "$build" "${common[@]}" \
-    -DBUILD_TESTING=OFF -DCMAKE_C_FLAGS="$flags ${QUALITY_C_FLAGS:-}"
-  cmake --build "$build" --clean-first --target ent ent_s --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
+    -DBUILD_TESTING="$testing" -DCMAKE_C_FLAGS="$flags ${QUALITY_C_FLAGS:-}"
+  if [[ "$testing" == "ON" ]]; then
+    # Full default build: library, tests and perf fixtures.
+    cmake --build "$build" --clean-first --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
+  else
+    cmake --build "$build" --clean-first --target ent ent_s --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
+  fi
 }
 
 case "$mode" in
   warnings|analyze)
     baseline
     flags="-Wall -Wextra"
-    if [[ "$mode" == analyze ]]; then flags="$flags -fanalyzer"; fi
-    build_library "$base_source" "$root/base-$mode-$base_sha" "$flags" 2>&1 | tee "$root/base-$mode.log"
-    build_library "$repo" "$root/current-$mode" "$flags" 2>&1 | tee "$root/current-$mode.log"
+    diagnostics_testing=OFF
+    if [[ "$mode" == "warnings" ]]; then
+      # Cover test and perf sources as well: the library-only build used to
+      # hide their diagnostics from this gate.
+      diagnostics_testing=ON
+    else
+      # -fanalyzer stays library-only: analysing every test is too slow and
+      # too noisy to act on.
+      flags="$flags -fanalyzer"
+    fi
+    build_library "$base_source" "$root/base-$mode-$base_sha" "$flags" "$diagnostics_testing" 2>&1 | tee "$root/base-$mode.log"
+    build_library "$repo" "$root/current-$mode" "$flags" "$diagnostics_testing" 2>&1 | tee "$root/current-$mode.log"
     python3 "$repo/scripts/check-diagnostics.py" "$root/base-$mode.log" \
       "$root/current-$mode.log" --output "$root/$mode.json"
     ;;
