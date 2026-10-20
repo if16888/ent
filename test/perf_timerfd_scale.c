@@ -334,7 +334,10 @@ CLEANUP:
         b.hol_release = 1;
         pthread_cond_broadcast(&b.hol_cv);
         pthread_mutex_unlock(&b.hol_lock);
-        if(b.stopfd >= 0) (void)write(b.stopfd, &one, sizeof(one));
+        if(b.stopfd >= 0 && write(b.stopfd, &one, sizeof(one)) != (ssize_t)sizeof(one))
+        {
+            fprintf(stderr, "timerfd HOL: failed to signal worker stop\n");
+        }
         pthread_join(worker, NULL);
         if(b.worker_error || probes[1].n == 0)
             success = 0;
@@ -521,7 +524,10 @@ CLEANUP:
     if(thread_started)
     {
         uint64_t one = 1;
-        if(b.stopfd >= 0) (void)write(b.stopfd, &one, sizeof(one));
+        if(b.stopfd >= 0 && write(b.stopfd, &one, sizeof(one)) != (ssize_t)sizeof(one))
+        {
+            fprintf(stderr, "timerfd scale: failed to signal worker stop\n");
+        }
         pthread_join(worker, NULL);
     }
     for(i = 0; i < created; ++i)
