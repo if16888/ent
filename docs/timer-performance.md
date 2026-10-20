@@ -10,7 +10,10 @@ P50/P95/P99 and maximum are **absolute callback inter-arrival errors**, not
 scheduled-deadline-to-callback latencies. With fixed-delay `ms` timers, callback
 execution time contributes to the observed interval. The CPU figure includes
 create, runtime, deletion and close, uses `CLOCK_PROCESS_CPUTIME_ID`, and can exceed
-100% of a single core. Thread counts use snapshots from
+100% of a single core. `voluntary_ctxt_switches` and `involuntary_ctxt_switches`
+are process-wide `getrusage(RUSAGE_SELF)` deltas over the same window; for the
+Linux microsecond RT worker they expose the per-timer 1 ms stop-polling wakeups.
+Thread counts use snapshots from
 `/proc/self/status`; they are **not** peak thread counts. `ru_maxrss` is a
 process high-water mark in KiB, not instantaneous RSS or a per-timer allocation.
 
@@ -37,9 +40,22 @@ cmake --build build-perf --target perf_timer_scale --parallel 2
 ./build-perf/bin/perf_timer_scale us 16 1000 1500
 ```
 
-Arguments: `ms|us`, timer count (1–128), period in mode units (1–10000),
-duration in milliseconds (250–5000). The per-timer timestamp buffer is
+Arguments: `ms|us`, timer count (1–128), period in mode units (ms: 1–10000,
+us: 1–1000000 so T08-class 20 ms and 1000 ms periods are measurable),
+duration in milliseconds (250–5000). Pick a duration that yields at least two
+intervals per timer (for 1000 ms periods use at least 4000 ms) or the smoke
+check reports insufficient samples. The per-timer timestamp buffer is
 capped at 8192; use suitable duration and period to prevent truncation.
+
+T08 wakeup/CPU matrix (1/16/64 timers at 1 ms, 20 ms and 1000 ms):
+
+```sh
+for n in 1 16 64; do
+  ./build-perf/bin/perf_timer_scale us "$n" 1000 4000
+  ./build-perf/bin/perf_timer_scale us "$n" 20000 4000
+  ./build-perf/bin/perf_timer_scale us "$n" 1000000 4000
+done
+```
 
 ### Reproducible 20-run evidence
 

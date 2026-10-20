@@ -125,15 +125,16 @@ int main(int argc, char** argv) {
     double* lag_us = NULL;
     double* deletion_us = NULL;
     struct rusage resource;
+    struct rusage resource_a;
 
-    if(argc != 5 || (strcmp(argv[1], "ms") != 0 && strcmp(argv[1], "us") != 0) ||
+    mode_us = argc == 5 && strcmp(argv[1], "us") == 0;
+    if(argc != 5 || (strcmp(argv[1], "ms") != 0 && !mode_us) ||
        parse(argv[2], 1, TIMER_LIMIT, &count) ||
-       parse(argv[3], 1, 10000, &period) ||
+       parse(argv[3], 1, mode_us ? 1000000 : 10000, &period) ||
        parse(argv[4], 250, 5000, &duration)) {
-        fprintf(stderr, "usage: %s ms|us timers(1..128) period(1..10000) duration_ms(250..5000)\n", argv[0]);
+        fprintf(stderr, "usage: %s ms|us timers(1..128) period(ms:1..10000 us:1..1000000) duration_ms(250..5000)\n", argv[0]);
         return EXIT_FAILURE;
     }
-    mode_us = strcmp(argv[1], "us") == 0;
     base_ns = (long long)period * (mode_us ? 1000LL : 1000000LL);
     timers = (UTL_TIMER_T*)calloc((size_t)count, sizeof(*timers));
     probes = (TIMER_PROBE*)calloc((size_t)count, sizeof(*probes));
@@ -145,6 +146,8 @@ int main(int argc, char** argv) {
     wall_a = ns(CLOCK_MONOTONIC);
     cpu_a = ns(CLOCK_PROCESS_CPUTIME_ID);
     if(wall_a < 0 || cpu_a < 0) goto CLEANUP;
+    memset(&resource_a, 0, sizeof(resource_a));
+    if(getrusage(RUSAGE_SELF, &resource_a) != 0) goto CLEANUP;
     for(i = 0; i < count; ++i) {
         MSG_ID_T rc = mode_us ?
             UTL_TimerCreateUs(&timers[i], UTL_TIMER_E_PERIOD, period, callback, &probes[i]) :
@@ -205,6 +208,7 @@ int main(int argc, char** argv) {
            "abs_interarrival_error_p50_us=%.3f p95_us=%.3f p99_us=%.3f max_us=%.3f "
            "cpu_process_ms=%.3f wall_ms=%.3f cpu_pct_single_core=%.2f "
            "threads_before=%d threads_active=%d threads_after=%d ru_maxrss_kib=%ld "
+           "voluntary_ctxt_switches=%ld involuntary_ctxt_switches=%ld "
            "delete_p50_us=%.3f delete_p95_us=%.3f delete_p99_us=%.3f "
            "delete_max_us=%.3f timer_close_us=%.3f",
            argv[1], count, period, duration, total_hits, sample_count,
@@ -215,6 +219,8 @@ int main(int argc, char** argv) {
            (double)(cpu_b-cpu_a) / 1e6, (double)(wall_b-wall_a) / 1e6,
            100.0 * (double)(cpu_b-cpu_a) / (double)(wall_b-wall_a),
            before, active, after, resource.ru_maxrss,
+           (long)(resource.ru_nvcsw - resource_a.ru_nvcsw),
+           (long)(resource.ru_nivcsw - resource_a.ru_nivcsw),
            pct(deletion_us, count, 50), pct(deletion_us, count, 95),
            pct(deletion_us, count, 99), deletion_us[count - 1],
            (double)(close_b - close_a) / 1000.0);
