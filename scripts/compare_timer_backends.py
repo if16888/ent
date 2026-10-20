@@ -18,7 +18,8 @@ import sys
 import time
 
 from timer_baseline import (
-    DEFAULT_SCENARIOS, METRICS, OPTIONAL, REQUIRED, machine_metadata, parse_case, parse_result, rank
+    DEFAULT_SCENARIOS, DIAGNOSTIC, METRICS, OPTIONAL, REQUIRED, machine_metadata,
+    parse_case, parse_result, rank
 )
 
 def check_cpu_quota_capacity(cpu_max, required_cores):
@@ -193,6 +194,7 @@ def main():
                         "position": position,
                         **{field: metric[field] for field in REQUIRED},
                         **{field: metric.get(field, "") for field in OPTIONAL},
+                        **{field: metric.get(field, "") for field in DIAGNOSTIC},
                     }
                     rows.append(row)
                     print(f"{key} trial={trial} backend={backend} "
@@ -214,7 +216,7 @@ def main():
     with (args.output_dir / "paired_samples.csv").open(
         "w", newline="", encoding="utf-8"
     ) as out:
-        fields = ["scenario", "trial", "backend", "position", *REQUIRED, *OPTIONAL]
+        fields = ["scenario", "trial", "backend", "position", *REQUIRED, *OPTIONAL, *DIAGNOSTIC]
         writer = csv.DictWriter(out, fieldnames=fields)
         writer.writeheader()
         writer.writerows(rows)
