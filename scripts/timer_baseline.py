@@ -27,6 +27,9 @@ REQUIRED = (
     "timer_close_us",
 )
 OPTIONAL = ("deadline_lag_p50_us", "deadline_lag_p95_us", "deadline_lag_p99_us")
+# Diagnostic fields that only some binaries emit; never required and never
+# compared as a paired latency metric.
+DIAGNOSTIC = ("voluntary_ctxt_switches", "involuntary_ctxt_switches")
 METRICS = (
     "abs_interarrival_error_p50_us", "p95_us", "p99_us", "max_us",
     "cpu_pct_single_core", "threads_active", "ru_maxrss_kib",
@@ -43,8 +46,11 @@ def parse_case(spec):
         count, period = map(int, parts[1:])
     except ValueError as exc:
         raise ValueError("scenario timers and period must be integers") from exc
-    if not 1 <= count <= 128 or not 1 <= period <= 10000:
-        raise ValueError("scenario count must be 1..128, period 1..10000")
+    max_period = 1000000 if parts[0] == "us" else 10000
+    if not 1 <= count <= 128 or not 1 <= period <= max_period:
+        raise ValueError(
+            f"scenario count must be 1..128, period must be 1..{max_period}"
+        )
     return parts[0], count, period
 
 
@@ -70,9 +76,15 @@ def parse_result(stdout):
             if not math.isfinite(value):
                 raise ValueError("nonfinite metric: " + key)
             result[key] = value
-    unknown = set(result) - set(REQUIRED) - set(OPTIONAL)
+    unknown = set(result) - set(REQUIRED) - set(OPTIONAL) - set(DIAGNOSTIC)
     if unknown:
         raise ValueError("unknown timer metrics: " + ", ".join(sorted(unknown)))
+    for key in DIAGNOSTIC:
+        if key in result:
+            value = float(result[key])
+            if not math.isfinite(value) or value < 0:
+                raise ValueError("invalid diagnostic metric: " + key)
+            result[key] = value
     for key in OPTIONAL:
         if key in result:
             value = float(result[key])
@@ -174,7 +186,7 @@ def main():
         raise
 
     with (args.output_dir / "samples.csv").open("w", newline="", encoding="utf-8") as out:
-        writer = csv.DictWriter(out, fieldnames=["scenario", "trial", *REQUIRED, *OPTIONAL])
+        writer = csv.DictWriter(out, fieldnames=["scenario", "trial", *REQUIRED, *OPTIONAL, *DIAGNOSTIC])
         writer.writeheader()
         writer.writerows(rows)
 
@@ -183,7 +195,7 @@ def main():
         key = f"{mode}:{count}:{period}"
         subset = [row for row in rows if row["scenario"] == key]
         summaries[key] = {}
-        for field in (*METRICS, *OPTIONAL):
+        for field in (*METRICS, *OPTIONAL, *DIAGNOSTIC):
             # The microsecond RT path intentionally has no common deadline
             # instrumentation; preserve a blank CSV column, omit its summary.
             if not all(field in row for row in subset):

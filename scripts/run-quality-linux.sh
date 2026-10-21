@@ -44,8 +44,13 @@ case "$mode" in
       # too noisy to act on.
       flags="$flags -fanalyzer"
     fi
+    # Serialize diagnostics builds: concurrent compiler output shares one log
+    # and interleaved lines corrupt the line-based baseline comparison.
+    diagnostics_parallel_level="${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
+    CMAKE_BUILD_PARALLEL_LEVEL=1
     build_library "$base_source" "$root/base-$mode-$base_sha" "$flags" "$diagnostics_testing" 2>&1 | tee "$root/base-$mode.log"
     build_library "$repo" "$root/current-$mode" "$flags" "$diagnostics_testing" 2>&1 | tee "$root/current-$mode.log"
+    CMAKE_BUILD_PARALLEL_LEVEL="$diagnostics_parallel_level"
     python3 "$repo/scripts/check-diagnostics.py" "$root/base-$mode.log" \
       "$root/current-$mode.log" --output "$root/$mode.json"
     ;;
