@@ -69,6 +69,8 @@ typedef struct
     pthread_t         cbWorker;
     UTL_LOCK          cbLock;
     UTL_CV            cbCv;
+    pthread_cond_t    workerCv;      /* CLOCK_MONOTONIC; not waited on yet (step 1). */
+    BOOL              workerCvReady;
     unsigned int      pendingCallbacks;
 #ifdef ENT_TIMER_TEST_HOOKS
     unsigned int      maxPendingCallbacks;
@@ -288,6 +290,24 @@ int iUTL_TimerTestRtLiveContextCount(void)
     count = sTimerRtLiveContexts;
     iUTL_TimerLifecycleLockLeave();
     return (int)count;
+}
+
+static BOOL sTimerTestFailWorkerCvInit = FALSE;
+
+void iUTL_TimerTestInjectWorkerCvInitFailure(int fail)
+{
+    sTimerTestFailWorkerCvInit = fail ? TRUE : FALSE;
+}
+
+int iUTL_TimerTestRtWorkerCvReady(UTL_TIMER_T timer)
+{
+    PTIMER_CTX_T timerCtx = (PTIMER_CTX_T)timer;
+
+    if(timerCtx == NULL || timerCtx->tag != UTL_TIMER_TAG)
+    {
+        return 0;
+    }
+    return timerCtx->workerCvReady ? 1 : 0;
 }
 #else
 #define iUTL_TimerTestRtContextCreated() ((void)0)
@@ -1108,6 +1128,48 @@ static void iUTL_TimerRtRequestStop(PTIMER_CTX_T timerCtx)
     UTL_CVWakeAll(timerCtx->cbCv);
 }
 
+/* Step 1: the worker CV is created and destroyed here, but the RT worker still
+ * uses the 1 ms polling wait. Step 2 switches the waiter; cleanup must already
+ * be correct before any thread can block on it. */
+static BOOL iUTL_TimerRtWorkerCvInit(PTIMER_CTX_T timerCtx)
+{
+    pthread_condattr_t attr;
+    int rc;
+
+#ifdef ENT_TIMER_TEST_HOOKS
+    if(sTimerTestFailWorkerCvInit)
+    {
+        return FALSE;
+    }
+#endif
+    rc = pthread_condattr_init(&attr);
+    if(rc != 0)
+    {
+        return FALSE;
+    }
+    rc = pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+    if(rc == 0)
+    {
+        rc = pthread_cond_init(&timerCtx->workerCv, &attr);
+    }
+    (void)pthread_condattr_destroy(&attr);
+    if(rc != 0)
+    {
+        return FALSE;
+    }
+    timerCtx->workerCvReady = TRUE;
+    return TRUE;
+}
+
+static void iUTL_TimerRtWorkerCvClose(PTIMER_CTX_T timerCtx)
+{
+    if(timerCtx->workerCvReady)
+    {
+        (void)pthread_cond_destroy(&timerCtx->workerCv);
+        timerCtx->workerCvReady = FALSE;
+    }
+}
+
 static void* iUTL_TimerRtWorker(void* data)
 {
     PTIMER_CTX_T timerCtx = (PTIMER_CTX_T)data;
@@ -1291,6 +1353,7 @@ static void* iUTL_TimerCallbackWorker(void* data)
     UTL_LockLeave(timerCtx->cbLock);
     if(selfDeleteCleanup)
     {
+        iUTL_TimerRtWorkerCvClose(timerCtx);
         UTL_CVClose(&timerCtx->cbCv);
         UTL_LockClose(&timerCtx->cbLock);
         iUTL_TimerTestRtContextDestroyed();
@@ -1359,6 +1422,11 @@ static MSG_ID_T iUTL_TimerCreateRt(UTL_TIMER_T* pTimer,unsigned int type,int per
         free(timerCtx);
         return ENT_TMR_THREAD_FAILED;
     }
+    if(!iUTL_TimerRtWorkerCvInit(timerCtx))
+    {
+        /* Not fatal: the RT worker keeps the 1 ms stop-polling fallback. */
+        IENT_LOG_WARN("timer RT worker clock CV unavailable, using stop polling\n");
+    }
 
     UTL_LockEnter(sTimerCtx.dllLock);
     sts = UTL_DllInsHead(&sTimerCtx.dllHeader,(DLL_D_HDR*)timerCtx);
@@ -1412,6 +1480,7 @@ CREATE_FAILED:
         UTL_DllRemCurr((DLL_D_HDR*)timerCtx,&tmpDll);
         UTL_LockLeave(sTimerCtx.dllLock);
     }
+    iUTL_TimerRtWorkerCvClose(timerCtx);
     UTL_CVClose(&timerCtx->cbCv);
     UTL_LockClose(&timerCtx->cbLock);
     memset(timerCtx,0,sizeof(TIMER_CTX_T));
@@ -1471,6 +1540,7 @@ static MSG_ID_T iUTL_TimerDeleteRt(PTIMER_CTX_T timerCtx)
     sts = UTL_DllRemCurr((DLL_D_HDR*)timerCtx,&tmpDll);
     UTL_LockLeave(sTimerCtx.dllLock);
 
+    iUTL_TimerRtWorkerCvClose(timerCtx);
     UTL_CVClose(&timerCtx->cbCv);
     UTL_LockClose(&timerCtx->cbLock);
     iUTL_TimerTestRtContextDestroyed();
