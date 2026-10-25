@@ -22,6 +22,9 @@ unsigned int iUTL_TimerTestWindowsLastWaitStatus(void);
 #elif defined(__linux__)
 unsigned int iUTL_TimerTestRtMaxPendingCallbacks(UTL_TIMER_T timer);
 unsigned long long iUTL_TimerTestRtCoalescedCallbacks(UTL_TIMER_T timer);
+int iUTL_TimerTestRtLiveContextCount(void);
+void iUTL_TimerTestInjectWorkerCvInitFailure(int fail);
+int iUTL_TimerTestRtWorkerCvReady(UTL_TIMER_T timer);
 #endif
 
 static volatile int s_timer_hits = 0;
@@ -1286,6 +1289,103 @@ CLEANUP:
     return 0;
 #endif
 }
+
+/* Step 1 of the T08 design: the worker CV is created and destroyed, but the
+ * worker still polls every 1 ms. This locks down the lifecycle and the
+ * partial-init fallback before any waiter is introduced. */
+static int test_timer_create_us_worker_cv_lifecycle(void)
+{
+#ifdef __linux__
+    UTL_TIMER_T timer = NULL;
+    TIMER_WAIT_PROBE probe;
+    int baseline = 0;
+    int i;
+    int rc = 1;
+
+    if(timer_wait_probe_init(&probe) != 0)
+    {
+        return 1;
+    }
+    baseline = iUTL_TimerTestRtLiveContextCount();
+    if(expect_true(UTL_TimerInit() == ENT_SYS_NORMAL,
+                   "UTL_TimerInit should initialize before RT worker CV lifecycle test") != 0)
+    {
+        goto CLEANUP;
+    }
+
+    if(expect_true(UTL_TimerCreateUs(&timer, UTL_TIMER_E_ONESHOT, 200000,
+                                     timer_wait_probe_cb, &probe) == ENT_SYS_NORMAL,
+                   "UTL_TimerCreateUs should create a timer for worker CV lifecycle test") != 0)
+    {
+        UTL_TimerClose();
+        goto CLEANUP;
+    }
+    if(expect_true(iUTL_TimerTestRtWorkerCvReady(timer) == 1,
+                   "RT worker CV should be initialized on the normal path") != 0)
+    {
+        UTL_TimerDelete(&timer);
+        UTL_TimerClose();
+        goto CLEANUP;
+    }
+    if(expect_true(UTL_TimerDelete(&timer) == ENT_SYS_NORMAL,
+                   "UTL_TimerDelete should release the RT worker CV") != 0)
+    {
+        UTL_TimerClose();
+        goto CLEANUP;
+    }
+
+    for(i = 0; i < 20; ++i)
+    {
+        iUTL_TimerTestInjectWorkerCvInitFailure(1);
+        if(UTL_TimerCreateUs(&timer, UTL_TIMER_E_PERIOD, 1000,
+                             timer_wait_probe_cb, &probe) != ENT_SYS_NORMAL)
+        {
+            iUTL_TimerTestInjectWorkerCvInitFailure(0);
+            UTL_TimerClose();
+            goto CLEANUP;
+        }
+        iUTL_TimerTestInjectWorkerCvInitFailure(0);
+        if(expect_true(iUTL_TimerTestRtWorkerCvReady(timer) == 0,
+                       "Injected init failure should leave the worker CV disabled") != 0)
+        {
+            UTL_TimerDelete(&timer);
+            UTL_TimerClose();
+            goto CLEANUP;
+        }
+        if(i == 0 &&
+           expect_true(timer_wait_probe_wait_at_least(&probe, 1, 2000) == 0,
+                       "The polling fallback must still fire after CV init failure") != 0)
+        {
+            UTL_TimerDelete(&timer);
+            UTL_TimerClose();
+            goto CLEANUP;
+        }
+        if(expect_true(UTL_TimerDelete(&timer) == ENT_SYS_NORMAL,
+                       "A fallback timer must delete cleanly after CV init failure") != 0)
+        {
+            UTL_TimerClose();
+            goto CLEANUP;
+        }
+    }
+
+    if(expect_true(UTL_TimerClose() == ENT_SYS_NORMAL,
+                   "UTL_TimerClose should succeed after worker CV lifecycle test") != 0)
+    {
+        goto CLEANUP;
+    }
+    if(expect_true(iUTL_TimerTestRtLiveContextCount() == baseline,
+                   "Worker CV failure cycles must not leak RT timer contexts") != 0)
+    {
+        goto CLEANUP;
+    }
+    rc = 0;
+CLEANUP:
+    timer_wait_probe_destroy(&probe);
+    return rc;
+#else
+    return 0;
+#endif
+}
 #ifndef _WIN32
 static int test_timer_callback_can_self_delete_safely(void)
 {
@@ -1453,6 +1553,7 @@ int main(void)
     failures += test_timer_create_us_periodic_timer_fires_on_linux();
     failures += test_timer_create_us_coalesces_overrun_callbacks();
     failures += test_timer_create_us_callback_can_self_delete_safely();
+    failures += test_timer_create_us_worker_cv_lifecycle();
 #ifndef _WIN32
     failures += test_timer_callback_can_self_delete_safely();
     failures += test_timer_create_is_rejected_while_close_progresses();
