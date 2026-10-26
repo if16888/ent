@@ -35,6 +35,9 @@
 extern "C" {
 #endif
 
+/* Stateless elapsed-time clock; see docs/architecture/monotonic-clock.md. */
+ENT_PUBLIC MSG_ID_T UTL_MonotonicMs(ENT_U64* value);
+
 typedef void*  UTL_LOCK;
 typedef void*  UTL_CV;
 
