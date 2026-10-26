@@ -17,8 +17,8 @@
  */
 #ifdef _WIN32
 #pragma warning(disable : 4996)
-#include <Winsock2.h>
-#include <Windows.h>
+#include <winsock2.h>
+#include <windows.h>
 #else
 #include <sys/socket.h>
 #include <poll.h>

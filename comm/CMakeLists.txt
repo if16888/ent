@@ -516,7 +516,7 @@ endif()
 
 function(ent_link_backend_deps target visibility)
   if(WIN32)
-    target_link_libraries(${target} ${visibility} Ws2_32 Winmm)
+    target_link_libraries(${target} ${visibility} ws2_32 winmm)
   else()
     target_link_libraries(${target} ${visibility} pthread)
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
