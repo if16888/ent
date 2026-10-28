@@ -101,8 +101,13 @@ static bool          sUtilTimerInit;
 static TIMER_TH_CTX  sTimerCtx;
 #ifdef _WIN32
 static SRWLOCK       sTimerLifecycleLock = SRWLOCK_INIT;
-static __declspec(thread) unsigned int sTimerCallbackDepth = 0;
-static __declspec(thread) PTIMER_CTX_T sTimerCurrentCallback = NULL;
+#if defined(_MSC_VER)
+#define UTL_TIMER_THREAD_LOCAL __declspec(thread)
+#else
+#define UTL_TIMER_THREAD_LOCAL __thread
+#endif
+static UTL_TIMER_THREAD_LOCAL unsigned int sTimerCallbackDepth = 0;
+static UTL_TIMER_THREAD_LOCAL PTIMER_CTX_T sTimerCurrentCallback = NULL;
 #else
 static pthread_mutex_t sTimerLifecycleLock = PTHREAD_MUTEX_INITIALIZER;
 static __thread unsigned int sTimerCallbackDepth = 0;

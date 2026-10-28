@@ -462,7 +462,7 @@ set(ENT_LIBRARY_SOURCES
   ent_init.c ent_db.c ent_db_sqlite.c ent_db_mysql.c ent_db_pgsql.c
   ent_log_core.c ent_log_writer.c ent_log_options.c ent_log_compat.c
   ent_thread.c ent_msg.c ent_script.c ent_shm.c
-  utl_socket.c utl_thread.c utl_timer.c utl_dll.c utl_tpool.c
+  utl_socket.c utl_thread.c utl_time.c utl_timer.c utl_dll.c utl_tpool.c
   ${ENT_MSG_GENERATED_SOURCE}
 )
 
@@ -516,7 +516,7 @@ endif()
 
 function(ent_link_backend_deps target visibility)
   if(WIN32)
-    target_link_libraries(${target} ${visibility} Ws2_32 Winmm)
+    target_link_libraries(${target} ${visibility} ws2_32 winmm)
   else()
     target_link_libraries(${target} ${visibility} pthread)
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

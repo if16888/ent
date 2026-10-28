@@ -17,7 +17,7 @@
 #include "ient_comm.h"
 #ifdef _WIN32
 #include <sys/timeb.h>
-#include <Windows.h>
+#include <windows.h>
 #include <tchar.h>
 #include <limits.h>
 #else
